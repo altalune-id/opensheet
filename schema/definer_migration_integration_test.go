@@ -27,6 +27,7 @@ func TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole(t *testing.T) {
 	for _, sig := range []string{
 		"list_org_ids()", "resolve_org_by_slug(text)", "list_orgs_for_user(uuid)",
 		"resolve_invite_by_token_hash(text)", "list_pending_invites_for_email(text)",
+		"apikey_by_prefix(text)",
 	} {
 		name := prefix + strings.SplitN(sig, "(", 2)[0]
 

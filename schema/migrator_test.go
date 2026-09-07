@@ -137,6 +137,12 @@ func TestMigrateUp_SQLite_CreatesAllTables(t *testing.T) {
 		"altempl_projects",
 		"altempl_invites",
 		"altempl_todos",
+		"altempl_credentials",
+		"altempl_spreadsheets",
+		"altempl_sheets",
+		"altempl_api_keys",
+		"altempl_api_key_sheets",
+		"altempl_sheet_snapshots",
 	}
 	for _, tbl := range wantTables {
 		var n int
