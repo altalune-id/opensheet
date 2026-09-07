@@ -8,6 +8,8 @@
 #   errors.go     typed domain errors
 #   factory.go    NewStoreFactory dispatch
 #   postgres.go   Postgres implementation
+#   pgreader.go   Postgres read methods
+#   pgwriter.go   Postgres write methods
 #   sqlite.go     SQLite implementation
 #
 # `auth` is stateless (delegates to `user` store) so it has no store/factory/
@@ -37,7 +39,7 @@ check_file() {
 check_store_backed() {
     local mod="$1"
     local local_fail=0
-    for f in "${mod}.go" store.go service.go errors.go factory.go postgres.go sqlite.go; do
+    for f in "${mod}.go" store.go service.go errors.go factory.go postgres.go pgreader.go pgwriter.go sqlite.go; do
         check_file "$mod" "$f" || local_fail=1
     done
     # Test files -- at minimum a service_test.go and a driver test.
