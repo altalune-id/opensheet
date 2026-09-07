@@ -1,0 +1,58 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/icons"
+)
+
+type TodoRow struct {
+	ID          string
+	Title       string
+	Done        bool
+	OrgSlug     string
+	ProjectSlug string
+}
+
+templ TodoRowFragment(d web.LayoutData, t TodoRow) {
+	<li id={ "todo-" + t.ID } class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
+		<form
+			method="post"
+			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/toggle")) }
+			hx-post={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/toggle") }
+			hx-target={ "#todo-" + t.ID }
+			hx-swap="outerHTML"
+			class="inline"
+		>
+			<button
+				type="submit"
+				aria-label={ "Toggle " + t.Title }
+				class={
+					"flex size-5 items-center justify-center rounded border text-xs transition",
+					templ.KV("border-green-500 bg-green-500 text-white", t.Done),
+					templ.KV("border-border bg-card hover:border-muted-foreground", !t.Done),
+				}
+			>
+				if t.Done {
+					@icons.Icon("check", "h-3.5 w-3.5")
+				}
+			</button>
+		</form>
+		<span class={ "flex-1 text-sm", templ.KV("text-muted-foreground/70 line-through", t.Done), templ.KV("text-foreground", !t.Done) }>{ t.Title }</span>
+		<form
+			method="post"
+			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/delete")) }
+			hx-delete={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID) }
+			hx-target={ "#todo-" + t.ID }
+			hx-swap="outerHTML"
+			class="inline"
+		>
+			<button
+				type="submit"
+				aria-label={ "Delete " + t.Title }
+				class="rounded p-1 text-muted-foreground/70 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 focus:opacity-100"
+			>
+				@icons.Icon("trash-2", "h-4 w-4")
+			</button>
+		</form>
+	</li>
+}

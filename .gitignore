@@ -1,0 +1,51 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+
+# Test + coverage
+*.out
+*.test
+coverage.*
+.cover/
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+
+# Signing artifacts and keys
+*.sig
+*.pem
+
+# Local state
+*.db
+*.db-journal
+~/.altempl/
+
+# Editor
+.idea/
+*.swp
+.DS_Store
+
+# Node toolchain (pnpm-managed buf CLI)
+node_modules/
+.pnpm-store/
+
+# SDD workspace (scratch, not shipped)
+/.superpowers/
+/docs/superpowers/
+
+# App data
+.altempl-data
+.cache
+
+# Debugging / profiling
+*.prof
+.playwright-mcp
+
+# Local compose stack data (postgres bind mount, etc.).
+# Track the dir via .gitkeep, ignore every child (pg, future subdirs).
+/docker/data/*
+!/docker/data/.gitkeep

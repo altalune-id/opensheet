@@ -1,0 +1,21 @@
+{
+  "editor.tabSize": 2,
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.patterns": {
+    "go.mod": "go.sum, go.work, go.work.sum",
+    "buf.yaml": "buf.gen.yaml, buf.lock",
+    "package.json": "package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc, .yarnrc, .yarnrc.yml, .yarnrc.cjs, .yarnrc.js, pnpm-workspace.yaml, .pnpmfile.cjs, .pnpmfile.js, .nvmrc, .nvmrc.json, .nvmrc.yaml, .nvmrc.yml",
+    "Dockerfile": ".dockerignore, Dockerfile.*",
+    "docker-compose.yml": "docker-compose.override.yml, docker-compose.*.yml",
+    "README.md": "CHANGELOG.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md, SUPPORT.md, GOVERNANCE.md, CITATION.cff, AUTHORS, AUTHORS.md, LICENSE, LICENSE.*"
+  },
+  "[go]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": false,
+    "editor.formatOnSave": true
+  },
+  "[templ]": {
+    "editor.tabSize": 4,
+    "editor.formatOnSave": true
+  }
+}

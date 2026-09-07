@@ -1,0 +1,69 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+set -e
+
+zero=0000000000000000000000000000000000000000
+echo "→ verify signatures on outgoing commits"
+while read -r _ local_sha _ remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue
+    if [ "$remote_sha" = "$zero" ]; then
+        range="$local_sha --not --remotes"
+    else
+        range="${remote_sha}..${local_sha}"
+    fi
+    for c in $(git rev-list $range); do
+        if ! git verify-commit "$c" >/dev/null 2>&1; then
+            echo "commit $c is not GPG/SSH-signed — server-side branch protection will reject it." >&2
+            echo "fix: git config commit.gpgsign true && git rebase --exec 'git commit --amend --no-edit -S' <base>" >&2
+            exit 1
+        fi
+    done
+done
+
+echo "→ gofmt -l ."
+if [ -n "$(gofmt -l .)" ]; then
+    echo "gofmt: the following files need formatting:" >&2
+    gofmt -l . >&2
+    exit 1
+fi
+
+echo "→ go vet ./..."
+go vet ./...
+
+echo "→ pnpm exec buf lint"
+pnpm exec buf lint
+
+echo "→ go tool gen-config-example --check"
+go tool gen-config-example --check
+echo "→ go tool gen-config-example --format=yaml --check"
+go tool gen-config-example --format=yaml --check
+
+echo "→ go tool i18n-lint --check"
+go tool i18n-lint --check
+
+echo "→ go test -race -shuffle=on ./..."
+go test -race -shuffle=on ./...
+
+echo "→ golangci-lint run"
+golangci-lint run --timeout=3m ./...
+
+echo "→ buf breaking vs origin/main"
+git fetch --quiet origin main 2>/dev/null || echo "warn: no origin/main — skipping buf breaking"
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+    if git ls-tree -r origin/main --name-only | grep -q '\.proto$'; then
+        pnpm exec buf breaking --against '.git#branch=origin/main' || {
+            echo "buf breaking failed — proto API surface may have broken"; exit 1;
+        }
+    else
+        echo "warn: origin/main has no .proto files — skipping buf breaking"
+    fi
+fi
+
+echo "→ goreleaser check"
+if command -v goreleaser >/dev/null 2>&1; then
+    goreleaser check
+else
+    echo "warn: goreleaser not installed — skipping (brew install goreleaser to enable)"
+fi
+
+echo "→ pre-push OK"

@@ -1,0 +1,135 @@
+version: 2
+
+project_name: altempl
+
+before:
+  hooks:
+    - go mod tidy
+
+report_sizes: true
+
+builds:
+  - id: altempl
+    main: ./cmd/altempl
+    binary: altempl
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X altalune.id/template/version.Version={{.Version}}
+      - -X altalune.id/template/version.Commit={{.Commit}}
+      - -X altalune.id/template/version.BuildTime={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+      - config.example.yaml
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: checksum
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "typo"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Others
+      order: 999
+
+dockers:
+  - id: linux-amd64
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GHCR_OWNER }}/{{ .ProjectName }}
+      - --label=org.opencontainers.image.created={{ .CommitDate }}
+      - --label=org.opencontainers.image.licenses=Apache-2.0
+      - --build-arg=VERSION={{ .Version }}
+      - --build-arg=COMMIT={{ .FullCommit }}
+      - --build-arg=BUILD_TIME={{ .Date }}
+    image_templates:
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
+  - id: linux-arm64
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GHCR_OWNER }}/{{ .ProjectName }}
+      - --label=org.opencontainers.image.created={{ .CommitDate }}
+      - --label=org.opencontainers.image.licenses=Apache-2.0
+      - --build-arg=VERSION={{ .Version }}
+      - --build-arg=COMMIT={{ .FullCommit }}
+      - --build-arg=BUILD_TIME={{ .Date }}
+    image_templates:
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
+
+docker_manifests:
+  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:latest"
+    image_templates:
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
+
+release:
+  github:
+    owner: "{{ .Env.GHCR_OWNER }}"
+    name: "{{ .ProjectName }}"
+  draft: false
+  prerelease: auto

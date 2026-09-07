@@ -1,0 +1,185 @@
+package templates
+
+import (
+	"net/url"
+
+	"altalune.id/template/internal/web"
+)
+
+type OnboardView struct {
+	Error         string
+	ErrorCode string
+	FieldErrors   map[string]string
+	LocalAuth     bool
+	OIDCAuth      bool
+	OIDCFinalize  bool
+	Email         string
+	Name          string
+	OrgSlug       string
+	OrgName       string
+	ProjectSlug   string
+	ProjectName   string
+	SetupToken    string
+}
+
+func fieldErr(m map[string]string, key string) string {
+	if m == nil {
+		return ""
+	}
+	return m[key]
+}
+
+templ OnboardPage(d web.LayoutData, v OnboardView) {
+	<section class="mx-auto max-w-2xl">
+		<div class="mb-6">
+			<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("onboard.title") }</h1>
+			<p class="mt-2 text-sm text-muted-foreground">{ d.Tr("onboard.subtitle") }</p>
+		</div>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		<div class="rounded-lg border border-border bg-card p-6 shadow-sm">
+			if v.OIDCFinalize {
+				<div class="mb-4 rounded-md border border-border/60 bg-muted/40 p-3 text-sm">
+					<p class="text-xs font-medium uppercase tracking-wider text-muted-foreground/80">{ d.Tr("onboard.finalize_signed_in") }</p>
+					<p class="mt-0.5 truncate font-medium text-foreground">{ v.Email }</p>
+				</div>
+				<form method="post" action={ templ.SafeURL(d.Href("/onboard/complete")) } class="space-y-8" novalidate>
+					@onboardSetupToken(v.SetupToken)
+					<div class="space-y-4">
+						<div class="border-b border-border/50 pb-2">
+							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.org_section") }</h2>
+						</div>
+						@onboardField("org_slug", d.Tr("onboard.slug"), "text", "off", "acme", v.OrgSlug, v.FieldErrors, true)
+						@onboardField("org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
+					</div>
+					<div class="space-y-4">
+						<div class="border-b border-border/50 pb-2">
+							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.project_section") }</h2>
+						</div>
+						@onboardField("project_slug", d.Tr("onboard.slug"), "text", "off", "default", cmpOr(v.ProjectSlug, "default"), v.FieldErrors, false)
+						@onboardField("project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", cmpOr(v.ProjectName, "Default Project"), v.FieldErrors, false)
+					</div>
+					<button
+						type="submit"
+						class="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+					>
+						{ d.Tr("onboard.submit") }
+					</button>
+				</form>
+			} else if v.OIDCAuth {
+				<a class="btn-sso" href={ templ.SafeURL(d.Href("/onboard/oidc") + onboardTokenQuery(v.SetupToken)) }>
+					<img class="btn-sso__logo" src={ d.OIDCButtonLogoURL() } alt="" aria-hidden="true" width="24" height="24"/>
+					<span class="btn-sso__label">{ d.OIDCButtonLabel(d.Tr("onboard.oidc_button")) }</span>
+					<span class="btn-sso__chev" aria-hidden="true">→</span>
+				</a>
+				<p class="mt-2 text-center text-xs text-muted-foreground">{ d.Tr("onboard.oidc_hint") }</p>
+			}
+			if v.LocalAuth && !v.OIDCFinalize {
+				if v.OIDCAuth {
+					<div class="my-6 flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground/70">
+						<span class="h-px flex-1 bg-border"></span>
+						<span>{ d.Tr("onboard.or_local") }</span>
+						<span class="h-px flex-1 bg-border"></span>
+					</div>
+				}
+				<form method="post" action={ templ.SafeURL(d.Href("/onboard/local")) } class="space-y-8" novalidate>
+					@onboardSetupToken(v.SetupToken)
+					<div class="space-y-4">
+						<div class="border-b border-border/50 pb-2">
+							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.admin_section") }</h2>
+						</div>
+						@onboardField("email", d.Tr("login.email"), "email", "email", "you@example.com", v.Email, v.FieldErrors, true)
+						@onboardField("name", d.Tr("onboard.display_name"), "text", "name", "Your name", v.Name, v.FieldErrors, true)
+						@onboardPasswordField(d, v.FieldErrors)
+					</div>
+					<div class="space-y-4">
+						<div class="border-b border-border/50 pb-2">
+							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.org_section") }</h2>
+						</div>
+						@onboardField("org_slug", d.Tr("onboard.slug"), "text", "off", "acme", v.OrgSlug, v.FieldErrors, true)
+						@onboardField("org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
+					</div>
+					<div class="space-y-4">
+						<div class="border-b border-border/50 pb-2">
+							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.project_section") }</h2>
+						</div>
+						@onboardField("project_slug", d.Tr("onboard.slug"), "text", "off", "default", cmpOr(v.ProjectSlug, "default"), v.FieldErrors, false)
+						@onboardField("project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", cmpOr(v.ProjectName, "Default Project"), v.FieldErrors, false)
+					</div>
+					<button
+						type="submit"
+						class="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+					>
+						{ d.Tr("onboard.submit") }
+					</button>
+				</form>
+			}
+			if !v.LocalAuth && !v.OIDCAuth && !v.OIDCFinalize {
+				<p class="text-sm text-muted-foreground">{ d.Tr("onboard.no_method") }</p>
+			}
+		</div>
+	</section>
+}
+
+templ onboardSetupToken(token string) {
+	if token != "" {
+		<input type="hidden" name="token" value={ token }/>
+	}
+}
+
+func onboardTokenQuery(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "?token=" + url.QueryEscape(token)
+}
+
+templ onboardField(id, label, kind, autocomplete, placeholder, value string, errs map[string]string, required bool) {
+	<div>
+		<label for={ "onb-" + id } class="block text-sm font-medium text-foreground/90">{ label }</label>
+		<input
+			id={ "onb-" + id }
+			name={ id }
+			type={ kind }
+			autocomplete={ autocomplete }
+			placeholder={ placeholder }
+			value={ value }
+			required?={ required }
+			class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+		/>
+		if e := fieldErr(errs, id); e != "" {
+			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ e }</p>
+		}
+	</div>
+}
+
+templ onboardPasswordField(d web.LayoutData, errs map[string]string) {
+	<div>
+		<label for="onb-password" class="block text-sm font-medium text-foreground/90">{ d.Tr("onboard.password") }</label>
+		<input
+			id="onb-password"
+			name="password"
+			type="password"
+			required
+			minlength="8"
+			autocomplete="new-password"
+			placeholder={ d.Tr("onboard.password_placeholder") }
+			class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+		/>
+		if e := fieldErr(errs, "password"); e != "" {
+			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ e }</p>
+		}
+	</div>
+}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+templ OnboardLayout(d web.LayoutData, v OnboardView) {
+	@Layout(web.WithContent(d, OnboardPage(d, v)))
+}

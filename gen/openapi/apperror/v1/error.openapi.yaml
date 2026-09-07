@@ -1,0 +1,59 @@
+openapi: 3.1.0
+info:
+  title: apperror.v1
+paths: {}
+components:
+  schemas:
+    apperror.v1.ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          title: code
+        meta:
+          type: object
+          title: meta
+          additionalProperties:
+            type: string
+            title: value
+        requestId:
+          type: string
+          title: request_id
+        traceId:
+          type: string
+          title: trace_id
+      title: ErrorDetail
+      additionalProperties: false
+    apperror.v1.ErrorDetail.MetaEntry:
+      type: object
+      properties:
+        key:
+          type: string
+          title: key
+        value:
+          type: string
+          title: value
+      title: MetaEntry
+      additionalProperties: false
+    apperror.v1.UpstreamErrorDetail:
+      type: object
+      properties:
+        service:
+          type: string
+          title: service
+        source:
+          type: string
+          title: source
+        code:
+          type: string
+          title: code
+        message:
+          type: string
+          title: message
+        grpcCode:
+          type: integer
+          title: grpc_code
+          format: int32
+      title: UpstreamErrorDetail
+      additionalProperties: false
+security: []

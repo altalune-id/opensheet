@@ -1,0 +1,70 @@
+package templates
+
+import "altalune.id/template/internal/web"
+
+// WelcomeView is the payload for the T&C acceptance / display-name page.
+type WelcomeView struct {
+	Email          string
+	Name           string
+	AskDisplayName bool
+	AskAccept      bool
+	TermsURL       string
+	PrivacyURL     string
+	ReturnTo       string
+	Error          string
+	ErrorCode string
+}
+
+templ WelcomePage(d web.LayoutData, v WelcomeView) {
+	<section class="mx-auto max-w-xl">
+		<header class="border-b border-border pb-4">
+			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("welcome.eyebrow") }</p>
+			<h1 class="mt-1 text-2xl font-semibold text-foreground">{ d.Tr("welcome.title") }</h1>
+			<p class="mt-2 text-sm text-muted-foreground">
+				{ d.Tr("welcome.subtitle_prefix") }
+				<strong class="text-foreground">{ v.Email }</strong>{ d.Tr("welcome.subtitle_suffix") }
+			</p>
+		</header>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		<form method="post" action={ templ.SafeURL(d.Href("/welcome")) } class="mt-6 space-y-5" novalidate>
+			<input type="hidden" name="return_to" value={ v.ReturnTo }/>
+			if v.AskDisplayName {
+				<div>
+					<label for="welcome-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("welcome.display_name_label") }</label>
+					<input id="welcome-name" name="name" type="text" required autofocus value={ v.Name } placeholder={ d.Tr("welcome.display_name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("welcome.display_name_hint") }</p>
+				</div>
+			}
+			if v.AskAccept {
+				<div class="flex items-start gap-2">
+					<input id="welcome-accept" name="accept_terms" type="checkbox" value="1" required class="mt-0.5 h-4 w-4 rounded border-border text-foreground focus:ring-ring"/>
+					<label for="welcome-accept" class="text-sm text-foreground/90">
+						{ d.Tr("welcome.accept_prefix") }
+						if v.TermsURL != "" {
+							<a href={ templ.SafeURL(v.TermsURL) } target="_blank" rel="noopener" class="font-medium text-foreground underline hover:no-underline">{ d.Tr("welcome.terms_link") }</a>
+						}
+						if v.TermsURL != "" && v.PrivacyURL != "" {
+							{ " " }{ d.Tr("welcome.and") }{ " " }
+						}
+						if v.PrivacyURL != "" {
+							<a href={ templ.SafeURL(v.PrivacyURL) } target="_blank" rel="noopener" class="font-medium text-foreground underline hover:no-underline">{ d.Tr("welcome.privacy_link") }</a>
+						}
+						{ d.Tr("welcome.accept_suffix") }
+					</label>
+				</div>
+			}
+			<div class="flex items-center gap-3 pt-2">
+				<button type="submit" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("welcome.submit") }</button>
+				<form method="post" action={ templ.SafeURL(d.Href("/logout")) } class="inline">
+					<button type="submit" class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("welcome.wrong_account") }</button>
+				</form>
+			</div>
+		</form>
+	</section>
+}
+
+templ WelcomeLayout(d web.LayoutData, v WelcomeView) {
+	@Layout(web.WithContent(d, WelcomePage(d, v)))
+}

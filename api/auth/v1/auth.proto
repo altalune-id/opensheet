@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "altalune.id/template/gen/go/auth/v1;authv1";
+
+service AuthService {
+  rpc Whoami(WhoamiRequest) returns (WhoamiResponse);
+}
+
+message WhoamiRequest {}
+
+message WhoamiResponse {
+  string user_id = 1;
+  string email = 2;
+  string name = 3;
+  string active_org_id = 4;
+  string active_org_slug = 5;
+  repeated string scopes = 6;
+}

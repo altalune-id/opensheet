@@ -1,0 +1,44 @@
+# Version-control + editors
+.git/
+.github/
+.gitignore
+.editorconfig
+.vscode/
+.idea/
+
+# Build outputs — regenerated inside the image
+bin/
+dist/
+tmp/
+out/
+*.log
+*.out
+
+# Superpowers scratchpad
+.superpowers/
+docs/superpowers/
+
+# Local dev artifacts
+*.db
+*.db-journal
+*.sqlite
+.env
+.env.local
+docker/data/
+
+# Test caches
+coverage.out
+coverage.html
+
+# Never ship tests into the runtime image
+**/*_test.go
+**/testdata/
+
+# Generated code (templ + buf) is committed and shipped with the source tree.
+# The build stage compiles it in place — do NOT exclude it here.
+
+# Go module cache mounted separately by buildx
+.mod-cache/
+
+# Node/npm noise from any auxiliary tooling (kept out of Go image regardless)
+node_modules/

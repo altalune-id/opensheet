@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package apperror.v1;
+
+option go_package = "altalune.id/template/gen/go/apperror/v1;apperrorv1";
+
+message ErrorDetail {
+  string code = 1;
+  map<string, string> meta = 2;
+  string request_id = 3;
+  string trace_id = 4;
+}
+
+message UpstreamErrorDetail {
+  string service = 1;
+  string source = 2;
+  string code = 3;
+  string message = 4;
+  int32  grpc_code = 5;
+}

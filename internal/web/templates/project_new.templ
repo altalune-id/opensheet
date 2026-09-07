@@ -1,0 +1,49 @@
+package templates
+
+import "altalune.id/template/internal/web"
+
+type ProjectNewView struct {
+	OrgSlug   string
+	Slug  string
+	Name  string
+	Error string
+	ErrorCode string
+}
+
+templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
+	<section class="mx-auto max-w-xl">
+		<header class="border-b border-border pb-4">
+			<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("nav.create_project") }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">
+				{ d.Tr("project_new.subtitle_prefix") }
+				if d.ActiveOrg != nil {
+					<span class="font-medium text-foreground/90">{ d.ActiveOrg.Name }</span>.
+				} else {
+					{ d.Tr("project_new.subtitle_fallback") }
+				}
+			</p>
+		</header>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/projects")) } class="mt-6 space-y-5" novalidate>
+			<div>
+				<label for="project-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.name") }</label>
+				<input id="project-name" name="name" type="text" required autofocus value={ v.Name } placeholder={ d.Tr("project_new.name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+			</div>
+			<div>
+				<label for="project-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
+				<input id="project-slug" name="slug" type="text" required value={ v.Slug } placeholder={ d.Tr("project_new.slug_placeholder") } pattern="[a-z0-9-]+" class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+				<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("common.slug_hint") }</p>
+			</div>
+			<div class="flex items-center gap-3 pt-2">
+				<button type="submit" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("nav.create_project") }</button>
+				<a href={ templ.SafeURL(d.OrgPath("/projects")) } class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("common.cancel") }</a>
+			</div>
+		</form>
+	</section>
+}
+
+templ ProjectNewLayout(d web.LayoutData, v ProjectNewView) {
+	@Layout(web.WithContent(d, ProjectNewPage(d, v)))
+}

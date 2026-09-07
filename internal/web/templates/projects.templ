@@ -1,0 +1,66 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/icons"
+)
+
+type ProjectsView struct {
+	OrgSlug  string
+	Projects []ProjectSummary
+	Error    string
+	ErrorCode string
+}
+
+templ ProjectsPage(d web.LayoutData, v ProjectsView) {
+	<section>
+		<header class="flex items-baseline justify-between border-b border-border pb-4">
+			<div>
+				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("projects.title") }</h1>
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("projects.subtitle") }</p>
+			</div>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("plus", "h-4 w-4")
+				<span>{ d.Tr("nav.new_project") }</span>
+			</a>
+		</header>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		if len(v.Projects) == 0 {
+			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">{ d.Tr("projects.empty") }</p>
+				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("projects.create_first") }</a>
+			</div>
+		} else {
+			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				for _, p := range v.Projects {
+					<li>
+						<a
+							href={ templ.SafeURL(d.ProjectPath(p.Slug, "/overview")) }
+							class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+						>
+							<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground group-hover:text-foreground">
+								@icons.Icon("folder", "h-4 w-4")
+							</span>
+							<span class="min-w-0 flex-1">
+								<span class="flex items-center gap-2">
+									<span class="truncate text-sm font-medium text-foreground">{ p.Name }</span>
+									if p.System {
+										<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
+									}
+								</span>
+								<span class="mt-0.5 block truncate text-xs text-muted-foreground">{ p.Slug }</span>
+							</span>
+							@icons.Icon("chevron-right", "h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground")
+						</a>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+templ ProjectsLayout(d web.LayoutData, v ProjectsView) {
+	@Layout(web.WithContent(d, ProjectsPage(d, v)))
+}

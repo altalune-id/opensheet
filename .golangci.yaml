@@ -1,0 +1,253 @@
+version: "2"
+
+# altempl's golangci-lint config. v2 schema.
+# Run locally:  golangci-lint run --timeout=3m ./...
+# CI runs the same command via golangci/golangci-lint-action.
+
+run:
+  timeout: 3m
+  # Include test files in every linter's scope by default; exclude generated code below.
+  tests: true
+  # Skip the module's generated code entirely — buf + templ own their output.
+  # golangci-lint auto-detects _templ.go and *.pb.go; we still list them explicitly
+  # so accidental hand-edits still surface as "we skipped this on purpose".
+
+linters:
+  default: standard
+  enable:
+    - bodyclose         # HTTP response body must be closed
+    - depguard          # architectural boundary enforcement
+    - errorlint         # detects common error-wrap mistakes (%w usage, errors.Is/As)
+    - forbidigo         # forbid specific function calls (fmt.Print*, slog default)
+    - gochecknoglobals  # warn on package-level variable state
+    - gocritic          # opinionated but catches real bugs
+    - gosec             # security scanner (SQL injection, weak crypto, path traversal)
+    - misspell          # spelling in comments/strings
+    - nilerr            # returning nil on non-nil err path (or vice versa)
+    - prealloc          # slice preallocation hints — cheap perf wins
+    - revive            # replacement for golint; broad style checker
+    - unconvert         # redundant type conversions
+    - unparam           # unused function params (excluding interface implementations)
+    - whitespace        # misplaced whitespace
+
+  settings:
+    gocritic:
+      # opinionated tags: performance/diagnostic are safe; disable style noise.
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - ifElseChain     # legitimate readability choice in switches
+        - hugeParam       # false positives on Config structs
+        - rangeValCopy    # false positives on small structs
+    gosec:
+      excludes:
+        - G104            # duplicates errcheck
+        - G404            # weak random OK for non-crypto uses (invite-token uses crypto/rand explicitly)
+    revive:
+      # NOTE: we don't enforce doc-comments on every exported symbol — the spec's
+      # comment policy is "no comments unless the WHY is non-obvious". Well-named
+      # identifiers self-document. We DO keep the substantive checks below.
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: unexported-return
+          disabled: true   # constructors returning *unexported are our pattern (New returns *S)
+        - name: var-naming
+          disabled: false
+        - name: error-return
+          disabled: false
+        - name: error-naming
+          disabled: false
+        - name: error-strings
+          disabled: false
+        - name: dot-imports
+          disabled: false
+        - name: blank-imports
+          disabled: false
+        - name: context-as-argument
+          disabled: false
+        - name: context-keys-type
+          disabled: false
+        - name: increment-decrement
+          disabled: false
+        - name: range
+          disabled: false
+        - name: receiver-naming
+          disabled: false
+        - name: superfluous-else
+          disabled: false
+        - name: unreachable-code
+          disabled: false
+        - name: redefines-builtin-id
+          disabled: false
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    depguard:
+      rules:
+        domain-purity:
+          list-mode: strict
+          files:
+            - "**/internal/*/todo.go"
+            - "**/internal/*/user.go"
+            - "**/internal/*/org.go"
+            - "**/internal/*/project.go"
+            - "**/internal/*/invite.go"
+            - "**/internal/*/auth.go"
+            - "**/internal/onboard/onboard.go"
+            - "**/internal/*/store.go"
+            - "**/internal/*/errors.go"
+            # internal/cli holds Cobra command files whose names collide with the
+            # domain globs above (cli/todo.go, cli/auth.go, …); they are interfaces.
+            - "!**/internal/cli/*.go"
+            # TODO: auth.go imports platform/session for session.Principal. Define a
+            # local principal type in the auth domain and drop the platform import,
+            # then remove this exclusion.
+            - "!**/internal/auth/auth.go"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - altalune.id/template/internal/platform/tenant
+            - altalune.id/template/internal/apperror
+            - altalune.id/template/gen/go/apperror/v1
+            - altalune.id/template/reqid
+            - google.golang.org/grpc/codes
+        scheduler-purity:
+          list-mode: strict
+          files:
+            - "**/scheduler/*.go"
+            - "!**/scheduler/*_test.go"
+          allow:
+            - $gostd
+            - go.opentelemetry.io/otel
+            - github.com/robfig/cron/v3
+            - altalune.id/template/reqid
+        httpclient-purity:
+          list-mode: strict
+          files:
+            - "**/httpclient/*.go"
+            - "!**/httpclient/*_test.go"
+          allow:
+            - $gostd
+            - github.com/go-resty/resty/v2
+            - go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
+        application-purity:
+          list-mode: lax
+          files:
+            - "**/internal/*/service.go"
+            - "**/internal/*/onboard.go"
+            - "**/internal/*/accept.go"
+            - "**/internal/*/send.go"
+          deny:
+            - pkg: "database/sql"
+              desc: "application layer must not touch database/sql; use Store"
+            - pkg: "net/http"
+              desc: "application layer must not touch HTTP directly"
+        platform-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/platform/**"
+          deny:
+            - pkg: "altalune.id/template/internal/todo"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/user"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/org"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/project"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/invite"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/auth"
+              desc: "platform must not import domain packages"
+            - pkg: "altalune.id/template/internal/api"
+              desc: "platform must not import interfaces"
+            - pkg: "altalune.id/template/internal/web"
+              desc: "platform must not import interfaces"
+            - pkg: "altalune.id/template/internal/cli"
+              desc: "platform must not import interfaces"
+            - pkg: "altalune.id/template/internal/boot"
+              desc: "platform must not import boot"
+        platform-boundary-root:
+          list-mode: lax
+          files:
+            - "**/authl/**"
+            - "**/reqid/**"
+            - "**/nanoid/**"
+            - "**/worker/**"
+            - "**/logger/**"
+            - "**/telemetry/**"
+            - "**/mailer/**"
+            - "**/httpclient/**"
+          deny:
+            - pkg: "altalune.id/template/internal"
+              desc: "root-level shared packages must NOT depend on any internal/ package (import inversion)"
+    forbidigo:
+      forbid:
+        - pattern: 'fmt\.Print(f|ln|)\('
+          msg: "use cmd.OutOrStdout() or slog for output"
+        - pattern: 'slog\.(Info|Warn|Error|Debug)Context\('
+          msg: "use an injected *slog.Logger, not the slog default"
+      exclude-godoc-examples: true
+      analyze-types: true
+      # Allow slog default + fmt.Print in main.go and cli/render.
+      # Configure via `exclusions` block below.
+    # gochecknoglobals is enabled in linters.enable above with no extra config.
+    # It warns on unexported package-level variables; exported ones we tolerate
+    # for release-metadata (main.version, main.commit) via the exclusions block.
+
+  exclusions:
+    generated: strict
+    warn-unused: false
+    # Test files: relax noise from linters that overfire on table tests / fake repos.
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+          - prealloc
+          - unparam
+      # Generated code: buf + templ own it. Belt-and-suspenders with `generated: strict`.
+      - path: gen/
+        linters:
+          - all
+      - path: _templ\.go
+        linters:
+          - all
+      - path: cmd/altempl/main\.go
+        linters:
+          - forbidigo
+          - gochecknoglobals
+      - path: internal/cli/render/
+        linters:
+          - forbidigo
+        text: "fmt\\.Print"
+      # version/version.go holds -ldflags-injected build metadata; these MUST be
+      # package-level vars so `go build -ldflags -X ...` can stamp them.
+      - path: version/version\.go
+        linters:
+          - gochecknoglobals
+      # httpclient/safe.go holds the immutable SSRF deny-prefix table.
+      - path: httpclient/safe\.go
+        linters:
+          - gochecknoglobals
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - altalune.id/template
+
+issues:
+  # Fail CI on any issue.
+  max-issues-per-linter: 0
+  max-same-issues: 0

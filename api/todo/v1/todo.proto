@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package todo.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "altalune.id/template/gen/go/todo/v1;todov1";
+
+service TodoService {
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Toggle(ToggleRequest) returns (ToggleResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+message Todo {
+  string id = 1;
+  string project_id = 2;
+  string user_id = 3;
+  string title = 4;
+  bool done = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ListRequest {
+  string project_id = 1;
+  string page_token = 2;
+  int32 page_size = 3;
+}
+
+message ListResponse {
+  repeated Todo todos = 1;
+  string next_page_token = 2;
+}
+
+message CreateRequest {
+  string project_id = 1;
+  string title = 2;
+}
+
+message CreateResponse {
+  Todo todo = 1;
+}
+
+message ToggleRequest {
+  string todo_id = 1;
+}
+
+message ToggleResponse {
+  Todo todo = 1;
+}
+
+message DeleteRequest {
+  string todo_id = 1;
+}
+
+message DeleteResponse {}

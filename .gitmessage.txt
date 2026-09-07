@@ -1,0 +1,9 @@
+# <type>(<scope>): <subject>
+#
+# type: feat | fix | chore | refactor | docs | test | perf | build | ci
+# scope: optional package or subsystem
+# subject: imperative mood, no trailing period, <= 72 chars
+#
+# body: what & why (not how). wrap at 72 chars.
+#
+# Signed-off-by is automatic if commit.gpgsign=true.

@@ -1,0 +1,12 @@
+package icons
+
+// Icon renders the vendored Lucide SVG named `name` with the given Tailwind class applied. Missing icons render as a span with data-missing-icon so gaps are visible in dev.
+templ Icon(name, class string) {
+	if inner, ok := InnerFor(name); ok {
+		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class={ class }>
+			@templ.Raw(inner)
+		</svg>
+	} else {
+		<span class={ class } data-missing-icon={ name }></span>
+	}
+}

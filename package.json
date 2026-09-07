@@ -1,0 +1,33 @@
+{
+  "name": "altempl",
+  "version": "0.1.0-dev",
+  "private": true,
+  "description": "altempl — altalune multitenant template",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "buf": "buf",
+    "buf:generate": "buf generate",
+    "buf:lint": "buf lint",
+    "buf:format": "buf format --write",
+    "buf:breaking": "buf breaking --against '.git#branch=main,subdir=.'",
+    "prepare": "husky",
+    "lint-staged": "lint-staged"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.72.0",
+    "husky": "9.1.7",
+    "lint-staged": "15.2.10",
+    "prettier": "3.4.2"
+  },
+  "lint-staged": {
+    "*.go": ["gofmt -l -e"],
+    "Dockerfile": ["sh -c 'if command -v hadolint >/dev/null 2>&1; then hadolint \"$@\"; else echo \"warn: hadolint not installed — skipping (brew install hadolint to enable)\"; fi' _"],
+    "*.{yml,yaml}": ["sh -c 'if command -v yamllint >/dev/null 2>&1; then yamllint -c .yamllint.yaml \"$@\"; else echo \"warn: yamllint not installed — skipping (brew install yamllint to enable)\"; fi' _"],
+    "*.proto": ["pnpm exec buf lint --path"],
+    "*.md": ["prettier --check"]
+  }
+}

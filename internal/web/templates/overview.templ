@@ -1,0 +1,54 @@
+package templates
+
+import (
+	"fmt"
+
+	"altalune.id/template/internal/web"
+)
+
+type OverviewView struct {
+	OrgSlug string
+	ProjectID   string
+	ProjectSlug string
+	ProjectName string
+	TotalTodos  int
+	OpenTodos   int
+	DoneTodos   int
+}
+
+templ OverviewPage(d web.LayoutData, v OverviewView) {
+	<section class="flex flex-col gap-6">
+		<header class="border-b border-border pb-4">
+			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("nav.overview") }</p>
+			<h1 class="mt-1 text-2xl font-semibold text-foreground">{ v.ProjectName }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("common.slug") }: <span class="font-mono text-foreground/90">{ v.ProjectSlug }</span></p>
+		</header>
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+			@statCard(d.Tr("nav.todos"), fmt.Sprintf("%d", v.TotalTodos))
+			@statCard(d.Tr("overview.stat_open"), fmt.Sprintf("%d", v.OpenTodos))
+			@statCard(d.Tr("overview.stat_done"), fmt.Sprintf("%d", v.DoneTodos))
+		</div>
+		<div class="rounded-lg border border-border bg-card p-6 shadow-sm">
+			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("overview.quick_actions") }</h2>
+			<div class="mt-4 flex flex-wrap gap-2">
+				<a
+					href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos")) }
+					class="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+				>
+					{ d.Tr("overview.open_todos") }
+				</a>
+			</div>
+		</div>
+	</section>
+}
+
+templ statCard(label, value string) {
+	<div class="rounded-lg border border-border bg-card p-4 shadow-sm">
+		<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ label }</p>
+		<p class="mt-2 text-2xl font-semibold text-foreground">{ value }</p>
+	</div>
+}
+
+templ OverviewLayout(d web.LayoutData, v OverviewView) {
+	@Layout(web.WithContent(d, OverviewPage(d, v)))
+}

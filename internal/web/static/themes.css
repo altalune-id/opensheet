@@ -1,0 +1,463 @@
+/*
+ * altempl theme catalog.
+ *
+ * MUST load AFTER basecoat.css / Tailwind so these variables win the cascade —
+ * basecoat.css sets a neutral :root palette in oklch() at the same specificity,
+ * so file order is what makes our themes visible. See layout.templ.
+ *
+ * Values are bare HSL "H S% L%" so the Tailwind bridge in layout.templ can wrap
+ * them as `hsl(var(--x) / <alpha-value>)` and opacity utilities keep working.
+ *
+ * Design rules:
+ *   1. Body carries the theme hue at high lightness (light) or low lightness (dark).
+ *   2. Card sits at a distinct lightness so it visibly floats above the body —
+ *      light: card is near-white, body has the tint; dark: card is ~5% lighter than body.
+ *   3. Border in dark mode is only ~4-5 lightness points above card. Never white,
+ *      never harsh — it defines edges without shouting.
+ *   4. Popover / dropdown backgrounds fully opaque; no transparent overlays.
+ *   5. `--muted-foreground` maintains WCAG AA contrast (4.5:1) on `--card`.
+ */
+
+html, body {
+	background-color: hsl(var(--background));
+	color: hsl(var(--foreground));
+}
+
+/* Scrollbar tint matches the theme rather than the OS grey. */
+* { scrollbar-color: hsl(var(--border)) transparent; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Theme-token utility layer.
+
+   Tailwind CDN JIT does not reliably generate `bg-primary`, `text-foreground`,
+   `border-border`, etc. from CSS-var-backed colors (it emits layout utilities
+   but skips these color utilities). We author the color half of the utility
+   surface here so themes work independent of Tailwind's config quirks.
+   Tailwind CDN keeps handling layout / typography / opacity variants for
+   which pattern generation is well-defined.
+
+   Rule: name matches Tailwind's utility name; values are `hsl(var(--x))`
+   or `hsl(var(--x) / <alpha>)`. Only the classes actually used in templates
+   are enumerated — extend the list here when adding new usages.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Backgrounds */
+.bg-background { background-color: hsl(var(--background)); }
+.bg-foreground { background-color: hsl(var(--foreground)); }
+.bg-card { background-color: hsl(var(--card)); }
+.bg-popover { background-color: hsl(var(--popover)); }
+.bg-primary { background-color: hsl(var(--primary)); }
+.bg-secondary { background-color: hsl(var(--secondary)); }
+.bg-muted { background-color: hsl(var(--muted)); }
+.bg-accent { background-color: hsl(var(--accent)); }
+.bg-destructive { background-color: hsl(var(--destructive)); }
+.bg-border { background-color: hsl(var(--border)); }
+.bg-primary\/40 { background-color: hsl(var(--primary) / 0.4); }
+.bg-primary\/10 { background-color: hsl(var(--primary) / 0.1); }
+.bg-muted\/50 { background-color: hsl(var(--muted) / 0.5); }
+.bg-muted\/60 { background-color: hsl(var(--muted) / 0.6); }
+
+/* Text colors */
+.text-foreground { color: hsl(var(--foreground)); }
+.text-foreground\/90 { color: hsl(var(--foreground) / 0.9); }
+.text-foreground\/70 { color: hsl(var(--foreground) / 0.7); }
+.text-card-foreground { color: hsl(var(--card-foreground)); }
+.text-popover-foreground { color: hsl(var(--popover-foreground)); }
+.text-primary { color: hsl(var(--primary)); }
+.text-primary-foreground { color: hsl(var(--primary-foreground)); }
+.text-secondary-foreground { color: hsl(var(--secondary-foreground)); }
+.text-accent-foreground { color: hsl(var(--accent-foreground)); }
+.text-destructive { color: hsl(var(--destructive)); }
+.text-destructive-foreground { color: hsl(var(--destructive-foreground)); }
+.text-muted-foreground { color: hsl(var(--muted-foreground)); }
+.text-muted-foreground\/50 { color: hsl(var(--muted-foreground) / 0.5); }
+.text-muted-foreground\/60 { color: hsl(var(--muted-foreground) / 0.6); }
+.text-muted-foreground\/70 { color: hsl(var(--muted-foreground) / 0.7); }
+
+/* Borders (color only — width comes from Tailwind `.border`) */
+.border-border { border-color: hsl(var(--border)); }
+.border-border\/50 { border-color: hsl(var(--border) / 0.5); }
+.border-border\/70 { border-color: hsl(var(--border) / 0.7); }
+.border-input { border-color: hsl(var(--input)); }
+/* `.border-subtle` — solid themed hairline for structural dividers (sidebar
+   edges, nav underline, popover-internal separators). Uses the theme's
+   `--border` token so the tint always matches the current palette. Per-theme
+   dark-mode `--border` values sit ~3 lightness points above `--card` — enough
+   to define an edge without ever reading as a bright white line. */
+.border-subtle { border-color: hsl(var(--border)); }
+
+/* Rings (color only — width comes from Tailwind `.ring-1` / `.ring-2`) */
+.ring-border { --tw-ring-color: hsl(var(--border)); }
+.ring-ring { --tw-ring-color: hsl(var(--ring)); }
+.ring-primary\/20 { --tw-ring-color: hsl(var(--primary) / 0.2); }
+
+/* Placeholder color */
+.placeholder\:text-muted-foreground\/70::placeholder { color: hsl(var(--muted-foreground) / 0.7); }
+
+/* Divide-y color: applied to > :not([hidden]) ~ :not([hidden]) chain */
+.divide-border\/50 > :not([hidden]) ~ :not([hidden]) { border-color: hsl(var(--border) / 0.5); }
+
+/* Hover / focus states */
+.hover\:bg-muted:hover { background-color: hsl(var(--muted)); }
+.hover\:bg-muted\/50:hover { background-color: hsl(var(--muted) / 0.5); }
+.hover\:bg-muted\/60:hover { background-color: hsl(var(--muted) / 0.6); }
+.hover\:bg-primary\/90:hover { background-color: hsl(var(--primary) / 0.9); }
+.hover\:text-foreground:hover { color: hsl(var(--foreground)); }
+.hover\:border-muted-foreground:hover { border-color: hsl(var(--muted-foreground)); }
+.hover\:border-muted-foreground\/40:hover { border-color: hsl(var(--muted-foreground) / 0.4); }
+.hover\:ring-border:hover { --tw-ring-color: hsl(var(--border)); }
+
+.focus\:bg-muted:focus { background-color: hsl(var(--muted)); }
+.focus\:border-ring:focus { border-color: hsl(var(--ring)); }
+.focus\:ring-ring:focus { --tw-ring-color: hsl(var(--ring)); }
+.focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Component conventions.
+
+   Every "card surface" (cards, list containers, panels) shares:
+     - background: hsl(var(--card))
+     - 1px solid border: hsl(var(--border))
+     - radius: var(--radius) (per-theme)
+     - a tiny shadow for elevation in light mode; muted in dark
+   Use these class helpers in templates for consistency, or keep the
+   Tailwind combinations already in templates — both resolve identically.
+   ───────────────────────────────────────────────────────────────── */
+
+.surface {
+	background-color: hsl(var(--card));
+	color: hsl(var(--card-foreground));
+	border: 1px solid hsl(var(--border));
+	border-radius: var(--radius);
+	box-shadow: 0 1px 2px 0 hsl(220 40% 4% / 0.04);
+}
+.dark .surface {
+	box-shadow: 0 1px 2px 0 hsl(0 0% 0% / 0.35);
+}
+
+/* Popover surface: solid themed 1px ring plus a soft-drop shadow. Shadow does
+   the depth work; the ring gives a crisp edge that always tracks the theme. */
+.popover-surface {
+	background-color: hsl(var(--popover));
+	color: hsl(var(--popover-foreground));
+	border-radius: calc(var(--radius) - 2px);
+	border: 1px solid hsl(var(--border));
+	box-shadow:
+		0 12px 32px -8px hsl(220 40% 4% / 0.18),
+		0 4px 12px -4px hsl(220 40% 4% / 0.12);
+}
+.dark .popover-surface {
+	box-shadow:
+		0 20px 40px -12px hsl(0 0% 0% / 0.6),
+		0 8px 20px -6px hsl(0 0% 0% / 0.4);
+}
+
+/* Active option marker in theme/mode dropdowns.
+   Uses attribute selectors instead of Tailwind arbitrary variants for reliability
+   across CDN JIT and vendored builds. */
+button[data-theme-key][aria-current="true"],
+button[data-color-mode][aria-current="true"] {
+	background-color: hsl(var(--muted));
+	font-weight: 500;
+}
+button[data-theme-key][aria-current="true"] [data-check],
+button[data-color-mode][aria-current="true"] [data-check] {
+	opacity: 1;
+}
+
+/* SSO handoff button. Auth0/Clerk/Google convention: brand logo left, arrow right, neutral until hover. Hover tints border + shadow with the theme's primary. */
+.btn-sso {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	width: 100%;
+	max-width: 22rem;
+	margin-inline: auto;
+	height: 2.75rem;
+	padding: 0 1rem;
+	border-radius: calc(var(--radius) - 2px);
+	border: 1px solid hsl(var(--border));
+	background: hsl(var(--card));
+	color: hsl(var(--card-foreground));
+	font-weight: 500;
+	text-align: left;
+	text-decoration: none;
+	transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+.btn-sso:hover,
+.btn-sso:focus-visible {
+	border-color: hsl(var(--primary) / 0.6);
+	background: color-mix(in srgb, hsl(var(--primary)) 6%, hsl(var(--card)));
+	box-shadow: 0 4px 12px -6px hsl(var(--primary) / 0.35);
+	color: hsl(var(--card-foreground));
+}
+.btn-sso:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 3px hsl(var(--primary) / 0.25);
+}
+.btn-sso__logo {
+	width: 1.5rem;
+	height: 1.5rem;
+	flex-shrink: 0;
+	border-radius: 0.25rem;
+	object-fit: contain;
+}
+.btn-sso__label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	letter-spacing: -0.005em;
+}
+.btn-sso__chev {
+	color: hsl(var(--muted-foreground));
+	flex-shrink: 0;
+	transition: transform 120ms ease, color 120ms ease;
+}
+.btn-sso:hover .btn-sso__chev,
+.btn-sso:focus-visible .btn-sso__chev {
+	transform: translateX(2px);
+	color: hsl(var(--primary));
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Slate — cool graphite. Professional, precise, enterprise-ready.
+   ───────────────────────────────────────────────────────────────── */
+:root,
+[data-theme="slate"] {
+	--background: 220 22% 91%;
+	--foreground: 222 47% 11%;
+	--card: 0 0% 100%;
+	--card-foreground: 222 47% 11%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 222 47% 11%;
+	--primary: 222 47% 18%;
+	--primary-foreground: 210 30% 99%;
+	--secondary: 220 18% 84%;
+	--secondary-foreground: 222 47% 18%;
+	--muted: 220 20% 88%;
+	--muted-foreground: 220 15% 38%;
+	--accent: 220 18% 82%;
+	--accent-foreground: 222 47% 18%;
+	--destructive: 358 72% 48%;
+	--destructive-foreground: 210 30% 99%;
+	--border: 220 15% 82%;
+	--input: 220 15% 82%;
+	--ring: 222 47% 30%;
+	--radius: 0.5rem;
+	--chart-1: 222 47% 30%;
+	--chart-2: 220 30% 55%;
+	--chart-3: 200 40% 50%;
+	--chart-4: 340 60% 55%;
+	--chart-5: 30 75% 55%;
+	color-scheme: light;
+}
+[data-theme="slate"].dark,
+.dark[data-theme="slate"] {
+	--background: 222 42% 6%;
+	--foreground: 210 22% 96%;
+	--card: 222 32% 11%;
+	--card-foreground: 210 22% 96%;
+	--popover: 222 30% 13%;
+	--popover-foreground: 210 22% 96%;
+	--primary: 210 30% 92%;
+	--primary-foreground: 222 40% 12%;
+	--secondary: 222 24% 17%;
+	--secondary-foreground: 210 22% 96%;
+	--muted: 222 24% 14%;
+	--muted-foreground: 220 15% 68%;
+	--accent: 222 24% 18%;
+	--accent-foreground: 210 22% 96%;
+	--destructive: 358 65% 55%;
+	--destructive-foreground: 210 22% 96%;
+	--border: 222 60% 3%;
+	--input: 222 22% 20%;
+	--ring: 210 30% 60%;
+	--chart-1: 210 30% 80%;
+	--chart-2: 220 40% 65%;
+	--chart-3: 200 55% 55%;
+	--chart-4: 340 65% 65%;
+	--chart-5: 30 80% 65%;
+	color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Glacier — cyan-teal. Cool water; calm, clear, high-contrast accent.
+   ───────────────────────────────────────────────────────────────── */
+[data-theme="glacier"] {
+	--background: 192 48% 88%;
+	--foreground: 200 55% 10%;
+	--card: 195 25% 99%;
+	--card-foreground: 200 55% 10%;
+	--popover: 195 25% 99%;
+	--popover-foreground: 200 55% 10%;
+	--primary: 187 82% 30%;
+	--primary-foreground: 195 40% 98%;
+	--secondary: 192 40% 80%;
+	--secondary-foreground: 200 55% 18%;
+	--muted: 192 35% 86%;
+	--muted-foreground: 200 25% 34%;
+	--accent: 187 55% 78%;
+	--accent-foreground: 187 82% 20%;
+	--destructive: 358 72% 48%;
+	--destructive-foreground: 195 40% 98%;
+	--border: 192 30% 78%;
+	--input: 192 30% 78%;
+	--ring: 187 82% 34%;
+	--radius: 0.625rem;
+	--chart-1: 187 82% 34%;
+	--chart-2: 210 65% 45%;
+	--chart-3: 168 55% 40%;
+	--chart-4: 260 45% 55%;
+	--chart-5: 30 75% 55%;
+	color-scheme: light;
+}
+[data-theme="glacier"].dark,
+.dark[data-theme="glacier"] {
+	--background: 200 52% 5%;
+	--foreground: 195 20% 96%;
+	--card: 200 38% 10%;
+	--card-foreground: 195 20% 96%;
+	--popover: 200 36% 12%;
+	--popover-foreground: 195 20% 96%;
+	--primary: 187 82% 55%;
+	--primary-foreground: 200 50% 10%;
+	--secondary: 200 26% 16%;
+	--secondary-foreground: 195 20% 96%;
+	--muted: 200 26% 13%;
+	--muted-foreground: 195 18% 68%;
+	--accent: 187 45% 22%;
+	--accent-foreground: 187 88% 82%;
+	--destructive: 358 65% 55%;
+	--destructive-foreground: 195 20% 96%;
+	--border: 200 70% 3%;
+	--input: 200 26% 20%;
+	--ring: 187 82% 52%;
+	--chart-1: 187 88% 60%;
+	--chart-2: 210 70% 65%;
+	--chart-3: 168 60% 55%;
+	--chart-4: 260 55% 70%;
+	--chart-5: 30 80% 65%;
+	color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Savanna — warm sand + terracotta. Earthy, human, editorial.
+   ───────────────────────────────────────────────────────────────── */
+[data-theme="savanna"] {
+	--background: 34 52% 87%;
+	--foreground: 24 32% 14%;
+	--card: 36 40% 99%;
+	--card-foreground: 24 32% 14%;
+	--popover: 36 40% 99%;
+	--popover-foreground: 24 32% 14%;
+	--primary: 16 78% 44%;
+	--primary-foreground: 36 55% 98%;
+	--secondary: 32 45% 80%;
+	--secondary-foreground: 24 32% 20%;
+	--muted: 32 40% 87%;
+	--muted-foreground: 24 22% 34%;
+	--accent: 16 65% 82%;
+	--accent-foreground: 16 78% 24%;
+	--destructive: 358 72% 48%;
+	--destructive-foreground: 36 55% 98%;
+	--border: 32 30% 76%;
+	--input: 32 30% 76%;
+	--ring: 16 78% 46%;
+	--radius: 0.75rem;
+	--chart-1: 16 78% 46%;
+	--chart-2: 40 80% 50%;
+	--chart-3: 12 60% 40%;
+	--chart-4: 350 55% 50%;
+	--chart-5: 145 40% 40%;
+	color-scheme: light;
+}
+[data-theme="savanna"].dark,
+.dark[data-theme="savanna"] {
+	--background: 24 34% 7%;
+	--foreground: 36 22% 96%;
+	--card: 24 26% 12%;
+	--card-foreground: 36 22% 96%;
+	--popover: 24 25% 14%;
+	--popover-foreground: 36 22% 96%;
+	--primary: 18 82% 58%;
+	--primary-foreground: 24 34% 10%;
+	--secondary: 24 22% 18%;
+	--secondary-foreground: 36 22% 96%;
+	--muted: 24 22% 15%;
+	--muted-foreground: 36 18% 68%;
+	--accent: 18 45% 22%;
+	--accent-foreground: 18 85% 82%;
+	--destructive: 358 65% 55%;
+	--destructive-foreground: 36 22% 96%;
+	--border: 24 60% 4%;
+	--input: 24 22% 20%;
+	--ring: 18 82% 55%;
+	--chart-1: 18 85% 62%;
+	--chart-2: 40 82% 62%;
+	--chart-3: 12 65% 55%;
+	--chart-4: 350 60% 65%;
+	--chart-5: 145 45% 55%;
+	color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Forest — deep green + moss. Grounded, natural, calm.
+   ───────────────────────────────────────────────────────────────── */
+[data-theme="forest"] {
+	--background: 140 28% 87%;
+	--foreground: 150 32% 12%;
+	--card: 140 22% 99%;
+	--card-foreground: 150 32% 12%;
+	--popover: 140 22% 99%;
+	--popover-foreground: 150 32% 12%;
+	--primary: 152 55% 26%;
+	--primary-foreground: 140 30% 98%;
+	--secondary: 140 24% 80%;
+	--secondary-foreground: 150 32% 20%;
+	--muted: 140 22% 88%;
+	--muted-foreground: 150 20% 32%;
+	--accent: 150 45% 78%;
+	--accent-foreground: 152 55% 18%;
+	--destructive: 358 72% 48%;
+	--destructive-foreground: 140 30% 98%;
+	--border: 140 22% 76%;
+	--input: 140 22% 76%;
+	--ring: 152 55% 30%;
+	--radius: 0.5rem;
+	--chart-1: 152 55% 30%;
+	--chart-2: 100 45% 40%;
+	--chart-3: 170 50% 35%;
+	--chart-4: 30 75% 50%;
+	--chart-5: 260 45% 55%;
+	color-scheme: light;
+}
+[data-theme="forest"].dark,
+.dark[data-theme="forest"] {
+	--background: 150 32% 5%;
+	--foreground: 140 18% 96%;
+	--card: 150 25% 10%;
+	--card-foreground: 140 18% 96%;
+	--popover: 150 24% 12%;
+	--popover-foreground: 140 18% 96%;
+	--primary: 150 55% 50%;
+	--primary-foreground: 150 30% 8%;
+	--secondary: 150 22% 17%;
+	--secondary-foreground: 140 18% 96%;
+	--muted: 150 22% 14%;
+	--muted-foreground: 140 18% 68%;
+	--accent: 150 40% 22%;
+	--accent-foreground: 150 60% 82%;
+	--destructive: 358 65% 55%;
+	--destructive-foreground: 140 18% 96%;
+	--border: 150 60% 3%;
+	--input: 150 22% 20%;
+	--ring: 150 55% 48%;
+	--chart-1: 150 60% 58%;
+	--chart-2: 100 50% 55%;
+	--chart-3: 170 55% 50%;
+	--chart-4: 30 80% 60%;
+	--chart-5: 260 55% 68%;
+	color-scheme: dark;
+}

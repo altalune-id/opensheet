@@ -1,0 +1,622 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/icons"
+)
+
+templ Layout(d web.LayoutData) {
+	<!DOCTYPE html>
+	<html lang={ layoutLang(d) } dir={ layoutDir(d) }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ d.Title }</title>
+			<link rel="icon" href={ d.Static("favicon.ico") } sizes="any"/>
+			<link rel="icon" type="image/png" sizes="32x32" href={ d.Static("favicon-32x32.png") }/>
+			<link rel="apple-touch-icon" href={ d.Static("apple-touch-icon.png") }/>
+			@themeInitScript()
+			if d.UIMode == web.UIModeVendored {
+				<link rel="stylesheet" href={ d.Static("basecoat.css") }/>
+				<link rel="stylesheet" href={ d.Static("app.css") }/>
+				<script src={ d.Static("htmx.min.js") } defer></script>
+			} else {
+				@tailwindThemeBridge()
+				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. -->
+				<script src="https://cdn.tailwindcss.com"></script>
+				<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css"/>
+				<script src="https://unpkg.com/htmx.org@2" defer></script>
+			}
+			<!-- themes.css MUST load AFTER basecoat so our per-theme HSL variables win the cascade. -->
+			<link rel="stylesheet" href={ d.Static("themes.css") }/>
+			<style>
+				summary::-webkit-details-marker { display: none; }
+				summary { list-style: none; cursor: pointer; }
+				details[open] > summary .chev { transform: rotate(180deg); }
+			</style>
+		</head>
+		<body class="min-h-screen bg-background text-foreground antialiased">
+			@topNav(d)
+			if d.Principal != nil && d.ActiveNav.Scope != web.NavScopeNone {
+				<div class="flex min-h-[calc(100vh-3.5rem)]">
+					<aside class="sticky top-14 z-20 hidden h-[calc(100vh-3.5rem)] shrink-0 flex-col md:flex md:w-60 md:border-r border-subtle" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+						@orgSwitcherHeader(d)
+						<div class="flex-1 overflow-y-auto">
+							@orgSidebar(d)
+						</div>
+						@sidebarFooterUtils(d)
+					</aside>
+					if d.ActiveNav.Scope == web.NavScopeProject {
+						<aside class="sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 flex-col md:flex md:w-64 md:border-r border-subtle" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+							<div class="flex-1 overflow-y-auto">
+								@projectSidebar(d)
+							</div>
+						</aside>
+					}
+					<main class="flex-1 min-w-0 px-4 py-4 md:px-8 md:py-6">
+						if d.Flash != nil {
+							<div class={ "mb-4 rounded-md p-3 text-sm", flashClass(d.Flash.Kind) }>{ d.Flash.Message }</div>
+						}
+						@d.Content
+					</main>
+				</div>
+			} else {
+				<main class="mx-auto max-w-6xl px-4 py-6 md:py-10">
+					if d.Flash != nil {
+						<div class={ "mb-4 rounded-md p-3 text-sm", flashClass(d.Flash.Kind) }>{ d.Flash.Message }</div>
+					}
+					@d.Content
+					if d.Principal == nil && len(d.SupportedLocs) > 1 {
+						@publicLocaleFooter(d)
+					}
+				</main>
+			}
+			if d.Principal != nil && d.ActiveNav.Scope != web.NavScopeNone {
+				@mobileDrawer(d)
+			}
+			<script>
+				document.addEventListener('click', function(e) {
+					document.querySelectorAll('details[data-switcher][open]').forEach(function(d) {
+						if (!d.contains(e.target)) d.removeAttribute('open');
+					});
+				});
+				document.addEventListener('keydown', function(e) {
+					if (e.key === 'Escape') {
+						document.querySelectorAll('details[data-switcher][open]').forEach(function(d) {
+							d.removeAttribute('open');
+						});
+					}
+				});
+				document.querySelectorAll('details[data-switcher]').forEach(function(d) {
+					d.addEventListener('toggle', function() {
+						if (!d.open) return;
+						document.querySelectorAll('details[data-switcher][open]').forEach(function(o) {
+							if (o !== d) o.removeAttribute('open');
+						});
+					});
+				});
+			</script>
+		</body>
+	</html>
+}
+
+templ topNav(d web.LayoutData) {
+	<header class="sticky top-0 z-30 h-14 border-b border-subtle backdrop-blur" style="background:hsl(var(--card) / 0.92);color:hsl(var(--card-foreground));">
+		<div class="flex h-full items-center gap-3 px-4 md:px-6">
+			if d.Principal != nil && d.ActiveNav.Scope != web.NavScopeNone {
+				<label for="alt-drawer" class="md:hidden inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted" aria-label="Open menu">
+					@icons.Icon("menu", "h-5 w-5")
+				</label>
+			}
+			<a href={ templ.SafeURL(d.Href("/")) } class="flex items-center gap-2">
+				<img src={ d.Static("apple-touch-icon.png") } alt="" width="28" height="28" class="h-7 w-7 rounded-md"/>
+				<span class="hidden text-sm font-semibold tracking-tight text-foreground sm:inline">altempl</span>
+			</a>
+			if d.ActiveProject != nil {
+				<span class="hidden text-muted-foreground/50 md:inline">/</span>
+				<div class="hidden md:block">
+					@projectSwitcherPill(d)
+				</div>
+			}
+			<div class="ml-auto flex items-center gap-2">
+				if d.Principal == nil {
+					@publicUtilityBar(d)
+				} else if d.Principal.Email != "" {
+					@userMenu(d)
+					@themeApplyScript()
+				}
+			</div>
+		</div>
+	</header>
+}
+
+templ publicUtilityBar(d web.LayoutData) {
+	if len(d.ColorModes) > 0 {
+		<div>
+			@colorModeSelectorPill(d, false)
+		</div>
+	}
+	@themeApplyScript()
+}
+
+templ publicLocaleFooter(d web.LayoutData) {
+	<div class="mt-10 flex justify-center">
+		<div class="w-full max-w-xs">
+			@localeSelectorPill(d, true)
+		</div>
+	</div>
+}
+
+templ userMenu(d web.LayoutData) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-sm shadow-sm transition-colors hover:bg-muted/60" style="background:hsl(var(--card));color:hsl(var(--card-foreground));" aria-label="Account menu">
+			<span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[11px] font-semibold uppercase text-primary-foreground">
+				{ userInitial(d.Principal.Email) }
+			</span>
+			<span class="hidden max-w-[12rem] truncate text-foreground sm:inline">{ d.Principal.Email }</span>
+			@icons.Icon("chevron-down", "chev h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class="absolute right-0 top-full z-40 mt-2 w-64 popover-surface p-1" style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			<div class="px-3 py-2">
+				<p class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">{ d.Tr("common.signed_in_as") }</p>
+				<p class="mt-0.5 truncate text-sm font-medium text-foreground">{ d.Principal.Email }</p>
+			</div>
+			<div class="my-1 border-t border-subtle"></div>
+			<form method="post" action={ templ.SafeURL(d.Href("/logout")) } class="block">
+				<button type="submit" class="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
+					@icons.Icon("log-out", "h-4 w-4 text-muted-foreground")
+					<span>{ d.Tr("common.sign_out") }</span>
+				</button>
+			</form>
+		</div>
+	</details>
+}
+
+func userInitial(email string) string {
+	if email == "" {
+		return "?"
+	}
+	r := []rune(email)
+	if len(r) == 0 {
+		return "?"
+	}
+	first := r[0]
+	if first >= 'a' && first <= 'z' {
+		first = first - 32
+	}
+	return string(first)
+}
+
+// NOTE: the switcher renders outside the sidebar's scroll container — an overflow ancestor clips an
+// absolutely positioned dropdown no matter its z-index, which is what buried this popover under the page.
+templ orgSwitcherHeader(d web.LayoutData) {
+	<div class="shrink-0 px-3 pt-3">
+		@orgSwitcherPill(d)
+	</div>
+}
+
+templ orgSidebar(d web.LayoutData) {
+	<div class="flex flex-col gap-1 p-3">
+		if d.ActiveOrg != nil {
+			<p class="mt-4 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.ActiveOrg.Name }</p>
+			@orgMenu(d, d.ActiveOrg.Slug)
+		} else {
+			<p class="mt-4 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.workspace") }</p>
+			<a href={ templ.SafeURL(d.Href("/orgs/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_organization") }</span></a>
+		}
+	</div>
+}
+
+templ sidebarFooterUtils(d web.LayoutData) {
+	<div class="flex shrink-0 flex-col gap-2 border-t border-subtle p-2 pb-2">
+		if len(d.Themes) > 0 {
+			<div class="px-1">
+				@themeSelectorPill(d, true)
+			</div>
+		}
+		if len(d.ColorModes) > 0 {
+			<div class="px-1">
+				@colorModeSelectorPill(d, true)
+			</div>
+		}
+		if len(d.SupportedLocs) > 1 {
+			<div class="px-1">
+				@localeSelectorPill(d, true)
+			</div>
+		}
+		if d.Version != "" {
+			<p class="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">altempl · { d.Version }</p>
+		}
+		@themeApplyScript()
+	</div>
+}
+
+templ tailwindThemeBridge() {
+	<script>
+	window.tailwind = window.tailwind || {};
+	window.tailwind.config = {
+		darkMode: 'class',
+		theme: {
+			extend: {
+				colors: {
+					background: 'hsl(var(--background) / <alpha-value>)',
+					foreground: 'hsl(var(--foreground) / <alpha-value>)',
+					card: {
+						DEFAULT: 'hsl(var(--card) / <alpha-value>)',
+						foreground: 'hsl(var(--card-foreground) / <alpha-value>)'
+					},
+					popover: {
+						DEFAULT: 'hsl(var(--popover) / <alpha-value>)',
+						foreground: 'hsl(var(--popover-foreground) / <alpha-value>)'
+					},
+					primary: {
+						DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
+						foreground: 'hsl(var(--primary-foreground) / <alpha-value>)'
+					},
+					secondary: {
+						DEFAULT: 'hsl(var(--secondary) / <alpha-value>)',
+						foreground: 'hsl(var(--secondary-foreground) / <alpha-value>)'
+					},
+					muted: {
+						DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
+						foreground: 'hsl(var(--muted-foreground) / <alpha-value>)'
+					},
+					accent: {
+						DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
+						foreground: 'hsl(var(--accent-foreground) / <alpha-value>)'
+					},
+					destructive: {
+						DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
+						foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)'
+					},
+					border: 'hsl(var(--border) / <alpha-value>)',
+					input: 'hsl(var(--input) / <alpha-value>)',
+					ring: 'hsl(var(--ring) / <alpha-value>)'
+				}
+			}
+		}
+	};
+	</script>
+}
+
+templ themeInitScript() {
+	<script>
+	(function() {
+		try {
+			var t = localStorage.getItem('altempl.theme') || 'slate';
+			var m = localStorage.getItem('altempl.mode') || 'auto';
+			var root = document.documentElement;
+			root.setAttribute('data-theme', t);
+			root.setAttribute('data-color-mode', m);
+			var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+			root.classList.toggle('dark', dark);
+		} catch (e) {}
+	})();
+	</script>
+}
+
+templ themeSelectorPill(d web.LayoutData, dropUp bool) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm shadow-sm transition-colors hover:bg-muted/60" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+			@icons.Icon("palette", "h-4 w-4 text-muted-foreground")
+			<span class="truncate capitalize" data-theme-label>Slate</span>
+			@icons.Icon("chevron-down", "chev ms-auto h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class={ dropdownPos(dropUp), "absolute z-40 w-56 popover-surface p-1" } style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			for _, t := range d.Themes {
+				<button type="button" data-theme-key={ t.Key } class="theme-opt flex w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-muted focus:bg-muted focus:outline-none aria-[current=true]:bg-muted aria-[current=true]:font-medium">
+					<span class="inline-block h-3 w-3 rounded-full ring-1 ring-border" style={ "background:" + t.SwatchHex }></span>
+					<span class="capitalize">{ t.DisplayName }</span>
+					<span class="ms-auto opacity-0 aria-[current=true]:opacity-100" data-check aria-hidden="true">
+						@icons.Icon("check", "h-4 w-4 text-primary")
+					</span>
+				</button>
+			}
+		</div>
+	</details>
+}
+
+templ colorModeSelectorPill(d web.LayoutData, dropUp bool) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm shadow-sm transition-colors hover:bg-muted/60" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+			@icons.Icon("sun-moon", "h-4 w-4 text-muted-foreground")
+			<span class="truncate capitalize" data-mode-label>Auto</span>
+			@icons.Icon("chevron-down", "chev ms-auto h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class={ dropdownPos(dropUp), "absolute z-40 w-56 popover-surface p-1" } style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			for _, m := range d.ColorModes {
+				<button type="button" data-color-mode={ string(m) } class="mode-opt flex w-full items-center gap-2 rounded px-3 py-2 text-sm hover:bg-muted focus:bg-muted focus:outline-none aria-[current=true]:bg-muted aria-[current=true]:font-medium capitalize">
+					@modeIcon(string(m))
+					<span>{ string(m) }</span>
+					<span class="ms-auto opacity-0 aria-[current=true]:opacity-100" data-check aria-hidden="true">
+						@icons.Icon("check", "h-4 w-4 text-primary")
+					</span>
+				</button>
+			}
+		</div>
+	</details>
+}
+
+func dropdownPos(up bool) string {
+	if up {
+		return "bottom-full start-0 mb-2"
+	}
+	return "top-full end-0 mt-2"
+}
+
+templ modeIcon(m string) {
+	if m == "light" {
+		@icons.Icon("sun", "h-4 w-4 text-muted-foreground")
+	} else if m == "dark" {
+		@icons.Icon("moon", "h-4 w-4 text-muted-foreground")
+	} else {
+		@icons.Icon("monitor", "h-4 w-4 text-muted-foreground")
+	}
+}
+
+templ themeApplyScript() {
+	<script>
+	(function() {
+		var root = document.documentElement;
+		function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+		function refreshActiveMarks() {
+			var t = root.getAttribute('data-theme') || 'slate';
+			var m = root.getAttribute('data-color-mode') || 'auto';
+			document.querySelectorAll('button[data-theme-key]').forEach(function(b) {
+				b.setAttribute('aria-current', String(b.getAttribute('data-theme-key') === t));
+			});
+			document.querySelectorAll('button[data-color-mode]').forEach(function(b) {
+				b.setAttribute('aria-current', String(b.getAttribute('data-color-mode') === m));
+			});
+		}
+		function refreshLabels() {
+			var tl = document.querySelector('[data-theme-label]');
+			var ml = document.querySelector('[data-mode-label]');
+			if (tl) tl.textContent = cap(root.getAttribute('data-theme') || 'slate');
+			if (ml) ml.textContent = cap(root.getAttribute('data-color-mode') || 'auto');
+			refreshActiveMarks();
+		}
+		function setTheme(k) {
+			try { localStorage.setItem('altempl.theme', k); } catch(e) {}
+			root.setAttribute('data-theme', k);
+			refreshLabels();
+		}
+		function setMode(m) {
+			try { localStorage.setItem('altempl.mode', m); } catch(e) {}
+			root.setAttribute('data-color-mode', m);
+			var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+			root.classList.toggle('dark', dark);
+			refreshLabels();
+		}
+		function closeParentDetails(el) {
+			var d = el.closest('details[data-switcher]');
+			if (d) d.removeAttribute('open');
+		}
+		// Wire event listeners exactly once, even when this script is included
+		// multiple times (topNav + sidebar footers).
+		if (!window.__altemplThemeWired) {
+			window.__altemplThemeWired = true;
+			document.addEventListener('click', function(e) {
+				var t = e.target.closest('button[data-theme-key]');
+				if (t) { setTheme(t.getAttribute('data-theme-key')); closeParentDetails(t); return; }
+				var m = e.target.closest('button[data-color-mode]');
+				if (m) { setMode(m.getAttribute('data-color-mode')); closeParentDetails(m); return; }
+			});
+			if (window.matchMedia) {
+				var mql = window.matchMedia('(prefers-color-scheme: dark)');
+				if (mql.addEventListener) mql.addEventListener('change', function(){
+					if ((localStorage.getItem('altempl.mode') || 'auto') === 'auto') setMode('auto');
+				});
+			}
+		}
+		// Always refresh labels + active marks, even if the wire-guard tripped.
+		// Deferred to DOMContentLoaded so we still catch buttons rendered after
+		// this <script> (e.g. sidebar/mobile-drawer selectors when the FIRST
+		// copy of this script executes in the top-nav).
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', refreshLabels);
+		} else {
+			refreshLabels();
+		}
+	})();
+	</script>
+}
+
+templ localeSelectorPill(d web.LayoutData, dropUp bool) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm shadow-sm transition-colors hover:bg-muted/60" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+			@icons.Icon("globe", "h-4 w-4 text-muted-foreground")
+			<span class="truncate">{ d.LocaleLabel() }</span>
+			@icons.Icon("chevron-down", "chev ms-auto h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class={ dropdownPos(dropUp), "absolute z-40 w-56 popover-surface p-1" } style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			for _, opt := range d.LocaleOptions() {
+				<form method="post" action={ templ.SafeURL(d.Href("/locale")) } class="block">
+					<input type="hidden" name="locale" value={ opt.Code }/>
+					<input type="hidden" name="redirect" value={ d.CurrentPath }/>
+					<button type="submit" class={ localeOptionClass(opt.Active) }>
+						<span>{ opt.Native }</span>
+						<span class="text-xs text-muted-foreground/70">{ opt.Code }</span>
+					</button>
+				</form>
+			}
+		</div>
+	</details>
+}
+
+func localeOptionClass(active bool) string {
+	if active {
+		return "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-sm font-medium text-foreground bg-muted"
+	}
+	return "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted"
+}
+
+templ orgMenu(d web.LayoutData, slug string) {
+	<nav class="flex flex-col gap-0.5">
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug)) } class={ orgItemClass(d.ActiveNav.OrgKey == "overview") }>
+			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.OrgPath("/projects")) } class={ orgItemClass(d.ActiveNav.OrgKey == "projects" || d.ActiveNav.Scope == web.NavScopeProject) }>
+			@icons.Icon("folder", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.projects") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/members")) } class={ orgItemClass(d.ActiveNav.OrgKey == "members") }>
+			@icons.Icon("users", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.members") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/invites")) } class={ orgItemClass(d.ActiveNav.OrgKey == "invites") }>
+			@icons.Icon("mail", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.invites") }</span>
+		</a>
+	</nav>
+}
+
+templ projectSidebar(d web.LayoutData) {
+	<div class="flex flex-col gap-1 p-3">
+		if d.ActiveProject != nil {
+			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.ActiveProject.Name }</p>
+			@projectMenu(d, d.ActiveProject.Slug)
+		} else {
+			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.project") }</p>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
+		}
+	</div>
+}
+
+templ projectMenu(d web.LayoutData, slug string) {
+	<nav class="flex flex-col gap-0.5">
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
+			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
+			@icons.Icon("list-checks", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.todos") }</span>
+		</a>
+	</nav>
+}
+
+templ orgSwitcherPill(d web.LayoutData) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm shadow-sm" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+			@icons.Icon("building-2", "h-4 w-4 text-muted-foreground")
+			<span class="truncate">
+				if d.ActiveOrg != nil {
+					{ d.ActiveOrg.Name }
+				} else {
+					{ d.Tr("common.no_organization") }
+				}
+			</span>
+			@icons.Icon("chevron-down", "chev ml-auto h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class="absolute left-0 z-40 mt-2 w-64 popover-surface p-1" style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			if d.ActiveOrg != nil {
+				<div class="px-3 py-2">
+					<p class="text-xs uppercase tracking-wide text-muted-foreground/70">Current</p>
+					<p class="mt-0.5 truncate text-sm font-medium text-foreground">{ d.ActiveOrg.Name }</p>
+					if d.ActiveOrg.Role != "" {
+						<p class="text-xs text-muted-foreground">{ d.ActiveOrg.Role }</p>
+					}
+				</div>
+			}
+			if len(d.OtherOrgs) > 0 {
+				<div class="my-1 border-t border-subtle"></div>
+				<p class="px-3 py-1 text-xs uppercase tracking-wide text-muted-foreground/70">Switch</p>
+				for _, o := range d.OtherOrgs {
+					<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug + "/projects")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ o.Name }</a>
+				}
+			}
+			if d.Caps.OrgCreation {
+				<div class="my-1 border-t border-subtle"></div>
+				<a href={ templ.SafeURL(d.Href("/orgs/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
+					@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_organization") }</span>
+				</a>
+			}
+		</div>
+	</details>
+}
+
+templ projectSwitcherPill(d web.LayoutData) {
+	<details class="relative" data-switcher>
+		<summary class="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm shadow-sm" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+			@icons.Icon("folder", "h-4 w-4 text-muted-foreground")
+			<span class="truncate">
+				if d.ActiveProject != nil {
+					{ d.ActiveProject.Name }
+				} else {
+					{ d.Tr("common.select_project") }
+				}
+			</span>
+			@icons.Icon("chevron-down", "chev ml-auto h-4 w-4 text-muted-foreground/70 transition-transform")
+		</summary>
+		<div class="absolute left-0 z-40 mt-2 w-64 popover-surface p-1" style="background:hsl(var(--popover));color:hsl(var(--popover-foreground));">
+			if d.ActiveProject != nil {
+				<div class="px-3 py-2">
+					<p class="text-xs uppercase tracking-wide text-muted-foreground/70">Current</p>
+					<p class="mt-0.5 truncate text-sm font-medium text-foreground">{ d.ActiveProject.Name }</p>
+				</div>
+			}
+			if len(d.OtherProjects) > 0 {
+				<div class="my-1 border-t border-subtle"></div>
+				<p class="px-3 py-1 text-xs uppercase tracking-wide text-muted-foreground/70">Switch</p>
+				for _, p := range d.OtherProjects {
+					<a href={ templ.SafeURL(d.ProjectPath(p.Slug, "/overview")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ p.Name }</a>
+				}
+			}
+			<div class="my-1 border-t border-subtle"></div>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
+				@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_project") }</span>
+			</a>
+		</div>
+	</details>
+}
+
+templ mobileDrawer(d web.LayoutData) {
+	<input type="checkbox" id="alt-drawer" class="peer hidden"/>
+	<label for="alt-drawer" class="fixed inset-0 z-40 hidden bg-primary/40 backdrop-blur-sm peer-checked:block md:hidden" aria-hidden="true"></label>
+	<aside class="fixed inset-y-0 left-0 z-50 flex w-80 max-w-[86vw] -translate-x-full flex-col bg-card shadow-2xl transition-transform peer-checked:translate-x-0 md:hidden" style="background:hsl(var(--card));color:hsl(var(--card-foreground));">
+		<div class="flex h-14 shrink-0 items-center justify-between border-b border-subtle px-3">
+			<span class="text-sm font-semibold">{ d.Tr("common.menu") }</span>
+			<label for="alt-drawer" class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted" aria-label="Close menu">
+				@icons.Icon("x", "h-5 w-5")
+			</label>
+		</div>
+		@orgSwitcherHeader(d)
+		<div class="flex-1 overflow-y-auto">
+			@orgSidebar(d)
+			if d.ActiveNav.Scope == web.NavScopeProject {
+				<div class="mx-3 border-t border-subtle"></div>
+				@projectSidebar(d)
+			}
+		</div>
+		@sidebarFooterUtils(d)
+	</aside>
+}
+
+func orgItemClass(active bool) string {
+	if active {
+		return "flex items-center gap-2 min-h-[40px] rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+	}
+	return "flex items-center gap-2 min-h-[40px] rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+}
+
+func layoutLang(d web.LayoutData) string {
+	if s := string(d.Locale); s != "" {
+		return s
+	}
+	return "en"
+}
+
+func layoutDir(d web.LayoutData) string {
+	if d.Dir != "" {
+		return d.Dir
+	}
+	return "ltr"
+}
+
+func flashClass(kind string) string {
+	switch kind {
+	case "ok":
+		return "border border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+	case "warn":
+		return "border border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+	case "err":
+		return "border border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200"
+	}
+	return "border border-border bg-muted text-foreground"
+}

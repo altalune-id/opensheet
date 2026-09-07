@@ -1,0 +1,61 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/icons"
+)
+
+type OrgsView struct {
+	Orgs  []OrgSummary
+	Error string
+	ErrorCode string
+}
+
+templ OrgsPage(d web.LayoutData, v OrgsView) {
+	<section>
+		<header class="flex items-baseline justify-between border-b border-border pb-4">
+			<div>
+				<h1 class="text-2xl font-semibold text-foreground">Organizations</h1>
+				<p class="mt-1 text-sm text-muted-foreground">Every workspace you belong to.</p>
+			</div>
+			if d.Caps.OrgCreation {
+				<a href={ templ.SafeURL(d.Href("/orgs/new")) } class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("plus", "h-4 w-4")
+				<span>{ d.Tr("nav.new_organization") }</span>
+			</a>
+			}
+		</header>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		if len(v.Orgs) == 0 {
+			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">You do not belong to any organization yet.</p>
+				if d.Caps.OrgCreation {
+					<a href={ templ.SafeURL(d.Href("/orgs/new")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">Create one</a>
+				}
+			</div>
+		} else {
+			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				for _, o := range v.Orgs {
+					<li class="flex items-center justify-between px-4 py-3">
+						<div class="min-w-0">
+							<p class="flex items-center gap-2 truncate text-sm font-medium text-foreground">
+								<span class="truncate">{ o.Name }</span>
+								if o.System {
+									<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
+								}
+							</p>
+							<p class="truncate text-xs text-muted-foreground">{ o.Slug }</p>
+						</div>
+						<a href={ templ.SafeURL(d.Href("/orgs/" + o.Slug + "/projects")) } class="ml-4 text-sm font-medium text-muted-foreground hover:text-foreground">{ d.Tr("common.open") }</a>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+templ OrgsLayout(d web.LayoutData, v OrgsView) {
+	@Layout(web.WithContent(d, OrgsPage(d, v)))
+}

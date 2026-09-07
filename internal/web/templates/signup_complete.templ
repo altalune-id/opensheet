@@ -1,0 +1,106 @@
+package templates
+
+import "altalune.id/template/internal/web"
+
+// SignupCompleteView backs the /signup/complete form.
+type SignupCompleteView struct {
+	Email          string
+	Name           string
+	AskDisplayName bool
+	AskAccept      bool
+	TermsURL       string
+	PrivacyURL     string
+	OrgName        string
+	OrgSlug        string
+	ProjectName    string
+	ProjectSlug    string
+	FieldErrors    map[string]string
+	Error          string
+	ErrorCode string
+}
+
+templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
+	<section class="mx-auto max-w-xl">
+		<header class="border-b border-border pb-4">
+			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("welcome.eyebrow") }</p>
+			<h1 class="mt-1 text-2xl font-semibold text-foreground">{ d.Tr("signup.title") }</h1>
+			<p class="mt-2 text-sm text-muted-foreground">
+				{ d.Tr("signup.subtitle") }
+				if v.Email != "" {
+					{ " " }<strong class="text-foreground">{ v.Email }</strong>
+				}
+			</p>
+		</header>
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		<form method="post" action={ templ.SafeURL(d.Href("/signup/complete")) } class="mt-6 space-y-6" novalidate>
+			if v.AskDisplayName {
+				<div>
+					<label for="signup-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("welcome.display_name_label") }</label>
+					<input id="signup-name" name="name" type="text" required value={ v.Name } placeholder={ d.Tr("welcome.display_name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					if msg, ok := v.FieldErrors["name"]; ok {
+						<p class="mt-1 text-xs text-red-700">{ msg }</p>
+					}
+				</div>
+			}
+			<fieldset class="space-y-3">
+				<legend class="text-sm font-semibold text-foreground">{ d.Tr("signup.org_section") }</legend>
+				<div>
+					<label for="signup-org-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.name") }</label>
+					<input id="signup-org-name" name="org_name" type="text" required value={ v.OrgName } placeholder={ d.Tr("org_new.name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					if msg, ok := v.FieldErrors["org_name"]; ok {
+						<p class="mt-1 text-xs text-red-700">{ msg }</p>
+					}
+				</div>
+				<div>
+					<label for="signup-org-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
+					<input id="signup-org-slug" name="org_slug" type="text" required value={ v.OrgSlug } placeholder={ d.Tr("org_new.slug_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("common.slug_hint") }</p>
+					if msg, ok := v.FieldErrors["org_slug"]; ok {
+						<p class="mt-1 text-xs text-red-700">{ msg }</p>
+					}
+				</div>
+			</fieldset>
+			<fieldset class="space-y-3">
+				<legend class="text-sm font-semibold text-foreground">{ d.Tr("signup.project_section") }</legend>
+				<div>
+					<label for="signup-project-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.name") }</label>
+					<input id="signup-project-name" name="project_name" type="text" value={ v.ProjectName } placeholder={ d.Tr("project_new.name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+				</div>
+				<div>
+					<label for="signup-project-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
+					<input id="signup-project-slug" name="project_slug" type="text" value={ v.ProjectSlug } placeholder={ d.Tr("project_new.slug_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+				</div>
+			</fieldset>
+			if v.AskAccept {
+				<div class="flex items-start gap-2">
+					<input id="signup-accept" name="accept_terms" type="checkbox" value="1" required class="mt-0.5 h-4 w-4 rounded border-border text-foreground focus:ring-ring"/>
+					<label for="signup-accept" class="text-sm text-foreground/90">
+						{ d.Tr("welcome.accept_prefix") }
+						if v.TermsURL != "" {
+							<a href={ templ.SafeURL(v.TermsURL) } target="_blank" rel="noopener" class="font-medium text-foreground underline hover:no-underline">{ d.Tr("welcome.terms_link") }</a>
+						}
+						if v.TermsURL != "" && v.PrivacyURL != "" {
+							{ " " }{ d.Tr("welcome.and") }{ " " }
+						}
+						if v.PrivacyURL != "" {
+							<a href={ templ.SafeURL(v.PrivacyURL) } target="_blank" rel="noopener" class="font-medium text-foreground underline hover:no-underline">{ d.Tr("welcome.privacy_link") }</a>
+						}
+						{ d.Tr("welcome.accept_suffix") }
+					</label>
+				</div>
+			}
+			<div class="flex items-center gap-3 pt-2">
+				<button type="submit" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("signup.submit") }</button>
+				<form method="post" action={ templ.SafeURL(d.Href("/logout")) } class="inline">
+					<button type="submit" class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("welcome.wrong_account") }</button>
+				</form>
+			</div>
+		</form>
+	</section>
+}
+
+templ SignupCompleteLayout(d web.LayoutData, v SignupCompleteView) {
+	@Layout(web.WithContent(d, SignupCompletePage(d, v)))
+}

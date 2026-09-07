@@ -1,0 +1,253 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Stage 1 fan-in: gates test + build on every static-analysis job passing.
+  lint-gate:
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - hadolint
+      - yamllint
+      - buf-lint
+      - goreleaser-check
+      - env-example-drift-check
+      - templ-drift-check
+      - proto-drift-check
+    steps:
+      - name: Stage 1 static analysis complete
+        run: echo "static analysis green — proceeding to Stage 2"
+
+  # Stage 2: unit tests + container build, matrix across macOS + Linux.
+  test-unit:
+    needs: lint-gate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Vet
+        run: go vet ./...
+      - name: Gofmt
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          n=$(gofmt -l . | tee /dev/stderr | wc -l)
+          test "$n" -eq 0
+      - name: Test (race + shuffle + cover, unit only)
+        run: go test -race -shuffle=on -cover ./...
+
+  # Stage 3: integration tests — need a live Postgres and much slower, so gated on Stage 2 passing.
+  test-integration:
+    needs: test-unit
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: altempl
+          POSTGRES_PASSWORD: altempl
+          POSTGRES_DB: altempl_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Test (integration tag + Postgres)
+        env:
+          TEST_PG_DSN: postgres://altempl:altempl@localhost:5432/altempl_test?sslmode=disable
+        run: go test -race -shuffle=on -p 1 -tags integration ./...
+
+  # Static analysis via golangci-lint. Config lives at .golangci.yaml.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: false
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=3m ./...
+
+  # Dockerfile linting.
+  hadolint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+  # YAML style / correctness on workflows + example config.
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install yamllint
+        run: pip install --user yamllint==1.35.1
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yaml .github/workflows/ config.example.yaml
+
+  # Protobuf lint + breaking-change guard against main.
+  buf-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install pnpm devDeps
+        run: pnpm install --frozen-lockfile
+      - name: buf lint
+        run: pnpm exec buf lint
+      - name: buf breaking (against main)
+        if: github.ref != 'refs/heads/main'
+        run: |
+          git fetch --quiet origin main 2>/dev/null || { echo "no origin/main — skipping"; exit 0; }
+          if git ls-tree -r origin/main --name-only | grep -q '\.proto$'; then
+            pnpm exec buf breaking --against 'https://github.com/${{ github.repository }}.git#branch=main'
+          else
+            echo "origin/main has no .proto files — skipping buf breaking"
+          fi
+
+  # Drift check: regenerate protobuf output and fail if the committed files no longer match
+  # the .proto sources. Not a build step — a safety net against PRs that edit .proto without
+  # committing the regenerated code alongside.
+  proto-drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install pnpm devDeps
+        run: pnpm install --frozen-lockfile
+      - name: Verify committed protobuf matches sources
+        run: pnpm exec buf generate
+      - name: Fail on drift (gen/)
+        run: |
+          if ! git diff --exit-code gen/; then
+            echo "gen/ is stale — run \`pnpm exec buf generate\` and commit the result."
+            exit 1
+          fi
+
+  # Same idea for templ output. `_templ.go` files are committed source; this catches drift.
+  templ-drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Verify committed templ output matches sources
+        run: go tool templ generate
+      - name: Fail on drift (*_templ.go)
+        run: |
+          if ! git diff --exit-code -- '*_templ.go'; then
+            echo "templ output is stale — run \`go tool templ generate\` and commit."
+            exit 1
+          fi
+
+  # Drift check: .env.example must match what `internal/platform/config` declares.
+  env-example-drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Verify .env.example matches config struct tags
+        run: |
+          go tool gen-config-example --check
+          go tool gen-config-example --format=yaml --check
+
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: check
+        env:
+          GHCR_OWNER: ${{ github.repository_owner }}
+
+  # Build the container image (no push) — catches Dockerfile regressions on PRs before dev.yml would hit them on merge.
+  docker-build:
+    needs: lint-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: false
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+
+  # Vulnerability scan against stdlib + dependencies. Runs in Stage 3 alongside integration tests since it's expensive.
+  govulncheck:
+    needs: lint-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

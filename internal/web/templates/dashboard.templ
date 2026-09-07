@@ -1,0 +1,80 @@
+package templates
+
+import (
+	"altalune.id/template/internal/web"
+	"altalune.id/template/internal/web/icons"
+)
+
+type DashboardView struct {
+	OrgName      string
+	OrgSlug      string
+	Orgs         []OrgSummary
+	Projects     []ProjectSummary
+	ActiveProjID string
+}
+
+type OrgSummary struct {
+	ID     string
+	Slug   string
+	Name   string
+	System bool
+}
+
+type ProjectSummary struct {
+	ID     string
+	Slug   string
+	Name   string
+	System bool
+}
+
+templ DashboardPage(d web.LayoutData, v DashboardView) {
+	<section>
+		<header class="flex items-baseline justify-between border-b border-border pb-4">
+			<div>
+				<h1 class="text-2xl font-semibold text-foreground">
+					if v.OrgName != "" {
+						{ v.OrgName }
+					} else {
+						{ d.Tr("dashboard.title") }
+					}
+				</h1>
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("dashboard.subtitle") }</p>
+			</div>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("plus", "h-4 w-4")
+				<span>{ d.Tr("dashboard.new_project") }</span>
+			</a>
+		</header>
+		if len(v.Projects) == 0 {
+			<div class="mt-8 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">No projects yet.</p>
+				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">Create the first one</a>
+			</div>
+		} else {
+			<ul class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+				for _, p := range v.Projects {
+					<li>
+						<a href={ templ.SafeURL(d.ProjectPath(p.Slug, "/overview")) } class="block rounded-lg border border-border bg-card p-4 shadow-sm transition hover:border-muted-foreground/40 hover:shadow-md">
+							<div class="flex items-baseline justify-between gap-2">
+								<p class="truncate text-sm font-medium text-foreground">{ p.Name }</p>
+								<div class="flex shrink-0 items-center gap-1.5">
+									if p.ID == v.ActiveProjID {
+										<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground/90 ring-1 ring-inset ring-border">{ d.Tr("common.current") }</span>
+									}
+									if p.System {
+										<span class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
+									}
+								</div>
+							</div>
+							<p class="mt-1 text-xs text-muted-foreground">{ p.Slug }</p>
+						</a>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+templ DashboardLayout(d web.LayoutData, v DashboardView) {
+	@Layout(web.WithContent(d, DashboardPage(d, v)))
+}
