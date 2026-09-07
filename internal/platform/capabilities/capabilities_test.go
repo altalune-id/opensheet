@@ -82,3 +82,21 @@ func TestFrom_APIEnabled(t *testing.T) {
 		t.Error("APIEnabled should reflect config")
 	}
 }
+
+func TestFrom_OpensheetCapabilities(t *testing.T) {
+	c := &config.Config{Mode: config.ModeSelfhosted}
+	c.Google.OAuth.ClientID = "cid"
+	c.Google.Picker.APIKey = "pk"
+	c.Sheets.PublicEnabled = true
+	c.Security.EncryptionKey = "deadbeef"
+
+	caps := From(c)
+	if !caps.GoogleConnect || !caps.GooglePicker || !caps.PublicSheets || !caps.Encryption {
+		t.Fatalf("caps = %#v, want all four true", caps)
+	}
+
+	empty := From(&config.Config{Mode: config.ModeSelfhosted})
+	if empty.GoogleConnect || empty.GooglePicker || empty.PublicSheets || empty.Encryption {
+		t.Fatalf("caps = %#v, want all four false", empty)
+	}
+}

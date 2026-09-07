@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 		}
 		c.Tenant.SingletonOrg.Slug = "default"
 		c.Tenant.SingletonOrg.Name = "Default Organization"
+		c.Security.EncryptionKey = "0123456789abcdef"
 		return c
 	}
 
@@ -450,4 +452,169 @@ func TestSchedulerConfig_Locations_NilReceiverIsUTC(t *testing.T) {
 	loc, err := cfg.Locations()
 	require.NoError(t, err)
 	require.Equal(t, "UTC", loc("any").String())
+}
+
+func TestValidate_CloudRequiresEncryptionKey(t *testing.T) {
+	c := validCloudConfig(t)
+	c.Security.EncryptionKey = ""
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "security.encryptionKey") {
+		t.Fatalf("Validate() = %v, want an error naming security.encryptionKey", err)
+	}
+}
+
+func TestValidate_GoogleClientSecretWithoutClientID(t *testing.T) {
+	c := validSelfhostedConfig(t)
+	c.Google.OAuth.ClientSecret = "shhh"
+	c.Google.OAuth.ClientID = ""
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "google.oauth.clientID") {
+		t.Fatalf("Validate() = %v, want an error naming google.oauth.clientID", err)
+	}
+}
+
+func TestValidate_PostgresCacheRejectsSQLite(t *testing.T) {
+	c := validSelfhostedConfig(t)
+	c.DB.Driver = db.DriverSQLite
+	c.Cache.Driver = CacheDriverPostgres
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate() = nil, want an error for cache.driver=postgres with db.driver=sqlite")
+	}
+}
+
+func TestValidate_ValidConfigsPass(t *testing.T) {
+	if err := validSelfhostedConfig(t).Validate(); err != nil {
+		t.Fatalf("validSelfhostedConfig: %v", err)
+	}
+	if err := validCloudConfig(t).Validate(); err != nil {
+		t.Fatalf("validCloudConfig: %v", err)
+	}
+}
+
+func TestCacheConfig_Resolve(t *testing.T) {
+	tests := []struct {
+		driver   CacheDriver
+		dbDriver db.Driver
+		want     CacheDriver
+	}{
+		{CacheDriverAuto, db.DriverPostgres, CacheDriverPostgres},
+		{CacheDriverAuto, db.DriverSQLite, CacheDriverMemory},
+		{CacheDriverMemory, db.DriverPostgres, CacheDriverMemory},
+		{CacheDriverPostgres, db.DriverPostgres, CacheDriverPostgres},
+	}
+	for _, tc := range tests {
+		got := CacheConfig{Driver: tc.driver}.Resolve(tc.dbDriver)
+		if got != tc.want {
+			t.Errorf("Resolve(%q, %q) = %q, want %q", tc.driver, tc.dbDriver, got, tc.want)
+		}
+	}
+}
+
+func TestDefaults_OpensheetKeys(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Cache.Driver != CacheDriverAuto {
+		t.Errorf("cache.driver = %q, want %q", cfg.Cache.Driver, CacheDriverAuto)
+	}
+	if cfg.Cache.DefaultTTL != 30*time.Second {
+		t.Errorf("cache.defaultTTL = %s, want 30s", cfg.Cache.DefaultTTL)
+	}
+	if cfg.Cache.MaxBytes != 67108864 {
+		t.Errorf("cache.maxBytes = %d, want 67108864", cfg.Cache.MaxBytes)
+	}
+	if cfg.Sheets.MaxPayloadBytes != 8388608 {
+		t.Errorf("sheets.maxPayloadBytes = %d, want 8388608", cfg.Sheets.MaxPayloadBytes)
+	}
+	if cfg.Google.Timeout != 15*time.Second {
+		t.Errorf("google.timeout = %s, want 15s", cfg.Google.Timeout)
+	}
+}
+
+func TestDefaults_PublicSheetsOffInBothModes(t *testing.T) {
+	for _, mode := range []Mode{ModeSelfhosted, ModeCloud} {
+		t.Run(string(mode), func(t *testing.T) {
+			c := loadWithMode(t, mode)
+			if c.Sheets.PublicEnabled {
+				t.Fatal("sheets.publicEnabled defaulted true; public sheets must be opt-in")
+			}
+		})
+	}
+}
+
+func TestEnvKeys_NewFieldsAreBound(t *testing.T) {
+	var keys []string
+	for _, k := range WalkEnvKeys("OPENSHEET") {
+		keys = append(keys, k.Key)
+	}
+	for _, want := range []string{
+		"OPENSHEET_SECURITY_ENCRYPTION_KEY",
+		"OPENSHEET_GOOGLE_OAUTH_CLIENT_ID",
+		"OPENSHEET_GOOGLE_OAUTH_CLIENT_SECRET",
+		"OPENSHEET_GOOGLE_PICKER_API_KEY",
+		"OPENSHEET_CACHE_DRIVER",
+		"OPENSHEET_SHEETS_PUBLIC_ENABLED",
+	} {
+		if !slices.Contains(keys, want) {
+			t.Errorf("WalkEnvKeys missing %q", want)
+		}
+	}
+}
+
+func TestLoad_SecurityAndGoogleFromEnv(t *testing.T) {
+	t.Setenv("OPENSHEET_SECURITY_ENCRYPTION_KEY", "0123456789abcdef")
+	t.Setenv("OPENSHEET_GOOGLE_OAUTH_CLIENT_ID", "cid")
+	t.Setenv("OPENSHEET_GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
+	t.Setenv("OPENSHEET_GOOGLE_PICKER_API_KEY", "pkey")
+	t.Setenv("OPENSHEET_SHEETS_PUBLIC_ENABLED", "true")
+
+	cfg := loadWithMode(t, ModeSelfhosted)
+	require.Equal(t, "0123456789abcdef", cfg.Security.EncryptionKey)
+	require.Equal(t, "cid", cfg.Google.OAuth.ClientID)
+	require.Equal(t, "csecret", cfg.Google.OAuth.ClientSecret)
+	require.Equal(t, "pkey", cfg.Google.Picker.APIKey)
+	require.True(t, cfg.Sheets.PublicEnabled)
+}
+
+func validSelfhostedConfig(t *testing.T) *Config {
+	t.Helper()
+	c := &Config{
+		Mode:    ModeSelfhosted,
+		DB:      validDB(),
+		Genesis: GenesisConfig{Email: "root@example.com", Password: "x"},
+	}
+	c.Tenant.SingletonOrg.Slug = "default"
+	c.Tenant.SingletonOrg.Name = "Default Organization"
+	c.Cache.Driver = CacheDriverAuto
+	return c
+}
+
+func validCloudConfig(t *testing.T) *Config {
+	t.Helper()
+	c := validSelfhostedConfig(t)
+	c.Mode = ModeCloud
+	c.DB.Driver = db.DriverPostgres
+	c.DB.DSN = "postgres://localhost/opensheet"
+	c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "cid", ClientSecret: "csecret"}
+	c.Genesis.BreakGlass = true
+	c.Security.EncryptionKey = "0123456789abcdef"
+	return c
+}
+
+func loadWithMode(t *testing.T, mode Mode) *Config {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	t.Setenv("OPENSHEET_MODE", string(mode))
+	t.Setenv("OPENSHEET_GENESIS_EMAIL", "root@example.com")
+	if mode == ModeCloud {
+		t.Setenv("OPENSHEET_DB_DRIVER", string(db.DriverPostgres))
+		t.Setenv("OPENSHEET_DB_DSN", "postgres://localhost/opensheet")
+		t.Setenv("OPENSHEET_DB_MIGRATOR_DSN", "postgres://migrator@localhost/opensheet")
+		t.Setenv("OPENSHEET_OIDC_ISSUER", "https://iss.example.com")
+		t.Setenv("OPENSHEET_OIDC_CLIENT_ID", "cid")
+		t.Setenv("OPENSHEET_OIDC_CLIENT_SECRET", "csecret")
+		t.Setenv("OPENSHEET_SECURITY_ENCRYPTION_KEY", "0123456789abcdef")
+	}
+	cfg, err := Load("")
+	require.NoError(t, err)
+	return cfg
 }

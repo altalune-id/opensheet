@@ -19,6 +19,10 @@ type Capabilities struct {
 	MailEnabled        bool
 	OnboardingRequired bool
 	IsProduction       bool
+	GoogleConnect      bool
+	GooglePicker       bool
+	PublicSheets       bool
+	Encryption         bool
 	BasePath           string
 	BaseURL            string
 }
@@ -44,5 +48,9 @@ func From(c *config.Config) Capabilities {
 	caps.Signup = caps.PublicSignup
 	caps.OrgCreation = caps.Mode == config.ModeCloud
 	caps.InvitesEnabled = caps.Mode == config.ModeCloud || caps.ExternalIdentity
+	caps.GoogleConnect = c.Google.OAuth.ClientID != ""
+	caps.GooglePicker = c.Google.Picker.APIKey != ""
+	caps.PublicSheets = c.Sheets.PublicEnabled
+	caps.Encryption = c.Security.EncryptionKey != ""
 	return caps
 }

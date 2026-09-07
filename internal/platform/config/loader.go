@@ -134,6 +134,15 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
 
+	v.SetDefault("cache.driver", string(CacheDriverAuto))
+	v.SetDefault("cache.defaultTTL", "30s")
+	v.SetDefault("cache.maxBytes", int64(67108864))
+
+	v.SetDefault("sheets.publicEnabled", false)
+	v.SetDefault("sheets.maxPayloadBytes", int64(8388608))
+
+	v.SetDefault("google.timeout", "15s")
+
 	v.SetDefault("tokens.audience", "urn:opensheet:api")
 	v.SetDefault("tokens.supportedAlgs", []string{"RS256", "ES256"})
 	v.SetDefault("tokens.clockSkew", "60s")
