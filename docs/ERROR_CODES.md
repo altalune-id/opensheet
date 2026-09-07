@@ -112,6 +112,7 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `CRD006` | `apperror.CodeCredentialReauthNeeded`  | Credential Needs Reauthorization |
 | `CRD007` | `apperror.CodeEncryptionUnavailable`   | Encryption Unavailable           |
 | `CRD008` | `apperror.CodeCredentialStateInvalid`  | Connect State Invalid Or Expired |
+| `CRD009` | `apperror.CodeEncryptionOpenFailed`    | Encryption Open Failed           |
 
 ## SPR — Spreadsheets
 
