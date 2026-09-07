@@ -99,3 +99,60 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | -------- | ------------------------------------ | ----------------------- |
 | `ONB001` | `apperror.CodeOnboardingRequired`    | Onboarding Required     |
 | `ONB002` | `apperror.CodeOnboardingAlreadyDone` | Onboarding Already Done |
+
+## CRD — Credentials
+
+| Code     | Constant                               | Meaning                          |
+| -------- | -------------------------------------- | -------------------------------- |
+| `CRD001` | `apperror.CodeCredentialNotFound`      | Credential Not Found             |
+| `CRD002` | `apperror.CodeCredentialAlreadyExists` | Credential Already Exists        |
+| `CRD003` | `apperror.CodeCredentialInvalidName`   | Credential Invalid Name          |
+| `CRD004` | `apperror.CodeCredentialInvalidKind`   | Credential Invalid Kind          |
+| `CRD005` | `apperror.CodeCredentialInUse`         | Credential In Use                |
+| `CRD006` | `apperror.CodeCredentialReauthNeeded`  | Credential Needs Reauthorization |
+| `CRD007` | `apperror.CodeEncryptionUnavailable`   | Encryption Unavailable           |
+| `CRD008` | `apperror.CodeCredentialStateInvalid`  | Connect State Invalid Or Expired |
+
+## SPR — Spreadsheets
+
+| Code     | Constant                                | Meaning                        |
+| -------- | --------------------------------------- | ------------------------------ |
+| `SPR001` | `apperror.CodeSpreadsheetNotFound`      | Spreadsheet Not Found          |
+| `SPR002` | `apperror.CodeSpreadsheetAlreadyExists` | Spreadsheet Already Registered |
+| `SPR003` | `apperror.CodeSpreadsheetInvalidFileID` | Spreadsheet Invalid File ID    |
+| `SPR004` | `apperror.CodeSpreadsheetInvalidTitle`  | Spreadsheet Invalid Title      |
+
+## SHT — Sheets
+
+| Code     | Constant                              | Meaning                  |
+| -------- | ------------------------------------- | ------------------------ |
+| `SHT001` | `apperror.CodeSheetNotFound`          | Sheet Not Found          |
+| `SHT002` | `apperror.CodeSheetAlreadyExists`     | Sheet Slug Taken         |
+| `SHT003` | `apperror.CodeSheetInvalidSlug`       | Sheet Invalid Slug       |
+| `SHT004` | `apperror.CodeSheetInvalidVisibility` | Sheet Invalid Visibility |
+| `SHT005` | `apperror.CodeSheetInvalidTTL`        | Sheet Invalid Cache TTL  |
+| `SHT006` | `apperror.CodeSheetPublicDisabled`    | Public Sheets Disabled   |
+| `SHT007` | `apperror.CodeSheetPayloadTooLarge`   | Sheet Payload Too Large  |
+| `SHT008` | `apperror.CodeSheetTabNotFound`       | Sheet Tab Not Found      |
+
+## KEY — API keys
+
+| Code     | Constant                               | Meaning                    |
+| -------- | -------------------------------------- | -------------------------- |
+| `KEY001` | `apperror.CodeAPIKeyNotFound`          | API Key Not Found          |
+| `KEY002` | `apperror.CodeAPIKeyInvalidName`       | API Key Invalid Name       |
+| `KEY003` | `apperror.CodeAPIKeyInvalidScope`      | API Key Invalid Scope      |
+| `KEY004` | `apperror.CodeAPIKeyUnauthorized`      | API Key Unauthorized       |
+| `KEY005` | `apperror.CodeAPIKeyInsufficientScope` | API Key Insufficient Scope |
+
+`KEY004` is the single opaque code for missing, malformed, unknown, revoked and expired keys:
+distinguishing them on the wire tells an attacker which guesses were closer.
+
+## GSH — Google Sheets
+
+| Code     | Constant                              | Meaning                        |
+| -------- | ------------------------------------- | ------------------------------ |
+| `GSH001` | `apperror.CodeGoogleNotFound`         | Google Document Not Found      |
+| `GSH002` | `apperror.CodeGooglePermissionDenied` | Google Permission Denied       |
+| `GSH003` | `apperror.CodeGoogleQuotaExceeded`    | Google Quota Exceeded          |
+| `GSH004` | `apperror.CodeGoogleUnavailable`      | Google Temporarily Unavailable |

@@ -54,4 +54,38 @@ const (
 
 	CodeOnboardingRequired    = "ONB001"
 	CodeOnboardingAlreadyDone = "ONB002"
+
+	CodeCredentialNotFound      = "CRD001"
+	CodeCredentialAlreadyExists = "CRD002"
+	CodeCredentialInvalidName   = "CRD003"
+	CodeCredentialInvalidKind   = "CRD004"
+	CodeCredentialInUse         = "CRD005"
+	CodeCredentialReauthNeeded  = "CRD006"
+	CodeEncryptionUnavailable   = "CRD007"
+	CodeCredentialStateInvalid  = "CRD008"
+
+	CodeSpreadsheetNotFound      = "SPR001"
+	CodeSpreadsheetAlreadyExists = "SPR002"
+	CodeSpreadsheetInvalidFileID = "SPR003"
+	CodeSpreadsheetInvalidTitle  = "SPR004"
+
+	CodeSheetNotFound          = "SHT001"
+	CodeSheetAlreadyExists     = "SHT002"
+	CodeSheetInvalidSlug       = "SHT003"
+	CodeSheetInvalidVisibility = "SHT004"
+	CodeSheetInvalidTTL        = "SHT005"
+	CodeSheetPublicDisabled    = "SHT006"
+	CodeSheetPayloadTooLarge   = "SHT007"
+	CodeSheetTabNotFound       = "SHT008"
+
+	CodeAPIKeyNotFound          = "KEY001"
+	CodeAPIKeyInvalidName       = "KEY002"
+	CodeAPIKeyInvalidScope      = "KEY003"
+	CodeAPIKeyUnauthorized      = "KEY004"
+	CodeAPIKeyInsufficientScope = "KEY005"
+
+	CodeGoogleNotFound         = "GSH001"
+	CodeGooglePermissionDenied = "GSH002"
+	CodeGoogleQuotaExceeded    = "GSH003"
+	CodeGoogleUnavailable      = "GSH004"
 )
