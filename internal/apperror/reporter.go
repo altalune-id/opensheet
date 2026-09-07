@@ -7,8 +7,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/reqid"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/reqid"
 )
 
 // UnexpectedFunc is the function-type dependency domain services accept.

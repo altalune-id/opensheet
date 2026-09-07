@@ -21,7 +21,7 @@ import (
 // Setup wires OTel tracer + meter providers per cfg and returns a shutdown func that drains both.
 func Setup(ctx context.Context, cfg Config, log *slog.Logger) (trace.TracerProvider, metric.MeterProvider, func(context.Context) error, error) {
 	res, err := resource.Merge(resource.Default(),
-		resource.NewSchemaless(semconv.ServiceName("altempl")))
+		resource.NewSchemaless(semconv.ServiceName("opensheet")))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("telemetry: resource: %w", err)
 	}

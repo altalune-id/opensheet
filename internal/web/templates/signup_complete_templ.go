@@ -8,7 +8,7 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "altalune.id/template/internal/web"
+import "altalune.id/opensheet/internal/web"
 
 // SignupCompleteView backs the /signup/complete form.
 type SignupCompleteView struct {

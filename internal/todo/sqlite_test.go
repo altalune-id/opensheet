@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/schema"
 )
 
 func newSQLiteStoreForTest(t *testing.T) (todo.Store, *sql.DB, tenant.Context) {

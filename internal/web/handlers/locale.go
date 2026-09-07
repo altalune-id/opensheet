@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/i18n"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/user"
 )
 
 // LocaleHandler serves POST /locale, persisting the locale choice for signed-in users.

@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 const (

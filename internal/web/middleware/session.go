@@ -3,8 +3,8 @@ package middleware
 import (
 	"net/http"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/web"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/web"
 )
 
 // SessionConfig bundles the pieces Session needs to verify a session cookie.

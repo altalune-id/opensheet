@@ -20,7 +20,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"altalune.id/template/nanoid"
+	"altalune.id/opensheet/nanoid"
 )
 
 const (
@@ -69,8 +69,8 @@ func New(t *testing.T) *Handle {
 
 	c, err := postgres.Run(ctx, "postgres:17-alpine",
 		postgres.WithDatabase("altempl_test"),
-		postgres.WithUsername("altempl"),
-		postgres.WithPassword("altempl"),
+		postgres.WithUsername("opensheet"),
+		postgres.WithPassword("opensheet"),
 		testcontainers.WithLabels(map[string]string{labelOwner: "true"}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").

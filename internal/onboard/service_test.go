@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 func newTestLogger() *slog.Logger {

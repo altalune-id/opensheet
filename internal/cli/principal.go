@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	authv1 "altalune.id/template/gen/go/auth/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/config"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	authv1 "altalune.id/opensheet/gen/go/auth/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 // Source names where a Principal's token came from.
@@ -47,7 +47,7 @@ type Principal struct {
 }
 
 // ErrNotSignedIn signals no session file and no --token.
-var ErrNotSignedIn = errors.New("not signed in — run `altempl auth login` or set --token")
+var ErrNotSignedIn = errors.New("not signed in — run `opensheet auth login` or set --token")
 
 // Resolve returns the effective principal for cmd's invocation.
 func Resolve(ctx context.Context, cmd *cobra.Command, cfg *config.Config, bootClient ClientBootFn) (Principal, error) {
@@ -100,13 +100,13 @@ func readToken(cmd *cobra.Command) (string, Source, error) {
 	if f := cmd.Root().PersistentFlags().Lookup("token"); f != nil && f.Changed {
 		return strings.TrimSpace(f.Value.String()), SourceFlag, nil
 	}
-	if v := strings.TrimSpace(os.Getenv("ALT_TOKEN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OPENSHEET_TOKEN")); v != "" {
 		return v, SourceEnv, nil
 	}
 	if f := cmd.Root().PersistentFlags().Lookup("token-file"); f != nil && f.Changed {
 		return readTokenFile(f.Value.String(), SourceFlag)
 	}
-	if v := strings.TrimSpace(os.Getenv("ALT_TOKEN_FILE")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OPENSHEET_TOKEN_FILE")); v != "" {
 		return readTokenFile(v, SourceEnv)
 	}
 	return "", "", nil

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/httpclient"
-	"altalune.id/template/internal/cli/render"
+	"altalune.id/opensheet/httpclient"
+	"altalune.id/opensheet/internal/cli/render"
 )
 
 func newHealthzCmd() *cobra.Command {

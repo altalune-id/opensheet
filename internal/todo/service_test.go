@@ -11,11 +11,11 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/todo"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/todo"
 )
 
 func newSvc(t *testing.T, store todo.Store) (*todo.Service, *int) {
@@ -24,8 +24,8 @@ func newSvc(t *testing.T, store todo.Store) (*todo.Service, *int) {
 	calls := 0
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
 		calls++
-		return apperror.New("altempl.unexpected", err.Error(), codes.Internal,
-			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(err)
+		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
+			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
 	return todo.NewService(store, log, unexpected), &calls
 }

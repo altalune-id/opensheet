@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 //go:embed all:static

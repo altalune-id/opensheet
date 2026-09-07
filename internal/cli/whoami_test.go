@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func bootServerEcho(_ context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {

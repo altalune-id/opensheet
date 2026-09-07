@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # verify-serve-smoke.sh
-# Boots `altempl serve` against an ephemeral SQLite DB on a random port,
+# Boots `opensheet serve` against an ephemeral SQLite DB on a random port,
 # curls /healthz, sends SIGTERM, and asserts clean shutdown within 10s.
 set -uo pipefail
 
 cd "$(dirname -- "$0")/.."
 
-tmpdir=$(mktemp -d -t altempl-smoke.XXXXXX)
+tmpdir=$(mktemp -d -t opensheet-smoke.XXXXXX)
 
-# Always build fresh -- `./bin/altempl` is committed and can be stale relative
+# Always build fresh -- `./bin/opensheet` is committed and can be stale relative
 # to the current tree (e.g. missing RequestLog middleware). Build once here.
-BIN="${tmpdir}/altempl"
-if ! go build -o "$BIN" ./cmd/altempl; then
-    echo "go build ./cmd/altempl failed" >&2
+BIN="${tmpdir}/opensheet"
+if ! go build -o "$BIN" ./cmd/opensheet; then
+    echo "go build ./cmd/opensheet failed" >&2
     exit 1
 fi
 cleanup() {
@@ -24,7 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Random loopback port. 0 lets the kernel choose but altempl only reads a fixed
+# Random loopback port. 0 lets the kernel choose but opensheet only reads a fixed
 # addr, so pick from the ephemeral range with a small collision retry.
 pick_port() {
     for _ in 1 2 3 4 5; do
@@ -40,15 +40,15 @@ pick_port() {
 PORT=$(pick_port) || { echo "no free port"; exit 1; }
 ADDR="127.0.0.1:${PORT}"
 
-# Fresh SQLite file + isolated session path so we never touch ~/.altempl.
-export ALT_DB_DRIVER=sqlite
-export ALT_DB_DSN="${tmpdir}/altempl.db"
-export ALT_DB_AUTO_MIGRATE=true
-export ALT_HTTP_ADDR="$ADDR"
-export ALT_SESSION_PATH="${tmpdir}/session.json"
-export ALT_MAIL_DRIVER=console
-export ALT_GENESIS_EMAIL="admin@altempl.local"
-export ALT_GENESIS_PASSWORD="change-me"
+# Fresh SQLite file + isolated session path so we never touch ~/.opensheet.
+export OPENSHEET_DB_DRIVER=sqlite
+export OPENSHEET_DB_DSN="${tmpdir}/opensheet.db"
+export OPENSHEET_DB_AUTO_MIGRATE=true
+export OPENSHEET_HTTP_ADDR="$ADDR"
+export OPENSHEET_SESSION_PATH="${tmpdir}/session.json"
+export OPENSHEET_MAIL_DRIVER=console
+export OPENSHEET_GENESIS_EMAIL="admin@opensheet.local"
+export OPENSHEET_GENESIS_PASSWORD="change-me"
 
 logfile="${tmpdir}/serve.log"
 

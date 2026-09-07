@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"altalune.id/template/internal/invite"
+	"altalune.id/opensheet/internal/invite"
 )
 
 func TestErrors_EmptyMessages(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 func TestBootstrapSingleton_CreatesWhenMissing(t *testing.T) {

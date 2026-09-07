@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/internal/legal"
+	"altalune.id/opensheet/internal/legal"
 )
 
 func TestTerms_ParsesAndRenders(t *testing.T) {

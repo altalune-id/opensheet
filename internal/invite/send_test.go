@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/mailer"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/mailer"
 )
 
 type recordingMailer struct {
@@ -45,7 +45,7 @@ func TestSendWorkflow_Execute_HappyPath(t *testing.T) {
 	unex := 0
 	frozen := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	wf := invite.NewSendWorkflow(
-		store, mail, "https://altempl.example.test/",
+		store, mail, "https://opensheet.example.test/",
 		newTestLogger(), noopUnexpected(&unex),
 		invite.WithTokenGen(fixedTokenGen("raw-token-XYZ")),
 		invite.WithClock(func() time.Time { return frozen }),
@@ -72,7 +72,7 @@ func TestSendWorkflow_Execute_HappyPath(t *testing.T) {
 	if mail.msg.To != "alice@example.com" {
 		t.Errorf("mail To=%q", mail.msg.To)
 	}
-	if want := "https://altempl.example.test/invites/accept?token=raw-token-XYZ"; !strings.Contains(mail.msg.TextBody, want) {
+	if want := "https://opensheet.example.test/invites/accept?token=raw-token-XYZ"; !strings.Contains(mail.msg.TextBody, want) {
 		t.Errorf("mail body missing accept URL %q; got %q", want, mail.msg.TextBody)
 	}
 	if unex != 0 {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/mailer"
+	"altalune.id/opensheet/mailer"
 )
 
 type noopMailer struct{}

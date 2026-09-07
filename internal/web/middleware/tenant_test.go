@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/web/middleware"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/web/middleware"
 )
 
 func TestTenant_ScopesFromTheActivePrincipal(t *testing.T) {

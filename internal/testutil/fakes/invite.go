@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/invite"
+	"altalune.id/opensheet/internal/invite"
 )
 
 // Invite is an in-memory invite.Store for tests.

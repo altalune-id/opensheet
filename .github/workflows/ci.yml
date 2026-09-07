@@ -66,8 +66,8 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: altempl
-          POSTGRES_PASSWORD: altempl
+          POSTGRES_USER: opensheet
+          POSTGRES_PASSWORD: opensheet
           POSTGRES_DB: altempl_test
         ports:
           - 5432:5432
@@ -83,7 +83,7 @@ jobs:
           go-version: '1.26'
       - name: Test (integration tag + Postgres)
         env:
-          TEST_PG_DSN: postgres://altempl:altempl@localhost:5432/altempl_test?sslmode=disable
+          TEST_PG_DSN: postgres://opensheet:opensheet@localhost:5432/altempl_test?sslmode=disable
         run: go test -race -shuffle=on -p 1 -tags integration ./...
 
   # Static analysis via golangci-lint. Config lives at .golangci.yaml.

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"altalune.id/template/internal/web/middleware"
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/internal/web/middleware"
+	"altalune.id/opensheet/reqid"
 )
 
 func TestRequestID_MintsOneWhenMissing(t *testing.T) {

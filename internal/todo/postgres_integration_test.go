@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/schema"
 )
 
 func newTodoStoreForTest(t *testing.T) (todo.Store, uuid.UUID, uuid.UUID, uuid.UUID) { //nolint:nonamedreturns // multi-return

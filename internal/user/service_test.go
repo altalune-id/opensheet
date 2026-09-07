@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/user"
 )
 
 func newTestLogger() *slog.Logger {

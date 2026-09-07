@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"altalune.id/template/internal/i18n"
+	"altalune.id/opensheet/internal/i18n"
 )
 
 func TestLocale_Dir(t *testing.T) {

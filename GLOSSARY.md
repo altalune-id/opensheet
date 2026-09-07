@@ -117,8 +117,8 @@ structurally, with no adapter and no import of `worker`.
 
 | Term        | What it is                                                                                                                                                                           |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| module path | `altalune.id/template`                                                                                                                                                               |
-| binary      | `altempl`                                                                                                                                                                            |
+| module path | `altalune.id/opensheet`                                                                                                                                                              |
+| binary      | `opensheet`                                                                                                                                                                          |
 | fork        | Downstream services fork this repo and swap the domain modules. Signatures under the exported roots and `internal/platform/` are copied verbatim, so changing them costs every fork. |
 
 ## Business terms

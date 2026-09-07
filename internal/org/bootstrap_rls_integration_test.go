@@ -13,18 +13,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/schema"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/schema"
 )
 
-// Boot, web onboarding and `altempl init` all call BootstrapSingleton with no tenant in context,
+// Boot, web onboarding and `opensheet init` all call BootstrapSingleton with no tenant in context,
 // which is the one shape no other postgres test covers.
 func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T) {
 	h := pgtest.New(t)
@@ -53,7 +53,7 @@ func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T)
 		tenant.NewPgConn(sqlDB),
 	)
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	svc := org.NewService(store, capabilities.Capabilities{}, slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)
 

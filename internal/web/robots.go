@@ -3,7 +3,7 @@ package web
 import (
 	"net/http"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 const defaultRobotsBody = "User-agent: *\nDisallow: /\n"

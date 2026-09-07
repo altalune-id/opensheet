@@ -2,7 +2,7 @@
 package auth
 
 import (
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 // Credentials is the local-login request shape.

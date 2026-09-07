@@ -17,24 +17,24 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/i18n"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/handlers"
-	"altalune.id/template/mailer"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/handlers"
+	"altalune.id/opensheet/mailer"
 )
 
 func discardLogger() *slog.Logger   { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -42,8 +42,8 @@ func discardStdLogger() *log.Logger { return log.New(io.Discard, "", 0) }
 
 func passthroughUnexpected() apperror.UnexpectedFunc {
 	return func(_ context.Context, _ string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", "unexpected", codes.Internal,
-			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", "unexpected", codes.Internal,
+			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 }
 

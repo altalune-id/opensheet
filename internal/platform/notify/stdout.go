@@ -9,7 +9,7 @@ import (
 	"os"
 	"sync"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 // StdoutSink writes JSON incident records to stderr.

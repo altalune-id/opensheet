@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func TestPrincipalFromRef_CarriesIsAdmin(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/scheduler"
 )
 
 // sweepCron fires at 00:00, 06:00, 12:00 and 18:00 in the configured location.

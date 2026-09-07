@@ -10,7 +10,7 @@ import (
 	"github.com/go-jet/jet/v2/qrm"
 	"github.com/google/uuid"
 
-	pdb "altalune.id/template/internal/platform/db"
+	pdb "altalune.id/opensheet/internal/platform/db"
 )
 
 // SECURITY: resolves a slug before any tenant scope exists; the SECURITY DEFINER wrapper is what lifts RLS, not the caller's role.

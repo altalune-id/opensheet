@@ -11,10 +11,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/cli"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/cli"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/scheduler"
 )
 
 func schedulerBootStub(t *testing.T) cli.ServerBootFn {

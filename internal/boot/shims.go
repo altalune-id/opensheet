@@ -5,11 +5,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/user"
 )
 
 type userStoreForInvite struct{ store user.Store }

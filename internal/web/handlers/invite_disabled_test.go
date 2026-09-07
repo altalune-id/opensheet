@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/web/handlers"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/web/handlers"
 )
 
 func TestInviteHandler_GetList_ShowsDisabledBanner(t *testing.T) {

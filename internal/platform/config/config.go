@@ -1,4 +1,4 @@
-// Package config models altempl's typed configuration and its viper-driven load path.
+// Package config models opensheet's typed configuration and its viper-driven load path.
 package config
 
 import (
@@ -9,12 +9,12 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/notify"
-	"altalune.id/template/internal/platform/tokens"
-	"altalune.id/template/logger"
-	"altalune.id/template/scheduler"
-	"altalune.id/template/telemetry"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/notify"
+	"altalune.id/opensheet/internal/platform/tokens"
+	"altalune.id/opensheet/logger"
+	"altalune.id/opensheet/scheduler"
+	"altalune.id/opensheet/telemetry"
 )
 
 // Mode selects the deployment posture (selfhosted vs. multi-tenant cloud).
@@ -28,7 +28,7 @@ const (
 // IsProduction reports whether the mode implies production hardening.
 func (m Mode) IsProduction() bool { return m == ModeCloud }
 
-// Config is the top-level typed configuration for altempl.
+// Config is the top-level typed configuration for opensheet.
 type Config struct {
 	Mode          Mode                `yaml:"mode"          mapstructure:"mode"          awareness:"required,bootstrap" validate:"required,oneof=selfhosted cloud"`
 	HTTP          HTTPConfig          `yaml:"http"          mapstructure:"http"`
@@ -271,58 +271,58 @@ func validateCloud(c *Config) error {
 
 func validateCloudOIDC(c *Config) error {
 	if c.OIDC.Issuer == "" {
-		return errors.New("config: mode=cloud requires oidc.issuer (set ALT_OIDC_ISSUER)")
+		return errors.New("config: mode=cloud requires oidc.issuer (set OPENSHEET_OIDC_ISSUER)")
 	}
 	if c.OIDC.ClientID == "" {
-		return errors.New("config: mode=cloud requires oidc.clientID (set ALT_OIDC_CLIENT_ID)")
+		return errors.New("config: mode=cloud requires oidc.clientID (set OPENSHEET_OIDC_CLIENT_ID)")
 	}
 	if c.OIDC.ClientSecret == "" {
-		return errors.New("config: mode=cloud requires oidc.clientSecret (set ALT_OIDC_CLIENT_SECRET)")
+		return errors.New("config: mode=cloud requires oidc.clientSecret (set OPENSHEET_OIDC_CLIENT_SECRET)")
 	}
 	return nil
 }
 
 func validateCloudDBDriver(c *Config) error {
 	if c.DB.Driver != "" && c.DB.Driver != "postgres" {
-		return fmt.Errorf("config: mode=cloud requires db.driver=postgres, got %q (set ALT_DB_DRIVER=postgres)", c.DB.Driver)
+		return fmt.Errorf("config: mode=cloud requires db.driver=postgres, got %q (set OPENSHEET_DB_DRIVER=postgres)", c.DB.Driver)
 	}
 	return nil
 }
 
 func validateCloudGenesisEmail(c *Config) error {
 	if c.Genesis.Email == "" {
-		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set ALT_GENESIS_EMAIL)")
+		return errors.New("config: mode=cloud requires genesis.email — first-boot admin identity, matched against OIDC subject email (set OPENSHEET_GENESIS_EMAIL)")
 	}
 	return nil
 }
 
 func validateGenesisPasswordNeedsEmail(c *Config) error {
 	if c.Genesis.Password != "" && c.Genesis.Email == "" {
-		return errors.New("config: genesis.password without genesis.email — no account is created, so the password is silently ignored (set ALT_GENESIS_EMAIL, or unset ALT_GENESIS_PASSWORD)")
+		return errors.New("config: genesis.password without genesis.email — no account is created, so the password is silently ignored (set OPENSHEET_GENESIS_EMAIL, or unset OPENSHEET_GENESIS_PASSWORD)")
 	}
 	return nil
 }
 
 func validateCloudGenesisPasswordBreakGlass(c *Config) error {
 	if c.Genesis.Password != "" && !c.Genesis.BreakGlass {
-		return errors.New("config: mode=cloud with genesis.password requires genesis.breakGlass=true — the /login local form is hidden in cloud otherwise (set ALT_GENESIS_BREAK_GLASS=true, or unset ALT_GENESIS_PASSWORD)")
+		return errors.New("config: mode=cloud with genesis.password requires genesis.breakGlass=true — the /login local form is hidden in cloud otherwise (set OPENSHEET_GENESIS_BREAK_GLASS=true, or unset OPENSHEET_GENESIS_PASSWORD)")
 	}
 	return nil
 }
 
 func validateCloudSingletonOrg(c *Config) error {
 	if c.Tenant.SingletonOrg.Slug == "" {
-		return errors.New("config: mode=cloud requires tenant.singletonOrg.slug — the first organization created at bootstrap (set ALT_TENANT_SINGLETON_ORG_SLUG)")
+		return errors.New("config: mode=cloud requires tenant.singletonOrg.slug — the first organization created at bootstrap (set OPENSHEET_TENANT_SINGLETON_ORG_SLUG)")
 	}
 	if c.Tenant.SingletonOrg.Name == "" {
-		return errors.New("config: mode=cloud requires tenant.singletonOrg.name — the display name of the first organization (set ALT_TENANT_SINGLETON_ORG_NAME)")
+		return errors.New("config: mode=cloud requires tenant.singletonOrg.name — the display name of the first organization (set OPENSHEET_TENANT_SINGLETON_ORG_NAME)")
 	}
 	return nil
 }
 
 func validateAutoMigrateNeedsMigrator(c *Config) error {
 	if !c.DB.AllowBypassRLS && c.DB.AutoMigrate && c.DB.Migrator.DSN == "" {
-		return errors.New("config: mode=cloud with autoMigrate and RLS enforced requires db.migrator.dsn — run scripts/db/provision.sh (APP=altempl DB_NAME=altempl) and set ALT_DB_MIGRATOR_DSN to the altempl_migrator credential, or disable autoMigrate and run migrations out-of-band")
+		return errors.New("config: mode=cloud with autoMigrate and RLS enforced requires db.migrator.dsn — run scripts/db/provision.sh (APP=opensheet DB_NAME=opensheet) and set OPENSHEET_DB_MIGRATOR_DSN to the altempl_migrator credential, or disable autoMigrate and run migrations out-of-band")
 	}
 	return nil
 }

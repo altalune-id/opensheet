@@ -1,7 +1,7 @@
 package user
 
 import (
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 // NewStore dispatches to the Postgres or SQLite adapter based on cfg.Driver.

@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	pdb "altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
+	pdb "altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
 )
 
 func TestTenantRunInTx_AppliesSetConfig(t *testing.T) {

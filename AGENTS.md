@@ -3,7 +3,7 @@
 Guide for AI coding agents (Claude Code, Codex, Cursor, …) working in this
 repo. Read this before touching code.
 
-## What altempl is
+## What opensheet is
 
 Multitenant Go template. Templ + HTMX + Connect-RPC on one HTTP listener.
 Downstream services fork this shape and swap the domain modules. Signatures
@@ -82,11 +82,11 @@ make lint               # golangci-lint (or go vet fallback)
 
 ## Verifying UI / server changes
 
-Server smoke: `bash scripts/verify-serve-smoke.sh` boots `altempl serve`
+Server smoke: `bash scripts/verify-serve-smoke.sh` boots `opensheet serve`
 on ephemeral SQLite + random port, curls `/healthz`, sends SIGTERM,
 asserts clean shutdown within 10s.
 
-Live probe against a running altempl: `altempl healthz` (auto-uses the
+Live probe against a running opensheet: `opensheet healthz` (auto-uses the
 configured `http.addr`, or pass `--url http://host:port/healthz`).
 Same binary is used as the compose/k8s healthcheck.
 

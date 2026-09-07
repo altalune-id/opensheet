@@ -13,8 +13,8 @@ import (
 	sqlitedrv "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	sqliteent "altalune.id/template/internal/platform/db/entity/sqlite"
-	"altalune.id/template/internal/platform/tenant"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 type sqliteStore struct {

@@ -7,9 +7,9 @@ import (
 
 	"github.com/a-h/templ"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // LayoutFn builds a LayoutData for the shared error page.

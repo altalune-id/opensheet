@@ -7,10 +7,10 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	todov1 "altalune.id/template/gen/go/todo/v1"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
+	todov1 "altalune.id/opensheet/gen/go/todo/v1"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
 )
 
 func TestTodo_List_MissingAuth_ReturnsUnauthenticated(t *testing.T) {

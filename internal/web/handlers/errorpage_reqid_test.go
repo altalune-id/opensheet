@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/reqid"
 )
 
 func TestErrorPage_ShowsRequestIDForCorrelation(t *testing.T) {

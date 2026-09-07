@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	pdb "altalune.id/template/internal/platform/db"
-	pgent "altalune.id/template/internal/platform/db/entity/postgres"
-	"altalune.id/template/internal/platform/tenant"
+	pdb "altalune.id/opensheet/internal/platform/db"
+	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 type postgresStore struct {

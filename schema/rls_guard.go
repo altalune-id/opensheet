@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	pcfg "altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
+	pcfg "altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 // ErrRLSBypass is returned when the app connection's role has BYPASSRLS.

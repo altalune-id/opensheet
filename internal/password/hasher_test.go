@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/password"
+	"altalune.id/opensheet/internal/password"
 )
 
 func TestHash_RoundTrip(t *testing.T) {

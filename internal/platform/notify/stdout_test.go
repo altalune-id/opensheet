@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 func TestStdoutSink_Report_WritesJSON(t *testing.T) {
@@ -18,7 +18,7 @@ func TestStdoutSink_Report_WritesJSON(t *testing.T) {
 	s := newStdoutSink(log, &buf)
 
 	s.Report(context.Background(), &apperror.Incident{
-		Code:      "altempl.unexpected",
+		Code:      "opensheet.unexpected",
 		Message:   "op failed",
 		Cause:     errors.New("boom"),
 		RequestID: "req-1",
@@ -32,7 +32,7 @@ func TestStdoutSink_Report_WritesJSON(t *testing.T) {
 	if got.Level != "ERROR" {
 		t.Errorf("Level = %q, want ERROR", got.Level)
 	}
-	if got.Code != "altempl.unexpected" {
+	if got.Code != "opensheet.unexpected" {
 		t.Errorf("Code = %q", got.Code)
 	}
 	if got.Message != "op failed" {

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/user"
 )
 
 func bootstrap(

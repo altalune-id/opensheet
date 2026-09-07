@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tokens"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tokens"
 )
 
 func TestMissingAuthError_ErrorAndAppError(t *testing.T) {

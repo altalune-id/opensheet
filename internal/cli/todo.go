@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	todov1 "altalune.id/template/gen/go/todo/v1"
-	"altalune.id/template/internal/cli/render"
+	todov1 "altalune.id/opensheet/gen/go/todo/v1"
+	"altalune.id/opensheet/internal/cli/render"
 )
 
 func newTodoCmd(_ ServerBootFn, bootClient ClientBootFn) *cobra.Command {
@@ -42,7 +42,7 @@ func newTodoListCmd(bootClient ClientBootFn) *cobra.Command {
 				return err
 			}
 			if p.ProjectID == uuid.Nil {
-				return errors.New("todo list: no active project — pass --project or run `altempl auth login`")
+				return errors.New("todo list: no active project — pass --project or run `opensheet auth login`")
 			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {
@@ -93,7 +93,7 @@ func newTodoAddCmd(bootClient ClientBootFn) *cobra.Command {
 				return err
 			}
 			if p.ProjectID == uuid.Nil {
-				return errors.New("todo add: no active project — pass --project or run `altempl auth login`")
+				return errors.New("todo add: no active project — pass --project or run `opensheet auth login`")
 			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {

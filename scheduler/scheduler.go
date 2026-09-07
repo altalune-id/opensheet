@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/reqid"
 )
 
 const defaultShutdownGrace = 30 * time.Second

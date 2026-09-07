@@ -1,4 +1,4 @@
-// Package user models human identity records for altempl.
+// Package user models human identity records for opensheet.
 package user
 
 import (
@@ -15,7 +15,7 @@ const (
 	SourceLocal   = "local"
 )
 
-// User is the identity aggregate for a human that logs into altempl.
+// User is the identity aggregate for a human that logs into opensheet.
 type User struct {
 	ID              uuid.UUID
 	Email           string

@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/scheduler"
 )
 
 func TestScheduler_JobShape(t *testing.T) {

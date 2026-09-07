@@ -22,7 +22,7 @@ type loadOptions struct {
 // WithRequireFile makes Load fail when the config file is missing.
 func WithRequireFile() Option { return func(o *loadOptions) { o.requireFile = true } }
 
-// Load resolves defaults <- yaml file <- ALT_* env vars (last wins) into a typed Config.
+// Load resolves defaults <- yaml file <- OPENSHEET_* env vars (last wins) into a typed Config.
 func Load(path string, opts ...Option) (*Config, error) {
 	o := loadOptions{}
 	for _, opt := range opts {
@@ -36,7 +36,7 @@ func Load(path string, opts ...Option) (*Config, error) {
 	var cfg Config
 	bindEnv(v, "", reflect.TypeOf(cfg))
 
-	v.SetEnvPrefix("ALT")
+	v.SetEnvPrefix("OPENSHEET")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 
@@ -44,7 +44,7 @@ func Load(path string, opts ...Option) (*Config, error) {
 		v.SetConfigFile(path)
 	} else {
 		v.SetConfigType("yaml")
-		v.SetConfigName("altempl")
+		v.SetConfigName("opensheet")
 		v.AddConfigPath(".")
 		if home, err := os.UserHomeDir(); err == nil {
 			v.AddConfigPath(home)
@@ -85,7 +85,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("http.cookieSecure", false)
 
 	v.SetDefault("db.driver", "sqlite")
-	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".altempl", "altempl.db"))
+	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".opensheet", "opensheet.db"))
 	v.SetDefault("db.autoMigrate", true)
 	v.SetDefault("db.schema", "public")
 	v.SetDefault("db.tablePrefix", "altempl_")
@@ -102,7 +102,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("api.openapi.enabled", true)
 	v.SetDefault("api.openapi.requireBasicAuth", true)
 
-	v.SetDefault("session.path", filepath.Join(homeDir(), ".altempl", "session.json"))
+	v.SetDefault("session.path", filepath.Join(homeDir(), ".opensheet", "session.json"))
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
@@ -117,7 +117,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("observability.reporter.minSeverity", "error")
 
 	v.SetDefault("mail.driver", "console")
-	v.SetDefault("mail.from", "no-reply@altempl.local")
+	v.SetDefault("mail.from", "no-reply@opensheet.local")
 	v.SetDefault("mail.smtp.port", 587)
 	v.SetDefault("mail.smtp.tls", true)
 	v.SetDefault("mail.resend.maxAttempts", 3)
@@ -134,7 +134,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
 
-	v.SetDefault("tokens.audience", "urn:altempl:api")
+	v.SetDefault("tokens.audience", "urn:opensheet:api")
 	v.SetDefault("tokens.supportedAlgs", []string{"RS256", "ES256"})
 	v.SetDefault("tokens.clockSkew", "60s")
 }

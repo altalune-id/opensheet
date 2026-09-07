@@ -3,7 +3,7 @@ package capabilities
 import (
 	"testing"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func TestFrom_SelfhostedGenesis(t *testing.T) {

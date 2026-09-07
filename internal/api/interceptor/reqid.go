@@ -7,7 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/reqid"
 )
 
 // RequestID extracts (or mints) an X-Request-Id and threads it through ctx and response metadata.

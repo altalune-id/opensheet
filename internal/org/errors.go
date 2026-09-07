@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 // NotFoundError signals a missing org row.

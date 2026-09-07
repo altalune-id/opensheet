@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/scheduler"
 )
 
 func TestCronExpr_AcceptedForms(t *testing.T) {

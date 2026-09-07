@@ -532,8 +532,8 @@ const file_todo_v1_todo_proto_rawDesc = "" +
 	"\x04List\x12\x14.todo.v1.ListRequest\x1a\x15.todo.v1.ListResponse\x129\n" +
 	"\x06Create\x12\x16.todo.v1.CreateRequest\x1a\x17.todo.v1.CreateResponse\x129\n" +
 	"\x06Toggle\x12\x16.todo.v1.ToggleRequest\x1a\x17.todo.v1.ToggleResponse\x129\n" +
-	"\x06Delete\x12\x16.todo.v1.DeleteRequest\x1a\x17.todo.v1.DeleteResponseB\x81\x01\n" +
-	"\vcom.todo.v1B\tTodoProtoP\x01Z*altalune.id/template/gen/go/todo/v1;todov1\xa2\x02\x03TXX\xaa\x02\aTodo.V1\xca\x02\aTodo\\V1\xe2\x02\x13Todo\\V1\\GPBMetadata\xea\x02\bTodo::V1b\x06proto3"
+	"\x06Delete\x12\x16.todo.v1.DeleteRequest\x1a\x17.todo.v1.DeleteResponseB\x82\x01\n" +
+	"\vcom.todo.v1B\tTodoProtoP\x01Z+altalune.id/opensheet/gen/go/todo/v1;todov1\xa2\x02\x03TXX\xaa\x02\aTodo.V1\xca\x02\aTodo\\V1\xe2\x02\x13Todo\\V1\\GPBMetadata\xea\x02\bTodo::V1b\x06proto3"
 
 var (
 	file_todo_v1_todo_proto_rawDescOnce sync.Once

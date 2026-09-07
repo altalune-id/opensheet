@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/user"
 )
 
 type fakeOrgs struct {

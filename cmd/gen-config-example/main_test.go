@@ -12,8 +12,8 @@ func TestGenerator_ProducesOutput(t *testing.T) {
 	if len(out) < 100 {
 		t.Fatalf("output too short: %q", out)
 	}
-	if !strings.Contains(out, "ALT_") {
-		t.Error("expected ALT_ env vars in output")
+	if !strings.Contains(out, "OPENSHEET_") {
+		t.Error("expected OPENSHEET_ env vars in output")
 	}
 	if !strings.Contains(out, "[") {
 		t.Error("expected awareness markers")
@@ -38,10 +38,10 @@ func TestGenerator_EmitsNonSecretDefaults(t *testing.T) {
 	out := runGenerator(t)
 	// At least one field with a non-empty default should be present verbatim.
 	wants := []string{
-		"ALT_DB_DRIVER=sqlite",
-		"ALT_HTTP_ADDR=:5150",
-		"ALT_LOG_LEVEL=info",
-		"ALT_LOG_FORMAT=json",
+		"OPENSHEET_DB_DRIVER=sqlite",
+		"OPENSHEET_HTTP_ADDR=:5150",
+		"OPENSHEET_LOG_LEVEL=info",
+		"OPENSHEET_LOG_FORMAT=json",
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
@@ -54,13 +54,13 @@ func TestGenerator_SecretsHaveNoRHS(t *testing.T) {
 	out := runGenerator(t)
 	// Secret fields must appear with empty RHS regardless of any default.
 	secretVars := []string{
-		"ALT_HTTP_STATE_SECRET",
-		"ALT_DB_DSN",
-		"ALT_GENESIS_PASSWORD",
-		"ALT_OIDC_CLIENT_SECRET",
-		"ALT_MAIL_SMTP_PASS",
-		"ALT_API_OPENAPI_BASIC_AUTH_PASSWORD",
-		"ALT_TELEMETRY_OTLP_HEADERS",
+		"OPENSHEET_HTTP_STATE_SECRET",
+		"OPENSHEET_DB_DSN",
+		"OPENSHEET_GENESIS_PASSWORD",
+		"OPENSHEET_OIDC_CLIENT_SECRET",
+		"OPENSHEET_MAIL_SMTP_PASS",
+		"OPENSHEET_API_OPENAPI_BASIC_AUTH_PASSWORD",
+		"OPENSHEET_TELEMETRY_OTLP_HEADERS",
 	}
 	for _, name := range secretVars {
 		re := regexp.MustCompile("(?m)^" + regexp.QuoteMeta(name) + "=(.*)$")

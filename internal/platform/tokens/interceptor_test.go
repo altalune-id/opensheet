@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tokens"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tokens"
 )
 
 type stubVerifier struct {

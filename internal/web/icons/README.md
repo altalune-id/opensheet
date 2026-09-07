@@ -6,7 +6,7 @@ SVGs live under `svg/` and are embedded into the binary at build time.
 ## Use in a template
 
 ```templ
-import "altalune.id/template/internal/web/icons"
+import "altalune.id/opensheet/internal/web/icons"
 
 @icons.Icon("check", "size-4 text-blue-500")
 ```

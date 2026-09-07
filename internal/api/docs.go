@@ -22,7 +22,7 @@ func swaggerHTML(specURL string) []byte {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>altempl API docs</title>
+  <title>opensheet API docs</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@%[1]s/swagger-ui.css">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>%%F0%%9F%%93%%98</text></svg>">

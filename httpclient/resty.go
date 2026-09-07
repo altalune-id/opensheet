@@ -11,7 +11,7 @@ import (
 // Defaults applied by NewResty when RestyOptions leaves a field zero.
 const (
 	DefaultRestyTimeout = 10 * time.Second
-	DefaultUserAgent    = "altempl/1"
+	DefaultUserAgent    = "opensheet/1"
 )
 
 // RestyOptions configures NewResty; the zero value yields safe defaults.

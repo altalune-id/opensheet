@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 type fakeOrgReader struct {

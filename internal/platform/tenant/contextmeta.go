@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/reqid"
 )
 
 // ContextMeta extracts request_id and tenant identifiers from ctx for wire envelopes and log lines.

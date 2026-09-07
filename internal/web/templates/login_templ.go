@@ -8,7 +8,7 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "altalune.id/template/internal/web"
+import "altalune.id/opensheet/internal/web"
 
 type LoginView struct {
 	Error      string

@@ -5,8 +5,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 // InvalidCredentialsError signals a failed local login. SECURITY: masks unknown-user vs wrong-password to avoid enumeration.

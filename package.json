@@ -1,8 +1,8 @@
 {
-  "name": "altempl",
+  "name": "opensheet",
   "version": "0.1.0-dev",
   "private": true,
-  "description": "altempl — altalune multitenant template",
+  "description": "opensheet — altalune multitenant template",
   "engines": {
     "node": ">=24",
     "pnpm": ">=11"
@@ -27,7 +27,7 @@
     "*.go": ["gofmt -l -e"],
     "Dockerfile": ["sh -c 'if command -v hadolint >/dev/null 2>&1; then hadolint \"$@\"; else echo \"warn: hadolint not installed — skipping (brew install hadolint to enable)\"; fi' _"],
     "*.{yml,yaml}": ["sh -c 'if command -v yamllint >/dev/null 2>&1; then yamllint -c .yamllint.yaml \"$@\"; else echo \"warn: yamllint not installed — skipping (brew install yamllint to enable)\"; fi' _"],
-    "*.proto": ["pnpm exec buf lint --path"],
+    "*.proto": ["sh -c 'for f in \"$@\"; do pnpm exec buf lint --path \"$f\" || exit 1; done' _"],
     "*.md": ["prettier --check"]
   }
 }

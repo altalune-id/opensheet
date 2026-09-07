@@ -8,7 +8,7 @@ import (
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 func (s *postgresStore) Save(ctx context.Context, t *Todo) error {

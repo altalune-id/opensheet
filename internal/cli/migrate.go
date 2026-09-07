@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/schema"
 )
 
 func openMigratorDB(ctx context.Context, cfg *config.Config) (*sql.DB, *config.Config, error) {

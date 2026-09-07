@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/cli/render"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // TODO(future-proto): switch to bootClient.Conn once api/invite/v1 lands.

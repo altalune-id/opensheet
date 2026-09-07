@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web/handlers"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web/handlers"
 )
 
 const setupTokenForTest = "correct-horse-battery-staple"

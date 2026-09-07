@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"altalune.id/template/internal/platform/tokens"
+	"altalune.id/opensheet/internal/platform/tokens"
 )
 
 func TestNewVerifier_Disabled(t *testing.T) {

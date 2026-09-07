@@ -1,8 +1,8 @@
-# altempl — auto-generated from internal/platform/config struct tags.
+# opensheet — auto-generated from internal/platform/config struct tags.
 # DO NOT edit by hand. Run `go tool gen-config-example --format=yaml` to regenerate.
 #
 # Copy to config.yaml, uncomment what you need to set, and pass `-c config.yaml`.
-# Every field maps to an env var (shown as `env: ALT_*` in the per-field comment).
+# Every field maps to an env var (shown as `env: OPENSHEET_*` in the per-field comment).
 # Env vars override YAML.
 #
 # Awareness markers (in [brackets] on the per-field comment):
@@ -12,238 +12,238 @@
 #   mode:X     — only applies in the given mode (selfhosted | cloud)
 
 api:
-  # env: ALT_API_ENABLED
+  # env: OPENSHEET_API_ENABLED
   enabled: true
   openapi:
-    # [secret] env: ALT_API_OPENAPI_BASIC_AUTH_PASSWORD
+    # [secret] env: OPENSHEET_API_OPENAPI_BASIC_AUTH_PASSWORD
     basicAuthPassword: ""
-    # env: ALT_API_OPENAPI_BASIC_AUTH_USER
+    # env: OPENSHEET_API_OPENAPI_BASIC_AUTH_USER
     basicAuthUser: ""
-    # env: ALT_API_OPENAPI_ENABLED
+    # env: OPENSHEET_API_OPENAPI_ENABLED
     enabled: true
-    # env: ALT_API_OPENAPI_REQUIRE_BASIC_AUTH
+    # env: OPENSHEET_API_OPENAPI_REQUIRE_BASIC_AUTH
     requireBasicAuth: true
 
 compliance:
-  # env: ALT_COMPLIANCE_PRIVACY_URL
+  # env: OPENSHEET_COMPLIANCE_PRIVACY_URL
   privacyURL: ""
-  # env: ALT_COMPLIANCE_REQUIRE_ACCEPTANCE
+  # env: OPENSHEET_COMPLIANCE_REQUIRE_ACCEPTANCE
   requireAcceptance: ""
-  # env: ALT_COMPLIANCE_TERMS_URL
+  # env: OPENSHEET_COMPLIANCE_TERMS_URL
   termsURL: ""
 
 db:
-  # [bootstrap] env: ALT_DB_ALLOW_BYPASS_RLS
+  # [bootstrap] env: OPENSHEET_DB_ALLOW_BYPASS_RLS
   allowBypassRLS: ""
-  # env: ALT_DB_AUTO_MIGRATE
+  # env: OPENSHEET_DB_AUTO_MIGRATE
   autoMigrate: true
-  # env: ALT_DB_CONN_MAX_IDLE_TIME
+  # env: OPENSHEET_DB_CONN_MAX_IDLE_TIME
   connMaxIdleTime: ""
-  # env: ALT_DB_CONN_MAX_LIFETIME
+  # env: OPENSHEET_DB_CONN_MAX_LIFETIME
   connMaxLifetime: ""
-  # env: ALT_DB_CONNECT_BACKOFF
+  # env: OPENSHEET_DB_CONNECT_BACKOFF
   connectBackoff: 250ms
-  # env: ALT_DB_CONNECT_TIMEOUT
+  # env: OPENSHEET_DB_CONNECT_TIMEOUT
   connectTimeout: 30s
-  # [required, bootstrap] env: ALT_DB_DRIVER
+  # [required, bootstrap] env: OPENSHEET_DB_DRIVER
   driver: sqlite
-  # [required, secret] env: ALT_DB_DSN
+  # [required, secret] env: OPENSHEET_DB_DSN
   dsn: ""
   health:
-    # env: ALT_DB_HEALTH_INTERVAL
+    # env: OPENSHEET_DB_HEALTH_INTERVAL
     interval: 30s
-    # env: ALT_DB_HEALTH_TIMEOUT
+    # env: OPENSHEET_DB_HEALTH_TIMEOUT
     timeout: 2s
-  # env: ALT_DB_MAX_IDLE_CONNS
+  # env: OPENSHEET_DB_MAX_IDLE_CONNS
   maxIdleConns: ""
-  # env: ALT_DB_MAX_OPEN_CONNS
+  # env: OPENSHEET_DB_MAX_OPEN_CONNS
   maxOpenConns: ""
   migrator:
-    # [secret, bootstrap] env: ALT_DB_MIGRATOR_DSN
+    # [secret, bootstrap] env: OPENSHEET_DB_MIGRATOR_DSN
     dsn: ""
-    # [bootstrap] env: ALT_DB_MIGRATOR_ROLE
+    # [bootstrap] env: OPENSHEET_DB_MIGRATOR_ROLE
     role: ""
   reader:
-    # env: ALT_DB_READER_CONN_MAX_IDLE_TIME
+    # env: OPENSHEET_DB_READER_CONN_MAX_IDLE_TIME
     connMaxIdleTime: ""
-    # env: ALT_DB_READER_CONN_MAX_LIFETIME
+    # env: OPENSHEET_DB_READER_CONN_MAX_LIFETIME
     connMaxLifetime: ""
-    # [secret] env: ALT_DB_READER_DSN
+    # [secret] env: OPENSHEET_DB_READER_DSN
     dsn: ""
-    # env: ALT_DB_READER_MAX_IDLE_CONNS
+    # env: OPENSHEET_DB_READER_MAX_IDLE_CONNS
     maxIdleConns: ""
-    # env: ALT_DB_READER_MAX_OPEN_CONNS
+    # env: OPENSHEET_DB_READER_MAX_OPEN_CONNS
     maxOpenConns: ""
-    # [bootstrap] env: ALT_DB_READER_ROLE
+    # [bootstrap] env: OPENSHEET_DB_READER_ROLE
     role: ""
-  # [bootstrap] env: ALT_DB_ROLE
+  # [bootstrap] env: OPENSHEET_DB_ROLE
   role: ""
-  # [bootstrap] env: ALT_DB_SCHEMA
+  # [bootstrap] env: OPENSHEET_DB_SCHEMA
   schema: public
-  # [bootstrap] env: ALT_DB_TABLE_PREFIX
+  # [bootstrap] env: OPENSHEET_DB_TABLE_PREFIX
   tablePrefix: altempl_
 
 genesis:
-  # [bootstrap, mode:cloud] env: ALT_GENESIS_BREAK_GLASS
+  # [bootstrap, mode:cloud] env: OPENSHEET_GENESIS_BREAK_GLASS
   breakGlass: false
-  # env: ALT_GENESIS_EMAIL
+  # env: OPENSHEET_GENESIS_EMAIL
   email: ""
-  # [bootstrap, secret] env: ALT_GENESIS_PASSWORD
+  # [bootstrap, secret] env: OPENSHEET_GENESIS_PASSWORD
   password: ""
 
 http:
-  # [required] env: ALT_HTTP_ADDR
+  # [required] env: OPENSHEET_HTTP_ADDR
   addr: ":5150"
-  # env: ALT_HTTP_BASE_PATH
+  # env: OPENSHEET_HTTP_BASE_PATH
   basePath: ""
-  # [required] env: ALT_HTTP_BASE_URL
+  # [required] env: OPENSHEET_HTTP_BASE_URL
   baseURL: ""
-  # env: ALT_HTTP_COOKIE_SECURE
+  # env: OPENSHEET_HTTP_COOKIE_SECURE
   cookieSecure: false
-  # env: ALT_HTTP_ROBOTS_TXT
+  # env: OPENSHEET_HTTP_ROBOTS_TXT
   robotsTxt: ""
-  # [required, secret, bootstrap] env: ALT_HTTP_STATE_SECRET
+  # [required, secret, bootstrap] env: OPENSHEET_HTTP_STATE_SECRET
   stateSecret: ""
 
 i18n:
-  # [required, bootstrap] env: ALT_I18N_DEFAULT_LOCALE
+  # [required, bootstrap] env: OPENSHEET_I18N_DEFAULT_LOCALE
   defaultLocale: en-US
 
 log:
-  # env: ALT_LOG_ADD_SOURCE
+  # env: OPENSHEET_LOG_ADD_SOURCE
   addSource: ""
-  # env: ALT_LOG_FORMAT
+  # env: OPENSHEET_LOG_FORMAT
   format: json
-  # env: ALT_LOG_LEVEL
+  # env: OPENSHEET_LOG_LEVEL
   level: info
-  # [bootstrap] env: ALT_LOG_REDACT_PATTERNS
+  # [bootstrap] env: OPENSHEET_LOG_REDACT_PATTERNS
   redactPatterns: ""
 
 mail:
-  # env: ALT_MAIL_DRIVER
+  # env: OPENSHEET_MAIL_DRIVER
   driver: console
-  # env: ALT_MAIL_FROM
-  from: no-reply@altempl.local
+  # env: OPENSHEET_MAIL_FROM
+  from: no-reply@opensheet.local
   resend:
-    # [secret] env: ALT_MAIL_RESEND_API_KEY
+    # [secret] env: OPENSHEET_MAIL_RESEND_API_KEY
     apiKey: ""
-    # env: ALT_MAIL_RESEND_ENDPOINT
+    # env: OPENSHEET_MAIL_RESEND_ENDPOINT
     endpoint: ""
-    # env: ALT_MAIL_RESEND_MAX_ATTEMPTS
+    # env: OPENSHEET_MAIL_RESEND_MAX_ATTEMPTS
     maxAttempts: 3
   smtp:
-    # env: ALT_MAIL_SMTP_HOST
+    # env: OPENSHEET_MAIL_SMTP_HOST
     host: ""
-    # [secret] env: ALT_MAIL_SMTP_PASS
+    # [secret] env: OPENSHEET_MAIL_SMTP_PASS
     pass: ""
-    # env: ALT_MAIL_SMTP_PORT
+    # env: OPENSHEET_MAIL_SMTP_PORT
     port: 587
-    # env: ALT_MAIL_SMTP_TLS
+    # env: OPENSHEET_MAIL_SMTP_TLS
     tls: true
-    # env: ALT_MAIL_SMTP_USER
+    # env: OPENSHEET_MAIL_SMTP_USER
     user: ""
 
-# [required, bootstrap] env: ALT_MODE
+# [required, bootstrap] env: OPENSHEET_MODE
 mode: selfhosted
 
 observability:
   reporter:
-    # env: ALT_OBSERVABILITY_REPORTER_MIN_SEVERITY
+    # env: OPENSHEET_OBSERVABILITY_REPORTER_MIN_SEVERITY
     minSeverity: error
-    # env: ALT_OBSERVABILITY_REPORTER_SINKS
+    # env: OPENSHEET_OBSERVABILITY_REPORTER_SINKS
     sinks: ""
 
 oidc:
-  # env: ALT_OIDC_BUTTON_LABEL
+  # env: OPENSHEET_OIDC_BUTTON_LABEL
   buttonLabel: ""
-  # env: ALT_OIDC_BUTTON_LOGO_URL
+  # env: OPENSHEET_OIDC_BUTTON_LOGO_URL
   buttonLogoURL: ""
-  # [required, mode:cloud] env: ALT_OIDC_CLIENT_ID
+  # [required, mode:cloud] env: OPENSHEET_OIDC_CLIENT_ID
   clientID: ""
-  # [required, mode:cloud, secret] env: ALT_OIDC_CLIENT_SECRET
+  # [required, mode:cloud, secret] env: OPENSHEET_OIDC_CLIENT_SECRET
   clientSecret: ""
-  # env: ALT_OIDC_END_SESSION_ON_LOGOUT
+  # env: OPENSHEET_OIDC_END_SESSION_ON_LOGOUT
   endSessionOnLogout: ""
-  # [required, mode:cloud] env: ALT_OIDC_ISSUER
+  # [required, mode:cloud] env: OPENSHEET_OIDC_ISSUER
   issuer: ""
-  # env: ALT_OIDC_REDIRECT_PORT
+  # env: OPENSHEET_OIDC_REDIRECT_PORT
   redirectPort: ""
-  # env: ALT_OIDC_RESOURCE
+  # env: OPENSHEET_OIDC_RESOURCE
   resource: ""
-  # env: ALT_OIDC_SCOPES
+  # env: OPENSHEET_OIDC_SCOPES
   scopes: openid,email,profile
 
 onboard:
-  # [secret] env: ALT_ONBOARD_SETUP_TOKEN
+  # [secret] env: OPENSHEET_ONBOARD_SETUP_TOKEN
   setupToken: ""
 
 scheduler:
-  # [bootstrap] env: ALT_SCHEDULER_ENABLED
+  # [bootstrap] env: OPENSHEET_SCHEDULER_ENABLED
   enabled: true
-  # env: ALT_SCHEDULER_SHUTDOWN_GRACE
+  # env: OPENSHEET_SCHEDULER_SHUTDOWN_GRACE
   shutdownGrace: 30s
-  # [bootstrap] env: ALT_SCHEDULER_TIMEZONE
+  # [bootstrap] env: OPENSHEET_SCHEDULER_TIMEZONE
   timezone: UTC
 
 session:
-  # env: ALT_SESSION_PATH
-  path: ~/.altempl/session.json
+  # env: OPENSHEET_SESSION_PATH
+  path: ~/.opensheet/session.json
 
 telemetry:
   metrics:
-    # env: ALT_TELEMETRY_METRICS_ENABLED
+    # env: OPENSHEET_TELEMETRY_METRICS_ENABLED
     enabled: false
-    # env: ALT_TELEMETRY_METRICS_EXPORT_INTERVAL
+    # env: OPENSHEET_TELEMETRY_METRICS_EXPORT_INTERVAL
     exportInterval: 30s
     prometheus:
-      # env: ALT_TELEMETRY_METRICS_PROMETHEUS_ADDR
+      # env: OPENSHEET_TELEMETRY_METRICS_PROMETHEUS_ADDR
       addr: ":9091"
-      # env: ALT_TELEMETRY_METRICS_PROMETHEUS_ENABLED
+      # env: OPENSHEET_TELEMETRY_METRICS_PROMETHEUS_ENABLED
       enabled: false
-      # env: ALT_TELEMETRY_METRICS_PROMETHEUS_PATH
+      # env: OPENSHEET_TELEMETRY_METRICS_PROMETHEUS_PATH
       path: /metrics
   otlp:
-    # env: ALT_TELEMETRY_OTLP_ENDPOINT
+    # env: OPENSHEET_TELEMETRY_OTLP_ENDPOINT
     endpoint: ""
-    # [secret] env: ALT_TELEMETRY_OTLP_HEADERS
+    # [secret] env: OPENSHEET_TELEMETRY_OTLP_HEADERS
     headers: ""
-    # env: ALT_TELEMETRY_OTLP_INSECURE
+    # env: OPENSHEET_TELEMETRY_OTLP_INSECURE
     insecure: ""
-    # env: ALT_TELEMETRY_OTLP_PROTOCOL
+    # env: OPENSHEET_TELEMETRY_OTLP_PROTOCOL
     protocol: ""
   tracing:
-    # env: ALT_TELEMETRY_TRACING_ENABLED
+    # env: OPENSHEET_TELEMETRY_TRACING_ENABLED
     enabled: false
-    # env: ALT_TELEMETRY_TRACING_SAMPLE_RATIO
+    # env: OPENSHEET_TELEMETRY_TRACING_SAMPLE_RATIO
     sampleRatio: ""
 
 tenant:
-  # env: ALT_TENANT_PERSONAL_ORG_SLUG_FALLBACK
+  # env: OPENSHEET_TENANT_PERSONAL_ORG_SLUG_FALLBACK
   personalOrgSlugFallback: personal
-  # env: ALT_TENANT_PERSONAL_PROJECT_SLUG
+  # env: OPENSHEET_TENANT_PERSONAL_PROJECT_SLUG
   personalProjectSlug: default
-  # [bootstrap] env: ALT_TENANT_RLS_ENFORCE
+  # [bootstrap] env: OPENSHEET_TENANT_RLS_ENFORCE
   rlsEnforce: true
   singletonOrg:
-    # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_NAME
+    # [bootstrap] env: OPENSHEET_TENANT_SINGLETON_ORG_NAME
     name: Default Organization
-    # [bootstrap] env: ALT_TENANT_SINGLETON_ORG_SLUG
+    # [bootstrap] env: OPENSHEET_TENANT_SINGLETON_ORG_SLUG
     slug: default
-  # [bootstrap] env: ALT_TENANT_TENANT_SCOPED_TABLES
+  # [bootstrap] env: OPENSHEET_TENANT_TENANT_SCOPED_TABLES
   tenantScopedTables: ""
 
 tokens:
-  # env: ALT_TOKENS_ACCEPT_RS256
+  # env: OPENSHEET_TOKENS_ACCEPT_RS256
   acceptRS256: ""
-  # [required, mode:cloud, bootstrap] env: ALT_TOKENS_AUDIENCE
-  audience: "urn:altempl:api"
-  # env: ALT_TOKENS_CLOCK_SKEW
+  # [required, mode:cloud, bootstrap] env: OPENSHEET_TOKENS_AUDIENCE
+  audience: "urn:opensheet:api"
+  # env: OPENSHEET_TOKENS_CLOCK_SKEW
   clockSkew: 60s
-  # [required, mode:cloud] env: ALT_TOKENS_ISSUER
+  # [required, mode:cloud] env: OPENSHEET_TOKENS_ISSUER
   issuer: ""
-  # env: ALT_TOKENS_JWKS_CACHE_TTL
+  # env: OPENSHEET_TOKENS_JWKS_CACHE_TTL
   jwksCacheTTL: ""
-  # [required, mode:cloud] env: ALT_TOKENS_JWKS_URL
+  # [required, mode:cloud] env: OPENSHEET_TOKENS_JWKS_URL
   jwksURL: ""
-  # env: ALT_TOKENS_SUPPORTED_ALGS
+  # env: OPENSHEET_TOKENS_SUPPORTED_ALGS
   supportedAlgs: RS256,ES256

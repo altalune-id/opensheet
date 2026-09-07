@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/user"
 )
 
 func newGenesisService(t *testing.T, store *fakes.User, email string) *user.Service {

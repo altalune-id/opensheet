@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 func TestLoad_DefaultsPopulate(t *testing.T) {
@@ -50,7 +50,7 @@ genesis:
 `
 	path := writeTempYAML(t, "cfg.yaml", yaml)
 
-	t.Setenv("ALT_HTTP_ADDR", ":8080")
+	t.Setenv("OPENSHEET_HTTP_ADDR", ":8080")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -368,8 +368,8 @@ func withCwdOverride(t *testing.T, dir string) Option {
 
 func withGenesisFallback(t *testing.T) Option {
 	t.Helper()
-	t.Setenv("ALT_GENESIS_EMAIL", "root@example.com")
-	t.Setenv("ALT_GENESIS_PASSWORD", "x")
+	t.Setenv("OPENSHEET_GENESIS_EMAIL", "root@example.com")
+	t.Setenv("OPENSHEET_GENESIS_PASSWORD", "x")
 	return func(*loadOptions) {}
 }
 

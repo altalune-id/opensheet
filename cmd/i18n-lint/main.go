@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"altalune.id/template/cmd/i18n-lint/internal/keys"
+	"altalune.id/opensheet/cmd/i18n-lint/internal/keys"
 )
 
 func main() {

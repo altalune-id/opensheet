@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func TestMigratorConfig_RoleAlwaysFromMigratorRole(t *testing.T) {

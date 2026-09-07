@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	pdb "altalune.id/template/internal/platform/db"
-	pgent "altalune.id/template/internal/platform/db/entity/postgres"
-	"altalune.id/template/internal/platform/tenant"
+	pdb "altalune.id/opensheet/internal/platform/db"
+	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // NOTE: the definer wrappers are set-returning functions in FROM position, which go-jet cannot build;

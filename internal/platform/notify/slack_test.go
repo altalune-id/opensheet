@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 func TestSlackSink_Report_PostsPayload(t *testing.T) {
@@ -37,7 +37,7 @@ func TestSlackSink_Report_PostsPayload(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	s.Report(context.Background(), &apperror.Incident{
-		Code:      "altempl.unexpected",
+		Code:      "opensheet.unexpected",
 		Message:   "boom",
 		Cause:     errors.New("underlying"),
 		RequestID: "req-42",
@@ -53,7 +53,7 @@ func TestSlackSink_Report_PostsPayload(t *testing.T) {
 	mu.Lock()
 	got := string(body)
 	mu.Unlock()
-	for _, want := range []string{"req-42", "trace-42", "altempl.unexpected", "boom", "underlying"} {
+	for _, want := range []string{"req-42", "trace-42", "opensheet.unexpected", "boom", "underlying"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("body missing %q; got %s", want, got)
 		}
@@ -81,7 +81,7 @@ func TestSlackSink_Report_Overflow_DropsAndDoesNotBlock(t *testing.T) {
 		srv.Close()
 	})
 
-	inc := &apperror.Incident{Code: "altempl.unexpected", Message: "x"}
+	inc := &apperror.Incident{Code: "opensheet.unexpected", Message: "x"}
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < webhookQueueCap*3; i++ {

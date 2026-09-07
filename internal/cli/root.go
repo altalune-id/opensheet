@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/reqid"
-	"altalune.id/template/version"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/reqid"
+	"altalune.id/opensheet/version"
 )
 
 // ServerBootFn boots the fully-wired server graph (DB, migrations, services).
@@ -40,24 +40,24 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 	)
 
 	root := &cobra.Command{
-		Use:           "altempl",
-		Short:         "altempl — multitenant SSR + Connect-RPC starter",
-		Long:          "altempl is the altalune template — a multitenant Go template combining Templ + HTMX SSR and Connect-RPC over a single HTTP listener.",
+		Use:           "opensheet",
+		Short:         "opensheet — multitenant SSR + Connect-RPC starter",
+		Long:          "opensheet is the altalune template — a multitenant Go template combining Templ + HTMX SSR and Connect-RPC over a single HTTP listener.",
 		Version:       version.String(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
 	p := root.PersistentFlags()
-	p.StringVarP(&configPath, "config", "c", "", "config file (yaml). Env (ALT_*) still applies; -c makes yaml explicit.")
-	p.StringVar(&token, "token", "", "bearer token (also: ALT_TOKEN)")
-	p.StringVar(&tokenFile, "token-file", "", "path to file containing the bearer token (0600) (also: ALT_TOKEN_FILE)")
-	p.StringVar(&output, "output", "", "output format: text|json|ndjson (also: ALT_OUTPUT)")
-	p.StringVar(&orgSlug, "org", "", "override active org (slug) (also: ALT_ORG)")
-	p.StringVar(&projectSlug, "project", "", "override active project (slug) (also: ALT_PROJECT)")
+	p.StringVarP(&configPath, "config", "c", "", "config file (yaml). Env (OPENSHEET_*) still applies; -c makes yaml explicit.")
+	p.StringVar(&token, "token", "", "bearer token (also: OPENSHEET_TOKEN)")
+	p.StringVar(&tokenFile, "token-file", "", "path to file containing the bearer token (0600) (also: OPENSHEET_TOKEN_FILE)")
+	p.StringVar(&output, "output", "", "output format: text|json|ndjson (also: OPENSHEET_OUTPUT)")
+	p.StringVar(&orgSlug, "org", "", "override active org (slug) (also: OPENSHEET_ORG)")
+	p.StringVar(&projectSlug, "project", "", "override active project (slug) (also: OPENSHEET_PROJECT)")
 	p.BoolVar(&noInteractive, "no-interactive", false, "never prompt; fail if a prompt would be needed")
-	p.StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error (also: ALT_LOG_LEVEL)")
-	p.StringVar(&logFormat, "log-format", "json", "log format: json|text (also: ALT_LOG_FORMAT)")
+	p.StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error (also: OPENSHEET_LOG_LEVEL)")
+	p.StringVar(&logFormat, "log-format", "json", "log format: json|text (also: OPENSHEET_LOG_FORMAT)")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if cmd.Name() == "help" || cmd.Name() == "completion" {

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 type sessionFile struct {

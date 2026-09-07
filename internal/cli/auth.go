@@ -13,11 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"altalune.id/template/authl"
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/cli/render"
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/authl"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func newAuthCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
@@ -73,7 +73,7 @@ type loginOpts struct {
 func runLogin(cmd *cobra.Command, s *boot.Server, o loginOpts) error {
 	if o.admin || !s.Caps.ExternalIdentity {
 		if !s.Auth.LocalConfigured() {
-			return errors.New("login: local admin login not configured; set ALT_GENESIS_EMAIL / ALT_GENESIS_PASSWORD")
+			return errors.New("login: local admin login not configured; set OPENSHEET_GENESIS_EMAIL / OPENSHEET_GENESIS_PASSWORD")
 		}
 		if o.admin && s.Caps.ExternalIdentity {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warn: --admin break-glass login (OIDC bypassed for this session)")

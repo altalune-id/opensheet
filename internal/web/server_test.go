@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/web"
+	"altalune.id/opensheet/internal/web"
 )
 
 // stubRegister is a minimal Register that answers a fixed route.

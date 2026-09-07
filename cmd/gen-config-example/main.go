@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 const (
@@ -71,7 +71,7 @@ func main() {
 }
 
 func generate(format string) string {
-	keys := config.WalkEnvKeys("ALT")
+	keys := config.WalkEnvKeys("OPENSHEET")
 
 	var bootstrap, runtime []config.EnvKey
 	for _, k := range keys {
@@ -274,7 +274,7 @@ func topSegment(yaml string) string {
 }
 
 func envHeader() string {
-	return `# altempl — auto-generated from internal/platform/config struct tags.
+	return `# opensheet — auto-generated from internal/platform/config struct tags.
 # DO NOT edit by hand. Run ` + "`go tool gen-config-example`" + ` to regenerate.
 #
 # Awareness markers on each field (in [brackets] above the env var):
@@ -308,7 +308,7 @@ func envBootstrapPreamble() string {
 #   - Some fields are database-layer decisions (schema, tablePrefix) that
 #     require SQL-level intervention to change.
 #
-# Read every line here BEFORE first ` + "`altempl serve`" + `. Set them deliberately.
+# Read every line here BEFORE first ` + "`opensheet serve`" + `. Set them deliberately.
 #
 # ────────────────────────────────────────────────────────────────────
 `
@@ -329,11 +329,11 @@ func envRuntimePreamble() string {
 }
 
 func yamlHeader() string {
-	return `# altempl — auto-generated from internal/platform/config struct tags.
+	return `# opensheet — auto-generated from internal/platform/config struct tags.
 # DO NOT edit by hand. Run ` + "`go tool gen-config-example --format=yaml`" + ` to regenerate.
 #
 # Copy to config.yaml, uncomment what you need to set, and pass ` + "`-c config.yaml`" + `.
-# Every field maps to an env var (shown as ` + "`env: ALT_*`" + ` in the per-field comment).
+# Every field maps to an env var (shown as ` + "`env: OPENSHEET_*`" + ` in the per-field comment).
 # Env vars override YAML.
 #
 # Awareness markers (in [brackets] on the per-field comment):

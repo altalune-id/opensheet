@@ -19,9 +19,9 @@ const (
 )
 
 // EnvVar is the environment variable read when --output is unset.
-const EnvVar = "ALT_OUTPUT"
+const EnvVar = "OPENSHEET_OUTPUT"
 
-// Detect picks the output format: --output flag > ALT_OUTPUT env > TTY heuristic; unknown falls back to text.
+// Detect picks the output format: --output flag > OPENSHEET_OUTPUT env > TTY heuristic; unknown falls back to text.
 func Detect(cmd *cobra.Command) Format {
 	if raw := lookupFlag(cmd, "output"); raw != "" {
 		return normalize(raw)

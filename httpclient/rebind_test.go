@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 // NOTE: regression for DNS rebinding at TTL 0 — the filter must run per dial, not once per hostname.

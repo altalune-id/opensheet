@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/platform/config"
-	pdb "altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/platform/config"
+	pdb "altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/schema"
 )
 
 // TestMain warms up modernc.org/sqlite's global mutex-init on the main goroutine so parallel Open calls under -race don't hit the driver-level data race in _sqlite3MutexInit.

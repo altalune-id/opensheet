@@ -9,7 +9,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func TestRenderTemplate_SubstitutesTablePrefix(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 func applyConfigDefaults(cfg *Config) {

@@ -3,14 +3,14 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/cli/render"
-	"altalune.id/template/version"
+	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/version"
 )
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "version",
-		Short:   "Print altempl version info",
+		Short:   "Print opensheet version info",
 		GroupID: "meta",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info := version.Get()

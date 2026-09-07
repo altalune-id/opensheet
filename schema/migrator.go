@@ -14,8 +14,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 //go:embed migrations/sqlite/VERSION migrations/postgres/VERSION migrations/sqlite/*.sql migrations/postgres/*.sql

@@ -8,7 +8,7 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "altalune.id/template/internal/web"
+import "altalune.id/opensheet/internal/web"
 
 // WelcomeView is the payload for the T&C acceptance / display-name page.
 type WelcomeView struct {

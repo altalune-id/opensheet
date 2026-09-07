@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 func TestNew_Defaults(t *testing.T) {

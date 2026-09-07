@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/scheduler"
 )
 
 const unlockBudget = 5 * time.Second

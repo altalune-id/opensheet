@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"altalune.id/template/internal/onboard"
+	"altalune.id/opensheet/internal/onboard"
 )
 
 func TestNotOnboardedError_Message(t *testing.T) {

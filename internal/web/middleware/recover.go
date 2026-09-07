@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 // Recover installs a panic handler that reports via reporter and renders via tmpl.

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/org"
+	"altalune.id/opensheet/internal/org"
 )
 
 // Org is an in-memory org.Store.

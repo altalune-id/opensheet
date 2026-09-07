@@ -9,7 +9,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 // Verifier verifies a bearer token and returns the authenticated Principal.

@@ -21,17 +21,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build \
         -trimpath \
         -ldflags "-s -w \
-            -X altalune.id/template/version.Version=${VERSION} \
-            -X altalune.id/template/version.Commit=${COMMIT} \
-            -X altalune.id/template/version.BuildTime=${BUILD_TIME}" \
-        -o /out/altempl ./cmd/altempl
+            -X altalune.id/opensheet/version.Version=${VERSION} \
+            -X altalune.id/opensheet/version.Commit=${COMMIT} \
+            -X altalune.id/opensheet/version.BuildTime=${BUILD_TIME}" \
+        -o /out/opensheet ./cmd/opensheet
 
 FROM ${STATIC_BASE} AS runtime
 
-COPY --from=build /out/altempl /altempl
+COPY --from=build /out/opensheet /opensheet
 
 USER nonroot:nonroot
 EXPOSE 5150
 
-ENTRYPOINT ["/altempl"]
+ENTRYPOINT ["/opensheet"]
 CMD ["serve"]

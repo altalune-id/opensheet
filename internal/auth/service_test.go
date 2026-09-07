@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func TestService_LocalConfigured(t *testing.T) {

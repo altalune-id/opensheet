@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 // SingletonOrgMissingError signals the selfhosted singleton org has not been provisioned yet — the caller (typically OnboardWorkflow) should treat it as "onboarding still needs to run".

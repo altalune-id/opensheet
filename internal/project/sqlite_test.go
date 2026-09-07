@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/schema"
 )
 
 func newSQLiteDBForTest(t *testing.T) (*sql.DB, string) {

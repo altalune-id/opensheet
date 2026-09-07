@@ -5,8 +5,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // Tenant scopes the request context to the signed-in principal's active org.

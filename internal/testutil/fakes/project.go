@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/project"
+	"altalune.id/opensheet/internal/project"
 )
 
 // Project is an in-memory project.Store.

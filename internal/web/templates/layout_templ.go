@@ -9,8 +9,8 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/icons"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
 )
 
 func Layout(d web.LayoutData) templ.Component {
@@ -169,7 +169,7 @@ func Layout(d web.LayoutData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " <!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. --> <script src=\"https://cdn.tailwindcss.com\"></script> <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css\"><script src=\"https://unpkg.com/htmx.org@2\" defer></script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " <!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set OPENSHEET_UI_MODE=vendored. --> <script src=\"https://cdn.tailwindcss.com\"></script> <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css\"><script src=\"https://unpkg.com/htmx.org@2\" defer></script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -423,7 +423,7 @@ func topNav(d web.LayoutData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" alt=\"\" width=\"28\" height=\"28\" class=\"h-7 w-7 rounded-md\"> <span class=\"hidden text-sm font-semibold tracking-tight text-foreground sm:inline\">altempl</span></a> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" alt=\"\" width=\"28\" height=\"28\" class=\"h-7 w-7 rounded-md\"> <span class=\"hidden text-sm font-semibold tracking-tight text-foreground sm:inline\">opensheet</span></a> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -927,14 +927,14 @@ func sidebarFooterUtils(d web.LayoutData) templ.Component {
 			}
 		}
 		if d.Version != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<p class=\"px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60\">altempl · ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<p class=\"px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60\">opensheet · ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(d.Version)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/layout.templ`, Line: 228, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/layout.templ`, Line: 228, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -1007,7 +1007,7 @@ func themeInitScript() templ.Component {
 			templ_7745c5c3_Var41 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "<script>\n\t(function() {\n\t\ttry {\n\t\t\tvar t = localStorage.getItem('altempl.theme') || 'slate';\n\t\t\tvar m = localStorage.getItem('altempl.mode') || 'auto';\n\t\t\tvar root = document.documentElement;\n\t\t\troot.setAttribute('data-theme', t);\n\t\t\troot.setAttribute('data-color-mode', m);\n\t\t\tvar dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);\n\t\t\troot.classList.toggle('dark', dark);\n\t\t} catch (e) {}\n\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "<script>\n\t(function() {\n\t\ttry {\n\t\t\tvar t = localStorage.getItem('opensheet.theme') || 'slate';\n\t\t\tvar m = localStorage.getItem('opensheet.mode') || 'auto';\n\t\t\tvar root = document.documentElement;\n\t\t\troot.setAttribute('data-theme', t);\n\t\t\troot.setAttribute('data-color-mode', m);\n\t\t\tvar dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);\n\t\t\troot.classList.toggle('dark', dark);\n\t\t} catch (e) {}\n\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1327,7 +1327,7 @@ func themeApplyScript() templ.Component {
 			templ_7745c5c3_Var54 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<script>\n\t(function() {\n\t\tvar root = document.documentElement;\n\t\tfunction cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }\n\t\tfunction refreshActiveMarks() {\n\t\t\tvar t = root.getAttribute('data-theme') || 'slate';\n\t\t\tvar m = root.getAttribute('data-color-mode') || 'auto';\n\t\t\tdocument.querySelectorAll('button[data-theme-key]').forEach(function(b) {\n\t\t\t\tb.setAttribute('aria-current', String(b.getAttribute('data-theme-key') === t));\n\t\t\t});\n\t\t\tdocument.querySelectorAll('button[data-color-mode]').forEach(function(b) {\n\t\t\t\tb.setAttribute('aria-current', String(b.getAttribute('data-color-mode') === m));\n\t\t\t});\n\t\t}\n\t\tfunction refreshLabels() {\n\t\t\tvar tl = document.querySelector('[data-theme-label]');\n\t\t\tvar ml = document.querySelector('[data-mode-label]');\n\t\t\tif (tl) tl.textContent = cap(root.getAttribute('data-theme') || 'slate');\n\t\t\tif (ml) ml.textContent = cap(root.getAttribute('data-color-mode') || 'auto');\n\t\t\trefreshActiveMarks();\n\t\t}\n\t\tfunction setTheme(k) {\n\t\t\ttry { localStorage.setItem('altempl.theme', k); } catch(e) {}\n\t\t\troot.setAttribute('data-theme', k);\n\t\t\trefreshLabels();\n\t\t}\n\t\tfunction setMode(m) {\n\t\t\ttry { localStorage.setItem('altempl.mode', m); } catch(e) {}\n\t\t\troot.setAttribute('data-color-mode', m);\n\t\t\tvar dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);\n\t\t\troot.classList.toggle('dark', dark);\n\t\t\trefreshLabels();\n\t\t}\n\t\tfunction closeParentDetails(el) {\n\t\t\tvar d = el.closest('details[data-switcher]');\n\t\t\tif (d) d.removeAttribute('open');\n\t\t}\n\t\t// Wire event listeners exactly once, even when this script is included\n\t\t// multiple times (topNav + sidebar footers).\n\t\tif (!window.__altemplThemeWired) {\n\t\t\twindow.__altemplThemeWired = true;\n\t\t\tdocument.addEventListener('click', function(e) {\n\t\t\t\tvar t = e.target.closest('button[data-theme-key]');\n\t\t\t\tif (t) { setTheme(t.getAttribute('data-theme-key')); closeParentDetails(t); return; }\n\t\t\t\tvar m = e.target.closest('button[data-color-mode]');\n\t\t\t\tif (m) { setMode(m.getAttribute('data-color-mode')); closeParentDetails(m); return; }\n\t\t\t});\n\t\t\tif (window.matchMedia) {\n\t\t\t\tvar mql = window.matchMedia('(prefers-color-scheme: dark)');\n\t\t\t\tif (mql.addEventListener) mql.addEventListener('change', function(){\n\t\t\t\t\tif ((localStorage.getItem('altempl.mode') || 'auto') === 'auto') setMode('auto');\n\t\t\t\t});\n\t\t\t}\n\t\t}\n\t\t// Always refresh labels + active marks, even if the wire-guard tripped.\n\t\t// Deferred to DOMContentLoaded so we still catch buttons rendered after\n\t\t// this <script> (e.g. sidebar/mobile-drawer selectors when the FIRST\n\t\t// copy of this script executes in the top-nav).\n\t\tif (document.readyState === 'loading') {\n\t\t\tdocument.addEventListener('DOMContentLoaded', refreshLabels);\n\t\t} else {\n\t\t\trefreshLabels();\n\t\t}\n\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<script>\n\t(function() {\n\t\tvar root = document.documentElement;\n\t\tfunction cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }\n\t\tfunction refreshActiveMarks() {\n\t\t\tvar t = root.getAttribute('data-theme') || 'slate';\n\t\t\tvar m = root.getAttribute('data-color-mode') || 'auto';\n\t\t\tdocument.querySelectorAll('button[data-theme-key]').forEach(function(b) {\n\t\t\t\tb.setAttribute('aria-current', String(b.getAttribute('data-theme-key') === t));\n\t\t\t});\n\t\t\tdocument.querySelectorAll('button[data-color-mode]').forEach(function(b) {\n\t\t\t\tb.setAttribute('aria-current', String(b.getAttribute('data-color-mode') === m));\n\t\t\t});\n\t\t}\n\t\tfunction refreshLabels() {\n\t\t\tvar tl = document.querySelector('[data-theme-label]');\n\t\t\tvar ml = document.querySelector('[data-mode-label]');\n\t\t\tif (tl) tl.textContent = cap(root.getAttribute('data-theme') || 'slate');\n\t\t\tif (ml) ml.textContent = cap(root.getAttribute('data-color-mode') || 'auto');\n\t\t\trefreshActiveMarks();\n\t\t}\n\t\tfunction setTheme(k) {\n\t\t\ttry { localStorage.setItem('opensheet.theme', k); } catch(e) {}\n\t\t\troot.setAttribute('data-theme', k);\n\t\t\trefreshLabels();\n\t\t}\n\t\tfunction setMode(m) {\n\t\t\ttry { localStorage.setItem('opensheet.mode', m); } catch(e) {}\n\t\t\troot.setAttribute('data-color-mode', m);\n\t\t\tvar dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);\n\t\t\troot.classList.toggle('dark', dark);\n\t\t\trefreshLabels();\n\t\t}\n\t\tfunction closeParentDetails(el) {\n\t\t\tvar d = el.closest('details[data-switcher]');\n\t\t\tif (d) d.removeAttribute('open');\n\t\t}\n\t\t// Wire event listeners exactly once, even when this script is included\n\t\t// multiple times (topNav + sidebar footers).\n\t\tif (!window.__altemplThemeWired) {\n\t\t\twindow.__altemplThemeWired = true;\n\t\t\tdocument.addEventListener('click', function(e) {\n\t\t\t\tvar t = e.target.closest('button[data-theme-key]');\n\t\t\t\tif (t) { setTheme(t.getAttribute('data-theme-key')); closeParentDetails(t); return; }\n\t\t\t\tvar m = e.target.closest('button[data-color-mode]');\n\t\t\t\tif (m) { setMode(m.getAttribute('data-color-mode')); closeParentDetails(m); return; }\n\t\t\t});\n\t\t\tif (window.matchMedia) {\n\t\t\t\tvar mql = window.matchMedia('(prefers-color-scheme: dark)');\n\t\t\t\tif (mql.addEventListener) mql.addEventListener('change', function(){\n\t\t\t\t\tif ((localStorage.getItem('opensheet.mode') || 'auto') === 'auto') setMode('auto');\n\t\t\t\t});\n\t\t\t}\n\t\t}\n\t\t// Always refresh labels + active marks, even if the wire-guard tripped.\n\t\t// Deferred to DOMContentLoaded so we still catch buttons rendered after\n\t\t// this <script> (e.g. sidebar/mobile-drawer selectors when the FIRST\n\t\t// copy of this script executes in the top-nav).\n\t\tif (document.readyState === 'loading') {\n\t\t\tdocument.addEventListener('DOMContentLoaded', refreshLabels);\n\t\t} else {\n\t\t\trefreshLabels();\n\t\t}\n\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

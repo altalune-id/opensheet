@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"altalune.id/template/worker"
+	"altalune.id/opensheet/worker"
 )
 
 // PrometheusHandler returns an http.Handler serving the /metrics endpoint.

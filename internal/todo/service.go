@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
-var tracer = otel.Tracer("altalune.id/template/internal/todo")
+var tracer = otel.Tracer("altalune.id/opensheet/internal/todo")
 
 // Service is the todos driving port.
 type Service struct {

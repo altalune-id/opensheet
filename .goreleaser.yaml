@@ -1,6 +1,6 @@
 version: 2
 
-project_name: altempl
+project_name: opensheet
 
 before:
   hooks:
@@ -9,9 +9,9 @@ before:
 report_sizes: true
 
 builds:
-  - id: altempl
-    main: ./cmd/altempl
-    binary: altempl
+  - id: opensheet
+    main: ./cmd/opensheet
+    binary: opensheet
     mod_timestamp: "{{ .CommitTimestamp }}"
     env:
       - CGO_ENABLED=0
@@ -25,9 +25,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X altalune.id/template/version.Version={{.Version}}
-      - -X altalune.id/template/version.Commit={{.Commit}}
-      - -X altalune.id/template/version.BuildTime={{.Date}}
+      - -X altalune.id/opensheet/version.Version={{.Version}}
+      - -X altalune.id/opensheet/version.Commit={{.Commit}}
+      - -X altalune.id/opensheet/version.BuildTime={{.Date}}
 
 archives:
   - id: default
@@ -97,7 +97,7 @@ dockers:
       - --build-arg=COMMIT={{ .FullCommit }}
       - --build-arg=BUILD_TIME={{ .Date }}
     image_templates:
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-amd64"
   - id: linux-arm64
     goos: linux
     goarch: arm64
@@ -115,17 +115,17 @@ dockers:
       - --build-arg=COMMIT={{ .FullCommit }}
       - --build-arg=BUILD_TIME={{ .Date }}
     image_templates:
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-arm64"
 
 docker_manifests:
-  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}"
+  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}"
     image_templates:
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:latest"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:latest"
     image_templates:
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GHCR_OWNER }}/altempl:{{ .Version }}-arm64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-amd64"
+      - "ghcr.io/{{ .Env.GHCR_OWNER }}/opensheet:{{ .Version }}-arm64"
 
 release:
   github:

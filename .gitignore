@@ -22,7 +22,7 @@ coverage.*
 # Local state
 *.db
 *.db-journal
-~/.altempl/
+~/.opensheet/
 
 # Editor
 .idea/
@@ -38,7 +38,7 @@ node_modules/
 /docs/superpowers/
 
 # App data
-.altempl-data
+.opensheet-data
 .cache
 
 # Debugging / profiling

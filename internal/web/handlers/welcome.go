@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // WelcomeHandler renders the per-user welcome page (T&C accept + display name fixup).

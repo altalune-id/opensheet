@@ -3,7 +3,7 @@ package logger_test
 import (
 	"testing"
 
-	"altalune.id/template/logger"
+	"altalune.id/opensheet/logger"
 )
 
 func TestNew_JSONHandlerByDefault(t *testing.T) {

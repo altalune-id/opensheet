@@ -12,8 +12,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/web/middleware"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/web/middleware"
 )
 
 // stubReporter counts calls and returns a fixed AppError.

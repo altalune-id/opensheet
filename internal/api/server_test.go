@@ -8,9 +8,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	authv1 "altalune.id/template/gen/go/auth/v1"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/reqid"
+	authv1 "altalune.id/opensheet/gen/go/auth/v1"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/reqid"
 )
 
 func TestServer_Chain_RoundTrip_EchoesRequestID(t *testing.T) {

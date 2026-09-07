@@ -1,6 +1,6 @@
 version: "2"
 
-# altempl's golangci-lint config. v2 schema.
+# opensheet's golangci-lint config. v2 schema.
 # Run locally:  golangci-lint run --timeout=3m ./...
 # CI runs the same command via golangci/golangci-lint-action.
 
@@ -112,10 +112,10 @@ linters:
           allow:
             - $gostd
             - github.com/google/uuid
-            - altalune.id/template/internal/platform/tenant
-            - altalune.id/template/internal/apperror
-            - altalune.id/template/gen/go/apperror/v1
-            - altalune.id/template/reqid
+            - altalune.id/opensheet/internal/platform/tenant
+            - altalune.id/opensheet/internal/apperror
+            - altalune.id/opensheet/gen/go/apperror/v1
+            - altalune.id/opensheet/reqid
             - google.golang.org/grpc/codes
         scheduler-purity:
           list-mode: strict
@@ -126,7 +126,7 @@ linters:
             - $gostd
             - go.opentelemetry.io/otel
             - github.com/robfig/cron/v3
-            - altalune.id/template/reqid
+            - altalune.id/opensheet/reqid
         httpclient-purity:
           list-mode: strict
           files:
@@ -153,25 +153,25 @@ linters:
           files:
             - "**/internal/platform/**"
           deny:
-            - pkg: "altalune.id/template/internal/todo"
+            - pkg: "altalune.id/opensheet/internal/todo"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/user"
+            - pkg: "altalune.id/opensheet/internal/user"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/org"
+            - pkg: "altalune.id/opensheet/internal/org"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/project"
+            - pkg: "altalune.id/opensheet/internal/project"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/invite"
+            - pkg: "altalune.id/opensheet/internal/invite"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/auth"
+            - pkg: "altalune.id/opensheet/internal/auth"
               desc: "platform must not import domain packages"
-            - pkg: "altalune.id/template/internal/api"
+            - pkg: "altalune.id/opensheet/internal/api"
               desc: "platform must not import interfaces"
-            - pkg: "altalune.id/template/internal/web"
+            - pkg: "altalune.id/opensheet/internal/web"
               desc: "platform must not import interfaces"
-            - pkg: "altalune.id/template/internal/cli"
+            - pkg: "altalune.id/opensheet/internal/cli"
               desc: "platform must not import interfaces"
-            - pkg: "altalune.id/template/internal/boot"
+            - pkg: "altalune.id/opensheet/internal/boot"
               desc: "platform must not import boot"
         platform-boundary-root:
           list-mode: lax
@@ -185,7 +185,7 @@ linters:
             - "**/mailer/**"
             - "**/httpclient/**"
           deny:
-            - pkg: "altalune.id/template/internal"
+            - pkg: "altalune.id/opensheet/internal"
               desc: "root-level shared packages must NOT depend on any internal/ package (import inversion)"
     forbidigo:
       forbid:
@@ -220,7 +220,7 @@ linters:
       - path: _templ\.go
         linters:
           - all
-      - path: cmd/altempl/main\.go
+      - path: cmd/opensheet/main\.go
         linters:
           - forbidigo
           - gochecknoglobals
@@ -245,7 +245,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - altalune.id/template
+        - altalune.id/opensheet
 
 issues:
   # Fail CI on any issue.

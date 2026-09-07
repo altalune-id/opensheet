@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/logger"
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/logger"
+	"altalune.id/opensheet/reqid"
 )
 
 func TestContextHandler_WithAttrs_PreservesWrapper(t *testing.T) {

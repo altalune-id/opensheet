@@ -35,7 +35,7 @@ func bindEnv(v *viper.Viper, prefix string, t reflect.Type) {
 			bindEnv(v, key, ft)
 			continue
 		}
-		_ = v.BindEnv(key, envVarName("ALT", key))
+		_ = v.BindEnv(key, envVarName("OPENSHEET", key))
 	}
 }
 

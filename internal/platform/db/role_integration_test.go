@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/nanoid"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/nanoid"
 )
 
 func TestOpen_AppliesRoleOnEveryConnection(t *testing.T) {

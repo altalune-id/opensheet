@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/user"
 )
 
 func newInitCmd(bootServer ServerBootFn) *cobra.Command {
@@ -24,7 +24,7 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:     "init",
-		Short:   "Initialize altempl on first run — create the first admin, org, and project.",
+		Short:   "Initialize opensheet on first run — create the first admin, org, and project.",
 		GroupID: "runtime",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -85,7 +85,7 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("altempl: onboarded admin=%s (org=%s, project=%s)\n", u.Email, orgSlug, projectSlug)
+			cmd.Printf("opensheet: onboarded admin=%s (org=%s, project=%s)\n", u.Email, orgSlug, projectSlug)
 			return nil
 		},
 	}

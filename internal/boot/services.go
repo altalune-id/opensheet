@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/password"
-	"altalune.id/template/internal/platform"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/password"
+	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/user"
 )
 
 // Services is every domain store, service and workflow the composition root wires.

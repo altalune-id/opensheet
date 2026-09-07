@@ -9,12 +9,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/logger"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/logger"
 )
 
 func noopUnexpected() apperror.UnexpectedFunc {
@@ -111,21 +111,21 @@ func TestLogSetupToken_PinnedTokenIsNeverLogged(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: logger.Redact(logger.Config{})}))
 	cfg := config.Defaults()
-	cfg.HTTP.BaseURL = "https://altempl.example/"
+	cfg.HTTP.BaseURL = "https://opensheet.example/"
 	cfg.HTTP.BasePath = "/app"
 	cfg.Onboard.SetupToken = "pinned-value"
 
 	logSetupToken(cfg, log, "pinned-value")
 
 	require.NotContains(t, buf.String(), "pinned-value", "a pinned token must never reach the logs")
-	require.Contains(t, buf.String(), "https://altempl.example/app/onboard")
+	require.Contains(t, buf.String(), "https://opensheet.example/app/onboard")
 }
 
 func TestLogSetupToken_MintedTokenIsLoggedWithTheOnboardURL(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: logger.Redact(logger.Config{})}))
 	cfg := config.Defaults()
-	cfg.HTTP.BaseURL = "https://altempl.example"
+	cfg.HTTP.BaseURL = "https://opensheet.example"
 	cfg.HTTP.BasePath = ""
 
 	logSetupToken(cfg, log, "minted-value")
@@ -133,5 +133,5 @@ func TestLogSetupToken_MintedTokenIsLoggedWithTheOnboardURL(t *testing.T) {
 	// SECURITY: logger.Redact masks any attr key matching /token/, so a redacted value here would lock a fresh deployment out of /onboard.
 	require.NotContains(t, buf.String(), "<redacted>")
 	require.Contains(t, buf.String(), "minted-value")
-	require.Contains(t, buf.String(), "https://altempl.example/onboard")
+	require.Contains(t, buf.String(), "https://opensheet.example/onboard")
 }

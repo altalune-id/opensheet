@@ -9,8 +9,8 @@ import (
 	jetsqlite "github.com/go-jet/jet/v2/sqlite"
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/db"
-	sqliteent "altalune.id/template/internal/platform/db/entity/sqlite"
+	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
 // OrgReader lists every org id, across every tenant scope.

@@ -1,7 +1,7 @@
 // Package capabilities computes a snapshot of feature flags derived from Config.
 package capabilities
 
-import "altalune.id/template/internal/platform/config"
+import "altalune.id/opensheet/internal/platform/config"
 
 // Capabilities is the read-only feature-flag snapshot derived from Config.
 type Capabilities struct {

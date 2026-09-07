@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func TestSessionFile_RoundTrip(t *testing.T) {

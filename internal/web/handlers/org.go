@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // OrgHandler owns /orgs, /orgs/new, /orgs/{slug} and members routes.

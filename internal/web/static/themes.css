@@ -1,5 +1,5 @@
 /*
- * altempl theme catalog.
+ * opensheet theme catalog.
  *
  * MUST load AFTER basecoat.css / Tailwind so these variables win the cascade —
  * basecoat.css sets a neutral :root palette in oklch() at the same specificity,

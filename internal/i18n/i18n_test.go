@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"altalune.id/template/internal/i18n"
+	"altalune.id/opensheet/internal/i18n"
 )
 
 func TestTranslator_MissingKeyInLocaleFallsBackToDefault(t *testing.T) {

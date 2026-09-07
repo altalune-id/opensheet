@@ -6,7 +6,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/reqid"
 )
 
 // ContextHandler wraps a slog.Handler and injects request_id, trace_id, and span_id from ctx into every record.

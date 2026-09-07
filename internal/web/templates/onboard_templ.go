@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"net/url"
 
-	"altalune.id/template/internal/web"
+	"altalune.id/opensheet/internal/web"
 )
 
 type OnboardView struct {

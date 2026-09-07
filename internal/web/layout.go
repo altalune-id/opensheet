@@ -4,9 +4,9 @@ import (
 	"os"
 	"strings"
 
-	"altalune.id/template/internal/i18n"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/session"
 
 	"github.com/a-h/templ"
 )
@@ -21,9 +21,9 @@ const (
 	UIModeVendored UIMode = "vendored"
 )
 
-// ResolveUIMode reads ALT_UI_MODE; "vendored" flips to vendored, otherwise CDN.
+// ResolveUIMode reads OPENSHEET_UI_MODE; "vendored" flips to vendored, otherwise CDN.
 func ResolveUIMode() UIMode {
-	if os.Getenv("ALT_UI_MODE") == string(UIModeVendored) {
+	if os.Getenv("OPENSHEET_UI_MODE") == string(UIModeVendored) {
 		return UIModeVendored
 	}
 	return UIModeCDN

@@ -3,7 +3,7 @@ title: Privacy Policy
 updated: 2026-09-02
 ---
 
-<!-- SAMPLE — replace before public release. This is placeholder privacy text for a self-hosted altempl deployment. Consult counsel before publishing. -->
+<!-- SAMPLE — replace before public release. This is placeholder privacy text for a self-hosted opensheet deployment. Consult counsel before publishing. -->
 
 # Privacy Policy
 

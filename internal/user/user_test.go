@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"altalune.id/template/internal/user"
+	"altalune.id/opensheet/internal/user"
 )
 
 func TestNew_OK(t *testing.T) {

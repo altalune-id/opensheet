@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 func TestIsPrivateAddressError(t *testing.T) {

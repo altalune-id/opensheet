@@ -1,4 +1,4 @@
-module altalune.id/template
+module altalune.id/opensheet
 
 go 1.26
 
@@ -143,8 +143,8 @@ require (
 )
 
 tool (
-	altalune.id/template/cmd/gen-config-example
-	altalune.id/template/cmd/gen-tenant-tables
-	altalune.id/template/cmd/i18n-lint
+	altalune.id/opensheet/cmd/gen-config-example
+	altalune.id/opensheet/cmd/gen-tenant-tables
+	altalune.id/opensheet/cmd/i18n-lint
 	github.com/a-h/templ/cmd/templ
 )

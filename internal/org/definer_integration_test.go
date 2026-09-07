@@ -16,16 +16,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/nanoid"
-	"altalune.id/template/schema"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/nanoid"
+	"altalune.id/opensheet/schema"
 )
 
 // NOTE: pgtest reuses TEST_PG_DSN when set, so role and table names must be unique per run.
@@ -199,8 +199,8 @@ func TestPostgres_DefinerWrappers_ListInsideCallerTransaction(t *testing.T) {
 func newDefinerService(t *testing.T, f *definerFixture) *org.Service {
 	t.Helper()
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", msg, codes.Internal,
-			&apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", msg, codes.Internal,
+			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	return org.NewService(f.store, capabilities.Capabilities{OrgCreation: true},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)

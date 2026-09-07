@@ -6,10 +6,10 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/cli/render"
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/scheduler"
 )
 
 func newSchedulerCmd(bootServer ServerBootFn) *cobra.Command {
@@ -80,7 +80,7 @@ func newSchedulerRunCmd(bootServer ServerBootFn) *cobra.Command {
 			if err := runner.RunOnce(cmd.Context(), args[0]); err != nil {
 				return schedulerAppError(err)
 			}
-			cmd.Printf("altempl: job %q completed\n", args[0])
+			cmd.Printf("opensheet: job %q completed\n", args[0])
 			return nil
 		},
 	}

@@ -1,4 +1,4 @@
-# Contributing to altempl
+# Contributing to opensheet
 
 ## Workflow
 
@@ -39,7 +39,7 @@ touches them. Two ways to run them:
 make test-integration
 
 # 2) Reuse a running Postgres (faster).
-TEST_PG_DSN='postgres://altempl:altempl@localhost:5432/altempl_test?sslmode=disable' \
+TEST_PG_DSN='postgres://opensheet:opensheet@localhost:5432/altempl_test?sslmode=disable' \
     make test-integration
 ```
 

@@ -3,11 +3,11 @@ title: Terms of Service
 updated: 2026-09-02
 ---
 
-<!-- SAMPLE — replace before public release. This is placeholder legal text for a self-hosted altempl deployment. Consult counsel before publishing. -->
+<!-- SAMPLE — replace before public release. This is placeholder legal text for a self-hosted opensheet deployment. Consult counsel before publishing. -->
 
 # Terms of Service
 
-By using this deployment of altempl ("the Service"), you agree to the terms below.
+By using this deployment of opensheet ("the Service"), you agree to the terms below.
 
 ## 1. Acceptance
 

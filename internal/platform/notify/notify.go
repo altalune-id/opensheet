@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/mailer"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/mailer"
 )
 
 // Build dispatches each SinkConfig into a concrete ReportSink.

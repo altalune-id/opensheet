@@ -1,7 +1,7 @@
-# altempl
+# opensheet
 
 Reference multitenant Go template — Templ + HTMX SSR + Connect-RPC on one HTTP
-listener. Module path: `altalune.id/template`. Binary: `altempl`.
+listener. Module path: `altalune.id/opensheet`. Binary: `opensheet`.
 
 ## Quick start
 
@@ -9,15 +9,15 @@ Local binary (SQLite, single genesis admin):
 
 ```bash
 make build
-ALT_GENESIS_EMAIL=admin@local ALT_GENESIS_PASSWORD=change-me ./bin/altempl serve
+OPENSHEET_GENESIS_EMAIL=admin@local OPENSHEET_GENESIS_PASSWORD=change-me ./bin/opensheet serve
 # open http://127.0.0.1:5150/login
 ```
 
-Full stack (Postgres + Mailpit + altempl) via `compose.yaml`:
+Full stack (Postgres + Mailpit + opensheet) via `compose.yaml`:
 
 ```bash
 make compose-up
-# altempl:  http://127.0.0.1:5150/login
+# opensheet:  http://127.0.0.1:5150/login
 # mailpit:  http://127.0.0.1:8025    (every outbound email lands here)
 ```
 
@@ -26,16 +26,16 @@ Cloud config (Postgres + OIDC):
 ```bash
 cp config.example.yaml config.yaml    # edit
 make build
-./bin/altempl -c config.yaml serve
+./bin/opensheet -c config.yaml serve
 ```
 
 ## Layout
 
 ```
-altempl/
+opensheet/
 ├── api/                # buf-managed proto sources
 ├── authl/              # RFC 8252 OIDC PKCE loopback (exported)
-├── cmd/altempl/        # main package
+├── cmd/opensheet/        # main package
 ├── docs/               # configuration, deployment, CLI contract, module & platform templates
 ├── gen/                # generated proto (do not edit)
 ├── internal/

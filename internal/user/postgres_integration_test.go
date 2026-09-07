@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/schema"
 )
 
 func newPostgresStoreForTest(t *testing.T) user.Store {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/schema"
 )
 
 func TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole(t *testing.T) {

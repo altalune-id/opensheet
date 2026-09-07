@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"altalune.id/template/internal/i18n"
+	"altalune.id/opensheet/internal/i18n"
 )
 
 func handler(t *testing.T, seen *i18n.Locale) http.HandlerFunc {

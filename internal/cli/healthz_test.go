@@ -49,7 +49,7 @@ func TestHealthzCmd(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("ALT_OUTPUT", tc.output)
+			t.Setenv("OPENSHEET_OUTPUT", tc.output)
 			srv := httptest.NewServer(tc.handler)
 			t.Cleanup(srv.Close)
 

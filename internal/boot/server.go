@@ -12,30 +12,30 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"altalune.id/template/authl"
-	"altalune.id/template/internal/api"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/notify"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/platform/tokens"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/logger"
-	"altalune.id/template/mailer"
-	"altalune.id/template/nanoid"
-	"altalune.id/template/scheduler"
-	"altalune.id/template/telemetry"
-	"altalune.id/template/worker"
+	"altalune.id/opensheet/authl"
+	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/notify"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/tokens"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/logger"
+	"altalune.id/opensheet/mailer"
+	"altalune.id/opensheet/nanoid"
+	"altalune.id/opensheet/scheduler"
+	"altalune.id/opensheet/telemetry"
+	"altalune.id/opensheet/worker"
 )
 
 const setupTokenLen = 32
@@ -131,8 +131,8 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Verifier: verifier,
 		Mail:     mail,
 		AltAuth:  altAuth,
-		Tracer:   tp.Tracer("altalune.id/template"),
-		Meter:    mp.Meter("altalune.id/template"),
+		Tracer:   tp.Tracer("altalune.id/opensheet"),
+		Meter:    mp.Meter("altalune.id/opensheet"),
 		Notify:   sinks,
 		Nano:     nanoid.New,
 		Caps:     caps,
@@ -364,7 +364,7 @@ func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mint ephemeral state secret: %w", err)
 	}
-	log.Warn("http.stateSecret is empty — using an ephemeral secret; set ALT_HTTP_STATE_SECRET to persist")
+	log.Warn("http.stateSecret is empty — using an ephemeral secret; set OPENSHEET_HTTP_STATE_SECRET to persist")
 	return ephemeral, nil
 }
 

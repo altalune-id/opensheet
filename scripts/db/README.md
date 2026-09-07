@@ -34,7 +34,7 @@ edit rows, `_reader` reads, `_ops` manages other humans. No role in the graph
 holds a LOGIN + `BYPASSRLS` combination.
 
 `SET ROLE <app>_owner` is applied once per migration connection from
-`ALT_DB_MIGRATOR_ROLE`; the migration files carry no role statements.
+`OPENSHEET_DB_MIGRATOR_ROLE`; the migration files carry no role statements.
 
 ### Cross-tenant reads
 

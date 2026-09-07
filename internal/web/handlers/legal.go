@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"altalune.id/template/internal/legal"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/legal"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // LegalHandler serves the embedded Terms and Privacy documents at /terms and /privacy.

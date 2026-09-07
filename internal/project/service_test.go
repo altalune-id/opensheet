@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 func newTestService(t *testing.T) (*project.Service, *fakes.Project) {

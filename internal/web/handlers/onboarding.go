@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // OnboardingHandler wraps the user Service for the T&C + rename form.

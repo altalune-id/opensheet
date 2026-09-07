@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"altalune.id/template/internal/onboard"
+	"altalune.id/opensheet/internal/onboard"
 )
 
 // Onboard is an in-memory onboard.Store for tests.

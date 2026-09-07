@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/todo"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/todo"
 )
 
 func TestService_ByID_HappyPath(t *testing.T) {

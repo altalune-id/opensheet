@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/fakes"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 func newTestService(t *testing.T, orgCreation bool) (*org.Service, *fakes.Org) {
@@ -25,7 +25,7 @@ func newTestService(t *testing.T, orgCreation bool) (*org.Service, *fakes.Org) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	store := fakes.NewOrg()
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	svc := org.NewService(store, capabilities.Capabilities{OrgCreation: orgCreation}, log, unexpected)
 	return svc, store
@@ -287,7 +287,7 @@ func newServiceWithStore(t *testing.T, store org.Store) *org.Service {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	return org.NewService(store, capabilities.Capabilities{OrgCreation: true}, log, unexpected)
 }

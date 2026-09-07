@@ -13,13 +13,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/nanoid"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/nanoid"
+	"altalune.id/opensheet/schema"
 )
 
 // NOTE: pgtest reuses TEST_PG_DSN when set, so role and table names must be unique per run.

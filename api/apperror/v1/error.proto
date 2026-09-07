@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package apperror.v1;
 
-option go_package = "altalune.id/template/gen/go/apperror/v1;apperrorv1";
+option go_package = "altalune.id/opensheet/gen/go/apperror/v1;apperrorv1";
 
 message ErrorDetail {
   string code = 1;

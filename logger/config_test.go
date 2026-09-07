@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/logger"
+	"altalune.id/opensheet/logger"
 )
 
 func TestConfig_Validate_RecognisedLevels(t *testing.T) {

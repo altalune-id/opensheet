@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 func openTestPool(t *testing.T) db.Pool {

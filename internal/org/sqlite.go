@@ -12,7 +12,7 @@ import (
 	"github.com/go-jet/jet/v2/sqlite"
 	"github.com/google/uuid"
 
-	sqliteent "altalune.id/template/internal/platform/db/entity/sqlite"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
 type sqliteStore struct {

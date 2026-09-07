@@ -10,12 +10,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
-var tracer = otel.Tracer("altalune.id/template/internal/invite")
+var tracer = otel.Tracer("altalune.id/opensheet/internal/invite")
 
 // Service is the invites driving port.
 type Service struct {
@@ -47,7 +47,7 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (*Invite, error) {
 	ctx, span := tracer.Start(ctx, "invite.Send")
 	defer span.End()
 	if !s.enabled {
-		return nil, &InvitesDisabledError{Reason: "invites require OIDC in selfhosted mode; set ALT_OIDC_ISSUER to enable"}
+		return nil, &InvitesDisabledError{Reason: "invites require OIDC in selfhosted mode; set OPENSHEET_OIDC_ISSUER to enable"}
 	}
 	return s.send.Execute(ctx, req)
 }

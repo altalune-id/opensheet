@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	pdb "altalune.id/template/internal/platform/db"
+	pdb "altalune.id/opensheet/internal/platform/db"
 )
 
 func TestPostgresStore_WrapperStatementsBindValuesNotInterpolate(t *testing.T) {

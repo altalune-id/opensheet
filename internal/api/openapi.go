@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	genassets "altalune.id/template/gen"
+	genassets "altalune.id/opensheet/gen"
 )
 
 // BasicAuth guards the OpenAPI endpoints when set. Empty = no guard.
@@ -224,7 +224,7 @@ func openAPIGuard(auth *BasicAuth) func(http.Handler) http.Handler {
 			userOK := subtle.ConstantTimeCompare([]byte(u), []byte(want.User)) == 1
 			passOK := subtle.ConstantTimeCompare([]byte(p), []byte(want.Password)) == 1
 			if !ok || !userOK || !passOK {
-				w.Header().Set("WWW-Authenticate", `Basic realm="altempl openapi"`)
+				w.Header().Set("WWW-Authenticate", `Basic realm="opensheet openapi"`)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

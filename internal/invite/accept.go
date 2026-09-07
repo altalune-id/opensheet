@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 type userStore interface {

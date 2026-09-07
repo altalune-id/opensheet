@@ -10,17 +10,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/authl"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/authl"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // AuthHandler bundles the login/logout/callback routes into a single receiver.

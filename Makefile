@@ -1,20 +1,20 @@
 .PHONY: help build test test-race test-cover vet fmt check generate ui-vendor buf migrate docker clean install-tools lint dev
 
 GO      ?= go
-BIN     := bin/altempl
+BIN     := bin/opensheet
 VERSION := $(shell cat version/VERSION 2>/dev/null || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w \
-	-X altalune.id/template/version.Version=$(VERSION) \
-	-X altalune.id/template/version.Commit=$(COMMIT) \
-	-X altalune.id/template/version.BuildTime=$(BUILD)
+	-X altalune.id/opensheet/version.Version=$(VERSION) \
+	-X altalune.id/opensheet/version.Commit=$(COMMIT) \
+	-X altalune.id/opensheet/version.BuildTime=$(BUILD)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
 
-build: generate ## Build the altempl binary into bin/
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/altempl
+build: generate ## Build the opensheet binary into bin/
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/opensheet
 
 test: ## Run unit tests (fast; no external services)
 	$(GO) test ./...
@@ -84,12 +84,12 @@ icons-add: ## Add a Lucide icon: make icons-add NAME=trash-2
 	@curl -fsSL -o internal/web/icons/svg/$(NAME).svg "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/$(NAME).svg" && echo "  added $(NAME)"
 
 migrate: ## Run pending migrations against the configured DB
-	$(GO) run ./cmd/altempl migrate up
+	$(GO) run ./cmd/opensheet migrate up
 
 docker: ## Build the docker image
-	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD) -t altempl:dev .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD) -t opensheet:dev .
 
-compose-up: ## Start local dev stack (postgres + mailpit + altempl) via compose.yaml
+compose-up: ## Start local dev stack (postgres + mailpit + opensheet) via compose.yaml
 	@mkdir -p docker/data/pg
 	@if command -v docker >/dev/null 2>&1; then docker compose up -d --build; \
 	elif command -v podman-compose >/dev/null 2>&1; then podman-compose up -d --build; \

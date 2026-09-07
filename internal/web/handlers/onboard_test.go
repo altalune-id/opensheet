@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/web/handlers"
+	"altalune.id/opensheet/internal/web/handlers"
 )
 
 func TestOnboardingGate_RedirectsWhenRequired(t *testing.T) {

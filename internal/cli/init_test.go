@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func TestInit_SucceedsAndSecondCallReportsAlreadyOnboarded(t *testing.T) {
 	setSelfhostedEnv(t)
-	t.Setenv("ALT_GENESIS_EMAIL", "")
-	t.Setenv("ALT_GENESIS_PASSWORD", "")
+	t.Setenv("OPENSHEET_GENESIS_EMAIL", "")
+	t.Setenv("OPENSHEET_GENESIS_PASSWORD", "")
 
 	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
 		return boot.BootServer(ctx, cfg)

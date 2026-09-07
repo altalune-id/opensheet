@@ -14,15 +14,15 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/handlers"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/handlers"
 )
 
 func TestPostRemoveMember_SystemProtected_Returns409(t *testing.T) {
@@ -30,7 +30,7 @@ func TestPostRemoveMember_SystemProtected_Returns409(t *testing.T) {
 
 	store := fakes.NewOrg()
 	unexpected := func(_ context.Context, _ string, cause error, _ ...any) *apperror.AppError {
-		return apperror.New("altempl.unexpected", "unexpected", codes.Internal, &apperrorv1.ErrorDetail{Code: "altempl.unexpected"}).WithCause(cause)
+		return apperror.New("opensheet.unexpected", "unexpected", codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	orgSvc := org.NewService(store, capabilities.Capabilities{OrgCreation: true}, slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)
 

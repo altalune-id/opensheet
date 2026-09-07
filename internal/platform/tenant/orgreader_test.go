@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 func TestNewOrgReader_PostgresReadsTheDefinerWrapper(t *testing.T) {

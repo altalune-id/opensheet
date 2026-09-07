@@ -1,4 +1,4 @@
-# altempl platform template
+# opensheet platform template
 
 Every infrastructure package under `internal/platform/<name>/` follows
 this shape. Platform packages are the cross-cutting primitives that
@@ -103,7 +103,7 @@ knobs. Required inputs are positional constructor args.
   }
   ```
 - Env-var mapping is automatic via the `BindEnv` walker in
-  `internal/platform/config/`. `ALT_CACHE_URL` binds to `cfg.Cache.URL`.
+  `internal/platform/config/`. `OPENSHEET_CACHE_URL` binds to `cfg.Cache.URL`.
 - Provide `func (c *Config) Validate() error` when constraints are non-trivial.
 
 ### Errors
@@ -117,7 +117,7 @@ package accepts one. Never `panic` above `TestMain`.
 ### Logging + telemetry
 
 - Every platform package accepts a `*slog.Logger`.
-- Package-level `var tracer = otel.Tracer("altalune.id/template/internal/platform/<name>")`.
+- Package-level `var tracer = otel.Tracer("altalune.id/opensheet/internal/platform/<name>")`.
 - One span per meaningful operation. Attributes: `component`, `operation`, `id`.
 - Metrics: OTel meter, not Prometheus registry directly.
 
@@ -152,7 +152,7 @@ Every worker:
 
 **Worker or scheduler `Job`?** A `Job` when at most one replica should do the
 work per tick, or when an operator needs to trigger it by name
-(`altempl scheduler run <job>`). A `Worker` when every replica needs its own
+(`opensheet scheduler run <job>`). A `Worker` when every replica needs its own
 copy of the result — per-process state such as a health snapshot — or when
 per-tick failures must not reach the scheduler's `ErrorReporter`.
 
@@ -346,7 +346,7 @@ goroutines, no dropped requests.
    construction block, one `sup.Register(...)` if it's a Worker.
 
 Add the config schema to `config.example.yaml` (auto-generated) and
-`.env.example` with `ALT_*` env-var mapping.
+`.env.example` with `OPENSHEET_*` env-var mapping.
 
 ## 9. Review checklist
 

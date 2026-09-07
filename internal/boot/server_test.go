@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/logger"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/logger"
 )
 
 func newSmokeCfg(t *testing.T) *config.Config {

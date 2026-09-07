@@ -1,8 +1,8 @@
 package templates
 
 import (
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/icons"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
 )
 
 templ Layout(d web.LayoutData) {
@@ -22,7 +22,7 @@ templ Layout(d web.LayoutData) {
 				<script src={ d.Static("htmx.min.js") } defer></script>
 			} else {
 				@tailwindThemeBridge()
-				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set ALT_UI_MODE=vendored. -->
+				<!-- CDN mode is for local dev only; the Tailwind CDN prints a production warning. For prod deploys, vendor assets via `scripts/ui-vendor.sh` and set OPENSHEET_UI_MODE=vendored. -->
 				<script src="https://cdn.tailwindcss.com"></script>
 				<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/basecoat-css@latest/dist/basecoat.min.css"/>
 				<script src="https://unpkg.com/htmx.org@2" defer></script>
@@ -110,7 +110,7 @@ templ topNav(d web.LayoutData) {
 			}
 			<a href={ templ.SafeURL(d.Href("/")) } class="flex items-center gap-2">
 				<img src={ d.Static("apple-touch-icon.png") } alt="" width="28" height="28" class="h-7 w-7 rounded-md"/>
-				<span class="hidden text-sm font-semibold tracking-tight text-foreground sm:inline">altempl</span>
+				<span class="hidden text-sm font-semibold tracking-tight text-foreground sm:inline">opensheet</span>
 			</a>
 			if d.ActiveProject != nil {
 				<span class="hidden text-muted-foreground/50 md:inline">/</span>
@@ -225,7 +225,7 @@ templ sidebarFooterUtils(d web.LayoutData) {
 			</div>
 		}
 		if d.Version != "" {
-			<p class="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">altempl · { d.Version }</p>
+			<p class="px-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">opensheet · { d.Version }</p>
 		}
 		@themeApplyScript()
 	</div>
@@ -283,8 +283,8 @@ templ themeInitScript() {
 	<script>
 	(function() {
 		try {
-			var t = localStorage.getItem('altempl.theme') || 'slate';
-			var m = localStorage.getItem('altempl.mode') || 'auto';
+			var t = localStorage.getItem('opensheet.theme') || 'slate';
+			var m = localStorage.getItem('opensheet.mode') || 'auto';
 			var root = document.documentElement;
 			root.setAttribute('data-theme', t);
 			root.setAttribute('data-color-mode', m);
@@ -377,12 +377,12 @@ templ themeApplyScript() {
 			refreshActiveMarks();
 		}
 		function setTheme(k) {
-			try { localStorage.setItem('altempl.theme', k); } catch(e) {}
+			try { localStorage.setItem('opensheet.theme', k); } catch(e) {}
 			root.setAttribute('data-theme', k);
 			refreshLabels();
 		}
 		function setMode(m) {
-			try { localStorage.setItem('altempl.mode', m); } catch(e) {}
+			try { localStorage.setItem('opensheet.mode', m); } catch(e) {}
 			root.setAttribute('data-color-mode', m);
 			var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 			root.classList.toggle('dark', dark);
@@ -405,7 +405,7 @@ templ themeApplyScript() {
 			if (window.matchMedia) {
 				var mql = window.matchMedia('(prefers-color-scheme: dark)');
 				if (mql.addEventListener) mql.addEventListener('change', function(){
-					if ((localStorage.getItem('altempl.mode') || 'auto') === 'auto') setMode('auto');
+					if ((localStorage.getItem('opensheet.mode') || 'auto') === 'auto') setMode('auto');
 				});
 			}
 		}

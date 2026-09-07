@@ -8,8 +8,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
-	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
+	authv1connect "altalune.id/opensheet/gen/go/auth/v1/authv1connect"
+	todov1connect "altalune.id/opensheet/gen/go/todo/v1/todov1connect"
 )
 
 // DefaultClientTimeout is applied to the http.Client used by NewClient.

@@ -17,15 +17,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
 )
 
 type probeRoute struct {

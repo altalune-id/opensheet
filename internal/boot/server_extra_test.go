@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -102,7 +102,7 @@ func TestOIDCRedirectURL(t *testing.T) {
 		{"empty base URL returns empty", "", "", ""},
 		{"root mount", "http://127.0.0.1:5150", "", "http://127.0.0.1:5150/oauth/callback"},
 		{"trailing slash trimmed", "http://127.0.0.1:5150/", "", "http://127.0.0.1:5150/oauth/callback"},
-		{"basePath preserved", "https://app.example.com", "/altempl", "https://app.example.com/altempl/oauth/callback"},
+		{"basePath preserved", "https://app.example.com", "/opensheet", "https://app.example.com/opensheet/oauth/callback"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

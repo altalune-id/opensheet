@@ -1,4 +1,4 @@
-// Command altempl is the altalune multitenant SSR + Connect-RPC starter binary. See `altempl --help`.
+// Command opensheet is the altalune multitenant SSR + Connect-RPC starter binary. See `opensheet --help`.
 package main
 
 import (
@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/cli"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/cli"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func run() int {
 
 	root := cli.NewRootCmd(boot.BootServer, boot.BootClient)
 	if err := root.ExecuteContext(ctx); err != nil {
-		slog.ErrorContext(ctx, "altempl", "error", err)
+		slog.ErrorContext(ctx, "opensheet", "error", err)
 		return cli.ExitCodeFor(err)
 	}
 	return cli.ExitOK

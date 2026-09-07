@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"altalune.id/template/cmd/i18n-lint/internal/keys"
+	"altalune.id/opensheet/cmd/i18n-lint/internal/keys"
 )
 
 func writeFile(t *testing.T, path, content string) {

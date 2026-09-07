@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func TestSignVerify_Roundtrip(t *testing.T) {

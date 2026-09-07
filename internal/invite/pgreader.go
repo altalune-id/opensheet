@@ -8,7 +8,7 @@ import (
 	"github.com/go-jet/jet/v2/qrm"
 	"github.com/google/uuid"
 
-	pdb "altalune.id/template/internal/platform/db"
+	pdb "altalune.id/opensheet/internal/platform/db"
 )
 
 func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Invite, error) {

@@ -11,15 +11,15 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/onboard"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/user"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/onboard"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 const minOnboardPasswordLen = 8

@@ -8,9 +8,9 @@ import (
 	"slices"
 	"testing"
 
-	pcfg "altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/testutil/pgtest"
+	pcfg "altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/testutil/pgtest"
 )
 
 func TestRLSGuard_Integration(t *testing.T) {

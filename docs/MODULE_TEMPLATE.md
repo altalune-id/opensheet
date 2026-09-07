@@ -1,4 +1,4 @@
-# altempl module template
+# opensheet module template
 
 Every business-domain package under `internal/<name>/` follows this shape.
 It lets any engineer land in any module and know where things live.
@@ -43,9 +43,9 @@ Stateful workflows may live in their own file (see Section 3).
   (`todo`, `org`, …) — never `todoservice`, `todo_module`, `todos_v1`.
 - Import allow-list for `<name>.go` / `store.go` / `errors.go`
   (enforced by depguard): stdlib, `github.com/google/uuid`,
-  `altalune.id/template/internal/platform/tenant`,
-  `altalune.id/template/internal/apperror`,
-  `altalune.id/template/gen/go/apperror/v1`. Nothing else — no `net/http`,
+  `altalune.id/opensheet/internal/platform/tenant`,
+  `altalune.id/opensheet/internal/apperror`,
+  `altalune.id/opensheet/gen/go/apperror/v1`. Nothing else — no `net/http`,
   no `database/sql`, no `config`.
 - `service.go` may add `log/slog`, `go.opentelemetry.io/otel`, and other
   modules' aggregate types by ID only (never mutate another module's aggregate).
@@ -72,7 +72,7 @@ Stateful workflows may live in their own file (see Section 3).
 ### Unit of Work
 
 `db.Pool{W, R}` wraps writer + reader `*sql.DB`. SQLite aliases `R` to `W`.
-For Postgres, `ALT_DB_READER_DSN` routes non-tenant reads (`users`,
+For Postgres, `OPENSHEET_DB_READER_DSN` routes non-tenant reads (`users`,
 `onboard`) to a replica; when empty, `R` aliases `W`.
 
 Two helpers compose:
@@ -142,7 +142,7 @@ func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFun
   ctx, span := tracer.Start(ctx, "<name>.<Method>")
   defer span.End()
   ```
-  Package-level `var tracer = otel.Tracer("altalune.id/template/internal/<name>")`.
+  Package-level `var tracer = otel.Tracer("altalune.id/opensheet/internal/<name>")`.
 - Expected failures return typed domain errors directly.
 - Unexpected failures go through
   `s.unexpected(ctx, "<name>.<Method>: <situation>", err, k, v...)`.

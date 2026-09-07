@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 func TestProber_Probe(t *testing.T) {

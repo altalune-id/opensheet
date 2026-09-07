@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/scheduler"
 )
 
 var _ scheduler.Tenants = (*Enumerator)(nil)

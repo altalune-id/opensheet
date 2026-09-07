@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"altalune.id/template/internal/i18n"
+	"altalune.id/opensheet/internal/i18n"
 )
 
 func TestE2E_QueryLangSwitchesTranslation(t *testing.T) {

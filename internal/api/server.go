@@ -6,19 +6,19 @@ import (
 
 	"connectrpc.com/connect"
 
-	authv1connect "altalune.id/template/gen/go/auth/v1/authv1connect"
-	todov1connect "altalune.id/template/gen/go/todo/v1/todov1connect"
-	"altalune.id/template/internal/api/interceptor"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/auth"
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/tokens"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/internal/user"
+	authv1connect "altalune.id/opensheet/gen/go/auth/v1/authv1connect"
+	todov1connect "altalune.id/opensheet/gen/go/todo/v1/todov1connect"
+	"altalune.id/opensheet/internal/api/interceptor"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/tokens"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/user"
 )
 
 // Server holds the wired Connect handlers and their runtime configuration.

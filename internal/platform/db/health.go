@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"altalune.id/template/worker"
+	"altalune.id/opensheet/worker"
 )
 
 var _ worker.Worker = (*HealthMonitor)(nil)

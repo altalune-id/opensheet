@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/internal/api"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform"
-	"altalune.id/template/internal/platform/capabilities"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/testutil/fakes"
-	"altalune.id/template/internal/todo"
+	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/testutil/fakes"
+	"altalune.id/opensheet/internal/todo"
 )
 
 func openAPIServer(t *testing.T, enabled bool, auth *api.BasicAuth) *httptest.Server {
@@ -123,7 +123,7 @@ func TestOpenAPI_BasicAuth_MissingHeader_Returns401(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status=%d, want 401", resp.StatusCode)
 	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, `Basic realm="altempl openapi"`) {
+	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, `Basic realm="opensheet openapi"`) {
 		t.Errorf("WWW-Authenticate=%q", got)
 	}
 }
@@ -207,7 +207,7 @@ func TestOpenAPI_Docs_BasicAuth_MissingHeader_Returns401(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status=%d, want 401", resp.StatusCode)
 	}
-	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, `Basic realm="altempl openapi"`) {
+	if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, `Basic realm="opensheet openapi"`) {
 		t.Errorf("WWW-Authenticate=%q — must match spec-endpoint realm so browsers reuse creds", got)
 	}
 }

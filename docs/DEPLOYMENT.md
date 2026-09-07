@@ -7,22 +7,22 @@ Single container (SQLite in the image):
 ```bash
 make docker
 docker run --rm -p 5150:5150 \
-  -e ALT_DB_DRIVER=sqlite -e ALT_DB_DSN=/data/altempl.db \
-  -e ALT_GENESIS_EMAIL=admin@local -e ALT_GENESIS_PASSWORD=change-me \
-  -v altempl-data:/data altempl:dev
+  -e OPENSHEET_DB_DRIVER=sqlite -e OPENSHEET_DB_DSN=/data/opensheet.db \
+  -e OPENSHEET_GENESIS_EMAIL=admin@local -e OPENSHEET_GENESIS_PASSWORD=change-me \
+  -v opensheet-data:/data opensheet:dev
 ```
 
-CLI usage inside the image: `docker run --rm altempl:dev version`,
-`docker run --rm altempl:dev migrate status` (etc.).
+CLI usage inside the image: `docker run --rm opensheet:dev version`,
+`docker run --rm opensheet:dev migrate status` (etc.).
 
 Registry tags:
 
-| Tag                                   | Source                               |
-| ------------------------------------- | ------------------------------------ |
-| `ghcr.io/<owner>/altempl:edge`        | latest push to `main`                |
-| `ghcr.io/<owner>/altempl:<short-sha>` | that push, pinned                    |
-| `ghcr.io/<owner>/altempl:<version>`   | tagged release (`v0.1.0` → `:0.1.0`) |
-| `ghcr.io/<owner>/altempl:latest`      | most recent tagged release           |
+| Tag                                     | Source                               |
+| --------------------------------------- | ------------------------------------ |
+| `ghcr.io/<owner>/opensheet:edge`        | latest push to `main`                |
+| `ghcr.io/<owner>/opensheet:<short-sha>` | that push, pinned                    |
+| `ghcr.io/<owner>/opensheet:<version>`   | tagged release (`v0.1.0` → `:0.1.0`) |
+| `ghcr.io/<owner>/opensheet:latest`      | most recent tagged release           |
 
 Base images are digest-pinned in `Dockerfile` — refresh with
 `docker manifest inspect <ref>` and update the two `ARG` lines.
@@ -31,11 +31,11 @@ Base images are digest-pinned in `Dockerfile` — refresh with
 
 `compose.yaml` starts Postgres + [Mailpit](https://mailpit.axllent.org/)
 
-- altempl. Works with `docker compose` or `podman-compose`:
+- opensheet. Works with `docker compose` or `podman-compose`:
 
 ```bash
 make compose-up          # build + start everything
-open http://127.0.0.1:5150/login    # altempl
+open http://127.0.0.1:5150/login    # opensheet
 open http://127.0.0.1:8025          # mailpit — outbound email lands here
 
 make compose-logs
@@ -44,14 +44,14 @@ make compose-nuke        # stop + wipe docker/data/pg
 ```
 
 Postgres data lives at `./docker/data/pg` (bind-mounted, `.gitignore`d).
-The stack runs `selfhosted` with `ALT_DB_ALLOW_BYPASS_RLS=true` (RLS off)
+The stack runs `selfhosted` with `OPENSHEET_DB_ALLOW_BYPASS_RLS=true` (RLS off)
 and Mailpit's open SMTP — production settings go under `mail.smtp.*` (or
 `mail.resend.*` with `mail.driver=resend`) and the three-role split below.
 
 ## Postgres roles
 
-**Dev**: point `ALT_DB_DSN` at any role (superuser is fine) and set
-`ALT_DB_ALLOW_BYPASS_RLS=true`. RLS is off.
+**Dev**: point `OPENSHEET_DB_DSN` at any role (superuser is fine) and set
+`OPENSHEET_DB_ALLOW_BYPASS_RLS=true`. RLS is off.
 
 **Production** — role graph provisioned via `scripts/db/provision.sh`:
 
@@ -62,16 +62,16 @@ and Mailpit's open SMTP — production settings go under `mail.smtp.*` (or
 Provision idempotently (interactive; prompts for admin URL, DB name, passwords):
 
 ```bash
-APP=altempl DB_NAME=altempl scripts/db/provision.sh
+APP=opensheet DB_NAME=opensheet scripts/db/provision.sh
 ```
 
 Then set:
 
 ```
-ALT_DB_DSN=postgres://altempl_service:<svc-pw>@host:5432/altempl?sslmode=require
-ALT_DB_MIGRATOR_DSN=postgres://altempl_migrator:<mig-pw>@host:5432/altempl?sslmode=require
-ALT_DB_MIGRATOR_ROLE=altempl_owner
-ALT_DB_ALLOW_BYPASS_RLS=false
+OPENSHEET_DB_DSN=postgres://altempl_service:<svc-pw>@host:5432/opensheet?sslmode=require
+OPENSHEET_DB_MIGRATOR_DSN=postgres://altempl_migrator:<mig-pw>@host:5432/opensheet?sslmode=require
+OPENSHEET_DB_MIGRATOR_ROLE=altempl_owner
+OPENSHEET_DB_ALLOW_BYPASS_RLS=false
 ```
 
 `db.migrator.role` is the sole source of the migration role; `db.role` applies only to runtime
@@ -102,7 +102,7 @@ names the `ALTER ROLE` that fixes it.
 ## Reader replica
 
 `db.Pool{W, R}` wraps writer + reader. SQLite always aliases `R` to `W`.
-For Postgres, `ALT_DB_READER_DSN` routes non-tenant reads (`users`,
+For Postgres, `OPENSHEET_DB_READER_DSN` routes non-tenant reads (`users`,
 `onboard`) to a replica; empty aliases to `W`. Tenant-scoped reads run
 on `W` — `BeginTenanted` requires a tx on the primary for `set_config`.
 
@@ -126,10 +126,10 @@ clause. Both dialects satisfy the same domain interface.
 root — NOT under `http.basePath`. This is deliberate:
 
 - Orchestrator probes (compose, k8s kubelet, LB target groups) reach
-  altempl on its listen port directly. Basepath-independence keeps their
+  opensheet on its listen port directly. Basepath-independence keeps their
   config stable when you remount the app.
 - Public reverse proxies typically route only `example.com/<basePath>/*`
-  to altempl, so `/healthz` stays off the public surface by default.
+  to opensheet, so `/healthz` stays off the public surface by default.
 
 `/healthz` is liveness: it returns 200 whenever the process is serving, and
 never touches the database. Do not point a DB-dependent probe at it.
@@ -151,16 +151,16 @@ never escalates to the notification sinks and never fails the process.
 Public status page needed? Add the proxy route explicitly:
 
 ```nginx
-location = /altempl/healthz { proxy_pass http://altempl:5150/healthz; }
+location = /opensheet/healthz { proxy_pass http://opensheet:5150/healthz; }
 ```
 
-`altempl healthz` is a self-contained probe binary (works in distroless,
+`opensheet healthz` is a self-contained probe binary (works in distroless,
 no `curl` needed) — the compose/k8s healthcheck.
 
 ## Scheduler
 
 Jobs run in-process, registered as one `Worker` on the same `Supervisor` as
-the HTTP listener. `altempl scheduler list` prints what is registered.
+the HTTP listener. `opensheet scheduler list` prints what is registered.
 
 **Multiple replicas.** A job is either singleton or per-replica, and the
 choice is per job, not per deployment:
@@ -182,11 +182,11 @@ If `db.maxOpenConns` is capped at all, it must exceed the number of
 concurrent singleton jobs, or a job will block waiting for a connection it
 can never get while holding none. `0` (unlimited) is unaffected.
 
-**`--scheduler-only` as a deployment shape.** `altempl serve
+**`--scheduler-only` as a deployment shape.** `opensheet serve
 --scheduler-only` runs the jobs and nothing else — no web UI, no API. It
 still binds `http.addr` and still serves `/healthz` and `/readyz` — the
 `db-health` worker runs here too — so the same orchestrator probes and the
-same `altempl healthz` healthcheck work unchanged. `--scheduler-only` requires the scheduler: combined with
+same `opensheet healthz` healthcheck work unchanged. `--scheduler-only` requires the scheduler: combined with
 `scheduler.enabled=false` (or `WithScheduler(false)`) it is rejected at
 boot, because the process would serve probes and do no work.
 
@@ -204,7 +204,7 @@ job, so `/readyz` stays DB-aware in both shapes.
 
 ## Observability
 
-- **Traces** — `ALT_OBSERVABILITY_OTEL_ENDPOINT` → OTLP collector.
+- **Traces** — `OPENSHEET_OBSERVABILITY_OTEL_ENDPOINT` → OTLP collector.
   HTTP, Connect, workers, DB spans all propagate via `context.Context`.
 - **Metrics** — Prometheus at `basePath + /metrics`; gate with
   `api.metrics.requireBasicAuth` when the scrape target isn't private.
@@ -232,7 +232,7 @@ OpenAPI 3.1 is embedded at build time — served at
    for servers, `public` for CLI-only. Copy client ID + secret.
 2. Register redirect URIs — `http://<host>:<port>/oauth/callback` (web)
    and `http://127.0.0.1:0/callback` (CLI loopback, RFC 8252).
-3. Create a resource server for `urn:altempl:api`.
+3. Create a resource server for `urn:opensheet:api`.
 4. In `config.yaml`: `oidc.issuer`, `oidc.clientID`, `oidc.clientSecret`,
-   `oidc.resource: urn:altempl:api`, `tokens.audience: urn:altempl:api`.
+   `oidc.resource: urn:opensheet:api`, `tokens.audience: urn:opensheet:api`.
 5. Restart — log in at `/login`.

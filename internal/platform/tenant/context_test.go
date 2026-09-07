@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 func TestFrom_Missing_ReturnsMissingError(t *testing.T) {

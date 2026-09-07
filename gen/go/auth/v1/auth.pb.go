@@ -155,8 +155,8 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x0factive_org_slug\x18\x05 \x01(\tR\ractiveOrgSlug\x12\x16\n" +
 	"\x06scopes\x18\x06 \x03(\tR\x06scopes2H\n" +
 	"\vAuthService\x129\n" +
-	"\x06Whoami\x12\x16.auth.v1.WhoamiRequest\x1a\x17.auth.v1.WhoamiResponseB\x81\x01\n" +
-	"\vcom.auth.v1B\tAuthProtoP\x01Z*altalune.id/template/gen/go/auth/v1;authv1\xa2\x02\x03AXX\xaa\x02\aAuth.V1\xca\x02\aAuth\\V1\xe2\x02\x13Auth\\V1\\GPBMetadata\xea\x02\bAuth::V1b\x06proto3"
+	"\x06Whoami\x12\x16.auth.v1.WhoamiRequest\x1a\x17.auth.v1.WhoamiResponseB\x82\x01\n" +
+	"\vcom.auth.v1B\tAuthProtoP\x01Z+altalune.id/opensheet/gen/go/auth/v1;authv1\xa2\x02\x03AXX\xaa\x02\aAuth.V1\xca\x02\aAuth\\V1\xe2\x02\x13Auth\\V1\\GPBMetadata\xea\x02\bAuth::V1b\x06proto3"
 
 var (
 	file_auth_v1_auth_proto_rawDescOnce sync.Once

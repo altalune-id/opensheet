@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/testutil/pgtest"
+	"altalune.id/opensheet/internal/testutil/pgtest"
 )
 
 func TestOpenDB_HandlesDoNotShareASchema(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	"altalune.id/template/reqid"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/reqid"
 )
 
 // AttachContext returns a copy of e whose ErrorDetail(s) carry request_id and trace_id from ctx.

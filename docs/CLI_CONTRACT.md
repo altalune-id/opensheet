@@ -1,4 +1,4 @@
-# altempl CLI contract
+# opensheet CLI contract
 
 Stable interface for scripting, MCP server integration, and agent-driven usage.
 Semver applies to this document from v1.0.0 onward. Pre-v1, breaking changes
@@ -6,17 +6,17 @@ are documented in the changelog.
 
 ## Command tree
 
-The root binary is `altempl`. Commands are grouped by role (Runtime, Auth,
+The root binary is `opensheet`. Commands are grouped by role (Runtime, Auth,
 Tenancy, Domain, Meta) — the group label is cosmetic (it steers `--help`
 output) and is not part of the contract.
 
 ```
-altempl [global flags] <command> [subcommand] [args] [flags]
+opensheet [global flags] <command> [subcommand] [args] [flags]
 ```
 
 ### Runtime
 
-- `altempl serve`
+- `opensheet serve`
 
   - Runs the HTTP server (web UI + Connect API + workers) on the configured
     `http.addr`. Blocks until the process is signalled.
@@ -25,9 +25,9 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     - `--scheduler-only` — run only the periodic-job runner plus a
       health-endpoint listener. No web UI, no API.
   - The two are mutually exclusive; passing both is a usage error (`64`).
-  - Everything else comes from `-c`/`--config` and the `ALT_*` env vars.
+  - Everything else comes from `-c`/`--config` and the `OPENSHEET_*` env vars.
 
-- `altempl scheduler list`
+- `opensheet scheduler list`
 
   - Lists every registered job. Reads the wired runner; does not run anything.
   - JSON shape (`--output=json`):
@@ -46,7 +46,7 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     ```
   - Text output is a table: `NAME SCOPE SCHEDULE TIMEOUT SINGLETON`.
 
-- `altempl scheduler run <job>`
+- `opensheet scheduler run <job>`
 
   - Runs one job immediately, bypassing its schedule. Exactly one
     positional argument — the job `name` from `scheduler list`.
@@ -58,21 +58,21 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     - `7` — the runner is draining, or the scheduler is disabled
       (`scheduler.enabled=false`).
 
-- `altempl migrate up`
+- `opensheet migrate up`
 
   - Applies every pending migration end-to-end.
 
-- `altempl migrate status`
+- `opensheet migrate status`
 
   - Prints one row per migration: `<version> <applied-at | "pending"> <source>`.
 
-- `altempl migrate down-to <version>`
+- `opensheet migrate down-to <version>`
   - Rolls the schema back to the given goose version (integer). Exactly one
     positional argument required.
 
 ### Auth
 
-- `altempl auth login`
+- `opensheet auth login`
 
   - Signs in. Defaults to OIDC loopback (RFC 8252) when `oidc.issuer` +
     `oidc.clientID` are configured; falls back to a local prompt otherwise.
@@ -85,11 +85,11 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     - `--password-stdin` — read the password from stdin (unmasked). Pairs
       with `--email`.
 
-- `altempl auth logout`
+- `opensheet auth logout`
 
   - Clears the local session file at `session.path`.
 
-- `altempl auth whoami`
+- `opensheet auth whoami`
 
   - Prints the current signed-in principal.
   - JSON shape (`--output=json`):
@@ -113,7 +113,7 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     session: <path>
     ```
 
-- `altempl auth token mint`
+- `opensheet auth token mint`
   - Mints a short-lived API token for the signed-in user.
   - Flags:
     - `--ttl <duration>` — token time-to-live (default `15m`). Accepts any
@@ -123,7 +123,7 @@ altempl [global flags] <command> [subcommand] [args] [flags]
 
 ### Tenancy
 
-- `altempl org list`
+- `opensheet org list`
 
   - Lists orgs the caller is a member of.
   - JSON shape (`--output=json`):
@@ -141,12 +141,12 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     }
     ```
 
-- `altempl org create --slug <slug> --name <name>`
+- `opensheet org create --slug <slug> --name <name>`
 
   - Creates a new org. Both flags required.
   - Prints `Created org <slug> (<uuid>)` on success.
 
-- `altempl project list`
+- `opensheet project list`
 
   - Lists projects in the active org.
   - JSON shape (`--output=json`):
@@ -164,12 +164,12 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     }
     ```
 
-- `altempl project create --slug <slug> --name <name>`
+- `opensheet project create --slug <slug> --name <name>`
 
   - Creates a new project in the active org. Both flags required.
   - Prints `Created project <slug> (<uuid>)` on success.
 
-- `altempl invite list`
+- `opensheet invite list`
 
   - Lists pending invites for the active org.
   - JSON shape (`--output=json`):
@@ -189,17 +189,17 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     }
     ```
 
-- `altempl invite send --email <addr> [--role member|admin|owner]`
+- `opensheet invite send --email <addr> [--role member|admin|owner]`
 
   - Sends an invite to a new member of the active org.
   - `--email` required. `--role` defaults to `member`.
 
-- `altempl invite revoke <id>`
+- `opensheet invite revoke <id>`
   - Revokes a pending invite by its UUID.
 
 ### Domain
 
-- `altempl todo list [--done | --open]`
+- `opensheet todo list [--done | --open]`
 
   - Lists todos in the active project. `--done` and `--open` are mutually
     exclusive; omit both to list everything.
@@ -218,29 +218,29 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     }
     ```
 
-- `altempl todo add <title...>`
+- `opensheet todo add <title...>`
 
   - Creates a new todo. All positional arguments join with spaces to form
     the title.
 
-- `altempl todo toggle <id>`
+- `opensheet todo toggle <id>`
 
   - Flips the done flag on a todo. `<id>` must be a UUID.
 
-- `altempl todo delete <id>`
+- `opensheet todo delete <id>`
   - Deletes a todo. `<id>` must be a UUID.
 
 ### Meta
 
-- `altempl version`
+- `opensheet version`
 
-  - Prints `altempl <version> (<commit>, built <buildTime>)`.
+  - Prints `opensheet <version> (<commit>, built <buildTime>)`.
   - JSON shape (`--output=json`):
     ```json
     { "data": { "version": "...", "commit": "...", "buildTime": "..." } }
     ```
 
-- `altempl healthz`
+- `opensheet healthz`
 
   - Probes the running server's `/healthz` endpoint. Exits `0` on 2xx,
     non-zero otherwise. Suitable for container healthchecks and k8s
@@ -266,27 +266,27 @@ altempl [global flags] <command> [subcommand] [args] [flags]
     }
     ```
 
-- `altempl completion <bash|zsh|fish|powershell>`
+- `opensheet completion <bash|zsh|fish|powershell>`
   - Prints the completion script for the given shell to stdout. Source it
     from your shell rc.
 
 ## Global flags (persistent on root)
 
-| Flag               | Env              | Default                          | Purpose                                            |
-| ------------------ | ---------------- | -------------------------------- | -------------------------------------------------- |
-| `-c, --config`     | `ALT_CONFIG`     | —                                | Config file (yaml).                                |
-| `--token`          | `ALT_TOKEN`      | —                                | Bearer token (opaque).                             |
-| `--token-file`     | `ALT_TOKEN_FILE` | —                                | Path to file containing bearer token (0600 mode).  |
-| `--output`         | `ALT_OUTPUT`     | auto (text on TTY, json off-TTY) | Output format: `text` \| `json` \| `ndjson`.       |
-| `--org`            | `ALT_ORG`        | —                                | Override active org (slug).                        |
-| `--project`        | `ALT_PROJECT`    | —                                | Override active project (slug).                    |
-| `--no-interactive` | —                | `false`                          | Never prompt; fail if a prompt would be needed.    |
-| `--log-level`      | `ALT_LOG_LEVEL`  | `info`                           | Log level: `debug` \| `info` \| `warn` \| `error`. |
-| `--log-format`     | `ALT_LOG_FORMAT` | `json`                           | Log format: `json` \| `text`.                      |
+| Flag               | Env                    | Default                          | Purpose                                            |
+| ------------------ | ---------------------- | -------------------------------- | -------------------------------------------------- |
+| `-c, --config`     | `OPENSHEET_CONFIG`     | —                                | Config file (yaml).                                |
+| `--token`          | `OPENSHEET_TOKEN`      | —                                | Bearer token (opaque).                             |
+| `--token-file`     | `OPENSHEET_TOKEN_FILE` | —                                | Path to file containing bearer token (0600 mode).  |
+| `--output`         | `OPENSHEET_OUTPUT`     | auto (text on TTY, json off-TTY) | Output format: `text` \| `json` \| `ndjson`.       |
+| `--org`            | `OPENSHEET_ORG`        | —                                | Override active org (slug).                        |
+| `--project`        | `OPENSHEET_PROJECT`    | —                                | Override active project (slug).                    |
+| `--no-interactive` | —                      | `false`                          | Never prompt; fail if a prompt would be needed.    |
+| `--log-level`      | `OPENSHEET_LOG_LEVEL`  | `info`                           | Log level: `debug` \| `info` \| `warn` \| `error`. |
+| `--log-format`     | `OPENSHEET_LOG_FORMAT` | `json`                           | Log format: `json` \| `text`.                      |
 
 ## Token precedence
 
-`--token` > `ALT_TOKEN` > `--token-file` > `ALT_TOKEN_FILE` > `~/.altempl/session.json` > interactive login.
+`--token` > `OPENSHEET_TOKEN` > `--token-file` > `OPENSHEET_TOKEN_FILE` > `~/.opensheet/session.json` > interactive login.
 
 An invalid `--token` errors out (exit `2`). It does NOT fall back to
 lower-precedence sources.

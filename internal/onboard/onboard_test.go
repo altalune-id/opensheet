@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/onboard"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/onboard"
 )
 
 func TestMethod_IsValid(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // Tenant derives a tenant.Context from the Principal in ctx and threads it forward.

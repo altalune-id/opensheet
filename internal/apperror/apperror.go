@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 )
 
 // AppError is the canonical error envelope.

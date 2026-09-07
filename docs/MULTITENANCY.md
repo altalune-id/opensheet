@@ -1,17 +1,17 @@
 # Multitenancy
 
-How altempl isolates tenants and routes sign-ins. Read in five minutes.
+How opensheet isolates tenants and routes sign-ins. Read in five minutes.
 
 ## Modes
 
-|                         | `selfhosted`            | `cloud`                                          |
-| ----------------------- | ----------------------- | ------------------------------------------------ |
-| DB driver               | `sqlite` or `postgres`  | `postgres` only (enforced)                       |
-| OIDC                    | optional                | required (enforced)                              |
-| Local `/login` password | on by default           | off; `ALT_GENESIS_BREAK_GLASS=true` to re-enable |
-| Org creation from UI    | disabled                | enabled                                          |
-| Public OIDC signup      | disabled (invite-only)  | enabled                                          |
-| Invites                 | require OIDC configured | always available                                 |
+|                         | `selfhosted`            | `cloud`                                                |
+| ----------------------- | ----------------------- | ------------------------------------------------------ |
+| DB driver               | `sqlite` or `postgres`  | `postgres` only (enforced)                             |
+| OIDC                    | optional                | required (enforced)                                    |
+| Local `/login` password | on by default           | off; `OPENSHEET_GENESIS_BREAK_GLASS=true` to re-enable |
+| Org creation from UI    | disabled                | enabled                                                |
+| Public OIDC signup      | disabled (invite-only)  | enabled                                                |
+| Invites                 | require OIDC configured | always available                                       |
 
 ## Data isolation — how tenants stay separated
 
@@ -29,7 +29,7 @@ How altempl isolates tenants and routes sign-ins. Read in five minutes.
 | `altempl_migrator` | Runs migrations under `SET ROLE altempl_owner` | no        |
 | `altempl_service`  | Runtime connection                             | no        |
 
-Provision via `scripts/db/provision.sh` (`APP=altempl DB_NAME=altempl`). Point `ALT_DB_MIGRATOR_DSN` at `altempl_migrator` (`ALT_DB_MIGRATOR_ROLE=altempl_owner`) and `ALT_DB_DSN` at `altempl_service`. Boot uses migrator briefly for migrations, closes it, then serves from service.
+Provision via `scripts/db/provision.sh` (`APP=opensheet DB_NAME=opensheet`). Point `OPENSHEET_DB_MIGRATOR_DSN` at `altempl_migrator` (`OPENSHEET_DB_MIGRATOR_ROLE=altempl_owner`) and `OPENSHEET_DB_DSN` at `altempl_service`. Boot uses migrator briefly for migrations, closes it, then serves from service.
 
 ## Reader / writer
 
@@ -90,8 +90,8 @@ flowchart TD
 
 ## Terms of Service gate
 
-- Enabled via `ALT_COMPLIANCE_REQUIRE_ACCEPTANCE=true`.
-- Links: `ALT_COMPLIANCE_TERMS_URL`, `ALT_COMPLIANCE_PRIVACY_URL`.
+- Enabled via `OPENSHEET_COMPLIANCE_REQUIRE_ACCEPTANCE=true`.
+- Links: `OPENSHEET_COMPLIANCE_TERMS_URL`, `OPENSHEET_COMPLIANCE_PRIVACY_URL`.
 - Middleware `WelcomeGate` redirects any authenticated user with `TermsAcceptedAt=zero` to `/welcome`.
 - `/welcome` renders the T&C checkbox + optional display-name fixup → stamps `users.terms_accepted_at` → back to `return_to`.
 - Genesis admins auto-accept at bootstrap (they set the env, they consented).

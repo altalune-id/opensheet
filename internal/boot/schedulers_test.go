@@ -15,12 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/logger"
-	"altalune.id/template/scheduler"
-	"altalune.id/template/worker"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/logger"
+	"altalune.id/opensheet/scheduler"
+	"altalune.id/opensheet/worker"
 )
 
 var _ worker.Worker = (*scheduler.Runner)(nil)

@@ -4,7 +4,7 @@ package todo.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "altalune.id/template/gen/go/todo/v1;todov1";
+option go_package = "altalune.id/opensheet/gen/go/todo/v1;todov1";
 
 service TodoService {
   rpc List(ListRequest) returns (ListResponse);

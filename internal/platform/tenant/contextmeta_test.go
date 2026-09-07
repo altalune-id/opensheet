@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/reqid"
 )
 
 func TestContextMeta_Empty_OnBareCtx(t *testing.T) {

@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/web"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // InviteHandler owns /orgs/{slug}/invites and /invites/accept.

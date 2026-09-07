@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 func TestGoogleChatSink_Report_PostsPayload(t *testing.T) {
@@ -37,7 +37,7 @@ func TestGoogleChatSink_Report_PostsPayload(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	s.Report(context.Background(), &apperror.Incident{
-		Code:      "altempl.unexpected",
+		Code:      "opensheet.unexpected",
 		Message:   "kaput",
 		Cause:     errors.New("underlying"),
 		RequestID: "req-77",
@@ -53,7 +53,7 @@ func TestGoogleChatSink_Report_PostsPayload(t *testing.T) {
 	got := string(body)
 	mu.Unlock()
 
-	for _, want := range []string{"req-77", "trace-77", "altempl.unexpected", "kaput", "underlying"} {
+	for _, want := range []string{"req-77", "trace-77", "opensheet.unexpected", "kaput", "underlying"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("body missing %q; got %s", want, got)
 		}

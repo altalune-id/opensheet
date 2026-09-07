@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 const sqlSetTenant = "SELECT set_config('app.current_org_id', $1, true)"

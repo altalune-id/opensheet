@@ -7,7 +7,7 @@ import (
 )
 
 func TestEnvKeys_GenesisEmailIsNoLongerBootstrap(t *testing.T) {
-	keys := WalkEnvKeys("ALT")
+	keys := WalkEnvKeys("OPENSHEET")
 	var found bool
 	for _, k := range keys {
 		if k.YAML != "genesis.email" {
@@ -21,7 +21,7 @@ func TestEnvKeys_GenesisEmailIsNoLongerBootstrap(t *testing.T) {
 }
 
 func TestEnvKeys_OnboardSetupTokenIsSecret(t *testing.T) {
-	keys := WalkEnvKeys("ALT")
+	keys := WalkEnvKeys("OPENSHEET")
 	var found bool
 	for _, k := range keys {
 		if k.YAML != "onboard.setupToken" {
@@ -36,7 +36,7 @@ func TestEnvKeys_OnboardSetupTokenIsSecret(t *testing.T) {
 
 func TestLoad_OnboardSetupTokenFromEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("ALT_ONBOARD_SETUP_TOKEN", "pinned-token")
+	t.Setenv("OPENSHEET_ONBOARD_SETUP_TOKEN", "pinned-token")
 	t.Chdir(t.TempDir())
 
 	cfg, err := Load("")

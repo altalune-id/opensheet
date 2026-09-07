@@ -8,13 +8,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	apperrorv1 "altalune.id/template/gen/go/apperror/v1"
-	todov1 "altalune.id/template/gen/go/todo/v1"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	todov1 "altalune.id/opensheet/gen/go/todo/v1"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
 )
 
 // TodoService implements todo.v1.TodoService.

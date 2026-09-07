@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/reqid"
-	"altalune.id/template/scheduler"
+	"altalune.id/opensheet/reqid"
+	"altalune.id/opensheet/scheduler"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ui-vendor.sh — download pinned static assets into
-# internal/web/static/ so `ALT_UI_MODE=vendored` deployments have no
+# internal/web/static/ so `OPENSHEET_UI_MODE=vendored` deployments have no
 # runtime dependency on external CDNs.
 #
 # Pinned versions (bump here + re-run):

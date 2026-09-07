@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 func memMapFS() fstest.MapFS {

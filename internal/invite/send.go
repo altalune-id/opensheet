@@ -9,10 +9,10 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/mailer"
-	"altalune.id/template/nanoid"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/mailer"
+	"altalune.id/opensheet/nanoid"
 )
 
 // DefaultTTL is applied when SendRequest.TTL is zero.

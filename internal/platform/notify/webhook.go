@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"altalune.id/template/httpclient"
+	"altalune.id/opensheet/httpclient"
 )
 
 const (

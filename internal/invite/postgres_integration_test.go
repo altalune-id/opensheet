@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/template/internal/invite"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
-	"altalune.id/template/internal/testutil/pgtest"
-	"altalune.id/template/schema"
+	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/pgtest"
+	"altalune.id/opensheet/schema"
 )
 
 func newInviteStoreForTest(t *testing.T) (invite.Store, uuid.UUID, uuid.UUID) { //nolint:nonamedreturns // triple

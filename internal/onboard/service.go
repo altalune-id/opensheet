@@ -9,11 +9,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
-	"altalune.id/template/internal/apperror"
+	"altalune.id/opensheet/internal/apperror"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
-var tracer trace.Tracer = otel.Tracer("altalune.id/template/internal/onboard")
+var tracer trace.Tracer = otel.Tracer("altalune.id/opensheet/internal/onboard")
 
 // Option customizes a Service at construction time.
 type Option func(*Service)

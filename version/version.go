@@ -35,5 +35,5 @@ func Get() Info {
 }
 
 func String() string {
-	return "altempl " + Default() + " (commit " + Commit + ", built " + BuildTime + ")"
+	return "opensheet " + Default() + " (commit " + Commit + ", built " + BuildTime + ")"
 }

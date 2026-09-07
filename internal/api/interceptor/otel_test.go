@@ -3,7 +3,7 @@ package interceptor_test
 import (
 	"testing"
 
-	"altalune.id/template/internal/api/interceptor"
+	"altalune.id/opensheet/internal/api/interceptor"
 )
 
 func TestOTel_ReturnsNonNil(t *testing.T) {

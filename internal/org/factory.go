@@ -1,8 +1,8 @@
 package org
 
 import (
-	"altalune.id/template/internal/platform/db"
-	"altalune.id/template/internal/platform/tenant"
+	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // NewStore selects the Store implementation for the configured driver.

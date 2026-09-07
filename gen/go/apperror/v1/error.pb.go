@@ -184,9 +184,9 @@ const file_apperror_v1_error_proto_rawDesc = "" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x12\x12\n" +
 	"\x04code\x18\x03 \x01(\tR\x04code\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12\x1b\n" +
-	"\tgrpc_code\x18\x05 \x01(\x05R\bgrpcCodeB\x9e\x01\n" +
+	"\tgrpc_code\x18\x05 \x01(\x05R\bgrpcCodeB\x9f\x01\n" +
 	"\x0fcom.apperror.v1B\n" +
-	"ErrorProtoP\x01Z2altalune.id/template/gen/go/apperror/v1;apperrorv1\xa2\x02\x03AXX\xaa\x02\vApperror.V1\xca\x02\vApperror\\V1\xe2\x02\x17Apperror\\V1\\GPBMetadata\xea\x02\fApperror::V1b\x06proto3"
+	"ErrorProtoP\x01Z3altalune.id/opensheet/gen/go/apperror/v1;apperrorv1\xa2\x02\x03AXX\xaa\x02\vApperror.V1\xca\x02\vApperror\\V1\xe2\x02\x17Apperror\\V1\\GPBMetadata\xea\x02\fApperror::V1b\x06proto3"
 
 var (
 	file_apperror_v1_error_proto_rawDescOnce sync.Once

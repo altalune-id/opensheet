@@ -6,11 +6,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"altalune.id/template/internal/org"
-	"altalune.id/template/internal/platform/session"
-	"altalune.id/template/internal/project"
-	"altalune.id/template/internal/todo"
-	"altalune.id/template/internal/web/templates"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/web/templates"
 )
 
 // TodoHandler wraps the projects/todos services for the org-scoped todo routes.

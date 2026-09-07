@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 
-	"altalune.id/template/internal/api"
-	"altalune.id/template/internal/apperror"
-	"altalune.id/template/internal/platform/config"
-	"altalune.id/template/logger"
+	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/logger"
 )
 
 // Client is the CLI-side wired graph, omitting DB, migrations, and supervisor.
@@ -18,7 +18,7 @@ type Client struct {
 	Conn     *api.Client
 }
 
-// BootClient builds the minimal wired graph for CLI subcommands that talk to a remote altempl server.
+// BootClient builds the minimal wired graph for CLI subcommands that talk to a remote opensheet server.
 func BootClient(_ context.Context, cfg *config.Config, token string) (*Client, error) {
 	log := logger.New(cfg.Log)
 	reporter := apperror.NewReporter(log, cfg.Mode.IsProduction())

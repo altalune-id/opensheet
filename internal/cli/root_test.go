@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"altalune.id/template/internal/boot"
-	"altalune.id/template/internal/platform/config"
+	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func stubServerBoot(_ context.Context, _ *config.Config, _ ...boot.Option) (*boot.Server, error) {
@@ -23,16 +23,16 @@ func setSelfhostedEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	sessPath := filepath.Join(dir, "session.json")
-	t.Setenv("ALT_MODE", "selfhosted")
-	t.Setenv("ALT_DB_DRIVER", "sqlite")
-	t.Setenv("ALT_DB_DSN", filepath.Join(dir, "alt.db"))
-	t.Setenv("ALT_HTTP_ADDR", "127.0.0.1:0")
-	t.Setenv("ALT_HTTP_BASEURL", "http://127.0.0.1")
-	t.Setenv("ALT_GENESIS_EMAIL", "root@example.com")
-	t.Setenv("ALT_GENESIS_PASSWORD", "hunter2")
-	t.Setenv("ALT_SESSION_PATH", sessPath)
-	t.Setenv("ALT_MAIL_DRIVER", "console")
-	t.Setenv("ALT_MAIL_FROM", "no-reply@example.com")
+	t.Setenv("OPENSHEET_MODE", "selfhosted")
+	t.Setenv("OPENSHEET_DB_DRIVER", "sqlite")
+	t.Setenv("OPENSHEET_DB_DSN", filepath.Join(dir, "alt.db"))
+	t.Setenv("OPENSHEET_HTTP_ADDR", "127.0.0.1:0")
+	t.Setenv("OPENSHEET_HTTP_BASEURL", "http://127.0.0.1")
+	t.Setenv("OPENSHEET_GENESIS_EMAIL", "root@example.com")
+	t.Setenv("OPENSHEET_GENESIS_PASSWORD", "hunter2")
+	t.Setenv("OPENSHEET_SESSION_PATH", sessPath)
+	t.Setenv("OPENSHEET_MAIL_DRIVER", "console")
+	t.Setenv("OPENSHEET_MAIL_FROM", "no-reply@example.com")
 	return sessPath
 }
 
@@ -46,8 +46,8 @@ func TestRoot_VersionSubcommand(t *testing.T) {
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !strings.Contains(buf.String(), "altempl") {
-		t.Errorf("expected altempl in output, got %q", buf.String())
+	if !strings.Contains(buf.String(), "opensheet") {
+		t.Errorf("expected opensheet in output, got %q", buf.String())
 	}
 }
 

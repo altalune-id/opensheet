@@ -9,8 +9,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	pcfg "altalune.id/template/internal/platform/config"
-	"altalune.id/template/internal/platform/db"
+	pcfg "altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 func TestCheckRLSGuard_NotBypass_OK(t *testing.T) {

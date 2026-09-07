@@ -2,16 +2,16 @@
 
 ## Precedence
 
-`defaults <- config.yaml <- ALT_* env`. Env always wins. Nested keys map
+`defaults <- config.yaml <- OPENSHEET_* env`. Env always wins. Nested keys map
 by dot notation with dots → underscores:
 
-| YAML                               | Env var                               |
-| ---------------------------------- | ------------------------------------- |
-| `mode: cloud`                      | `ALT_MODE=cloud`                      |
-| `db.driver: postgres`              | `ALT_DB_DRIVER=postgres`              |
-| `http.basePath: /altempl`          | `ALT_HTTP_BASE_PATH=/altempl`         |
-| `tokens.audience: urn:altempl:api` | `ALT_TOKENS_AUDIENCE=urn:altempl:api` |
-| `tenant.singletonOrg.slug: main`   | `ALT_TENANT_SINGLETON_ORG_SLUG=main`  |
+| YAML                                 | Env var                                       |
+| ------------------------------------ | --------------------------------------------- |
+| `mode: cloud`                        | `OPENSHEET_MODE=cloud`                        |
+| `db.driver: postgres`                | `OPENSHEET_DB_DRIVER=postgres`                |
+| `http.basePath: /opensheet`          | `OPENSHEET_HTTP_BASE_PATH=/opensheet`         |
+| `tokens.audience: urn:opensheet:api` | `OPENSHEET_TOKENS_AUDIENCE=urn:opensheet:api` |
+| `tenant.singletonOrg.slug: main`     | `OPENSHEET_TENANT_SINGLETON_ORG_SLUG=main`    |
 
 `config.example.yaml` and `.env.example` are generated from struct tags
 in `internal/platform/config`. After editing those, run `make config-examples`.
@@ -29,13 +29,13 @@ Every `.env.example` field carries a marker in `[brackets]`:
 
 ## Modes
 
-| Property             | `selfhosted`           | `cloud`                                              |
-| -------------------- | ---------------------- | ---------------------------------------------------- |
-| DB driver            | `sqlite` or `postgres` | `postgres` only                                      |
-| OIDC identity        | optional               | required (`issuer` + `clientID` + `clientSecret`)    |
-| Local password login | on by default          | off; set `ALT_GENESIS_BREAK_GLASS=true` to re-enable |
-| Org creation from UI | disabled               | enabled                                              |
-| Public signup        | disabled               | enabled                                              |
+| Property             | `selfhosted`           | `cloud`                                                    |
+| -------------------- | ---------------------- | ---------------------------------------------------------- |
+| DB driver            | `sqlite` or `postgres` | `postgres` only                                            |
+| OIDC identity        | optional               | required (`issuer` + `clientID` + `clientSecret`)          |
+| Local password login | on by default          | off; set `OPENSHEET_GENESIS_BREAK_GLASS=true` to re-enable |
+| Org creation from UI | disabled               | enabled                                                    |
+| Public signup        | disabled               | enabled                                                    |
 
 Onboarding and admin bootstrap differ by _identity mechanism_, not by mode.
 Mode only decides which mechanisms are enabled.
@@ -61,9 +61,9 @@ genesis.email empty?                → nothing to reconcile
 The first org, its owner membership and the bootstrap row are created on
 first login or through `/onboard` — not at boot. `orgs.created_by` is
 `NOT NULL REFERENCES users(id)`, so there is no org to create until a user
-exists. Seeds use `ALT_TENANT_SINGLETON_ORG_SLUG` (default `default`),
-`ALT_TENANT_SINGLETON_ORG_NAME` (default `Default Organization`), and
-`ALT_TENANT_PERSONAL_PROJECT_SLUG` (default `default`).
+exists. Seeds use `OPENSHEET_TENANT_SINGLETON_ORG_SLUG` (default `default`),
+`OPENSHEET_TENANT_SINGLETON_ORG_NAME` (default `Default Organization`), and
+`OPENSHEET_TENANT_PERSONAL_PROJECT_SLUG` (default `default`).
 
 **Changing `genesis.email` after boot** takes effect on the next boot: the
 claim is re-evaluated every time, so a typo is corrected by fixing the env
@@ -77,25 +77,25 @@ app. This is why `genesis.email` is not a `bootstrap` value.
 boot: setup required — open this one-time onboarding URL url=https://host/onboard?token=<token>
 ```
 
-Pin it with `ALT_ONBOARD_SETUP_TOKEN` for automated installs; a pinned token
+Pin it with `OPENSHEET_ONBOARD_SETUP_TOKEN` for automated installs; a pinned token
 is never echoed to the logs. Local path (email + password + org + project →
 dashboard) is available when `caps.LocalIdentity` is on; OIDC path when
 `caps.ExternalIdentity` is on. Cloud shows only OIDC by default; selfhosted
 shows both.
 
-**Cloud + genesis + break-glass** — setting `ALT_GENESIS_EMAIL` +
-`ALT_GENESIS_PASSWORD` in cloud requires `ALT_GENESIS_BREAK_GLASS=true`.
+**Cloud + genesis + break-glass** — setting `OPENSHEET_GENESIS_EMAIL` +
+`OPENSHEET_GENESIS_PASSWORD` in cloud requires `OPENSHEET_GENESIS_BREAK_GLASS=true`.
 Without it, boot fails loud: the local login form is hidden in cloud, so
 the genesis user would be unreachable via the UI.
 
 ## Scheduler
 
-| Key                              | Default | Awareness   | Meaning                                                                                                                |
-| -------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `scheduler.enabled`              | `true`  | `bootstrap` | Master switch for the periodic-job runner. `false` boots the app with no jobs; `altempl scheduler run` then exits `7`. |
-| `scheduler.timezone`             | `UTC`   | `bootstrap` | IANA zone for every wall-clock schedule. Rejected at boot if `time.LoadLocation` cannot resolve it.                    |
-| `scheduler.shutdownGrace`        | `30s`   | `-`         | How long the runner waits for in-flight jobs on shutdown before giving up.                                             |
-| `scheduler.jobs.<name>.timezone` | —       | `-`         | Per-job override of `scheduler.timezone`, keyed by the job name from `altempl scheduler list`.                         |
+| Key                              | Default | Awareness   | Meaning                                                                                                                  |
+| -------------------------------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `scheduler.enabled`              | `true`  | `bootstrap` | Master switch for the periodic-job runner. `false` boots the app with no jobs; `opensheet scheduler run` then exits `7`. |
+| `scheduler.timezone`             | `UTC`   | `bootstrap` | IANA zone for every wall-clock schedule. Rejected at boot if `time.LoadLocation` cannot resolve it.                      |
+| `scheduler.shutdownGrace`        | `30s`   | `-`         | How long the runner waits for in-flight jobs on shutdown before giving up.                                               |
+| `scheduler.jobs.<name>.timezone` | —       | `-`         | Per-job override of `scheduler.timezone`, keyed by the job name from `opensheet scheduler list`.                         |
 
 Timezone resolves in three steps: `scheduler.jobs.<name>.timezone`, then
 `scheduler.timezone`, then UTC.

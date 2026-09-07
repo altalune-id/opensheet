@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"altalune.id/template/internal/api/interceptor"
-	"altalune.id/template/reqid"
+	"altalune.id/opensheet/internal/api/interceptor"
+	"altalune.id/opensheet/reqid"
 )
 
 type emptyReq struct{}

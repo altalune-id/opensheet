@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	pdb "altalune.id/template/internal/platform/db"
-	pgent "altalune.id/template/internal/platform/db/entity/postgres"
+	pdb "altalune.id/opensheet/internal/platform/db"
+	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
 )
 
 type postgresStore struct {
