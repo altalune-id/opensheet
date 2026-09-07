@@ -89,7 +89,7 @@ db:
   # [bootstrap] env: OPENSHEET_DB_SCHEMA
   schema: public
   # [bootstrap] env: OPENSHEET_DB_TABLE_PREFIX
-  tablePrefix: altempl_
+  tablePrefix: opensheet_
 
 genesis:
   # [bootstrap, mode:cloud] env: OPENSHEET_GENESIS_BREAK_GLASS

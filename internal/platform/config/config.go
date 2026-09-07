@@ -412,7 +412,7 @@ func validateCachePostgresNeedsPostgres(c *Config) error {
 
 func validateAutoMigrateNeedsMigrator(c *Config) error {
 	if !c.DB.AllowBypassRLS && c.DB.AutoMigrate && c.DB.Migrator.DSN == "" {
-		return errors.New("config: mode=cloud with autoMigrate and RLS enforced requires db.migrator.dsn — run scripts/db/provision.sh (APP=opensheet DB_NAME=opensheet) and set OPENSHEET_DB_MIGRATOR_DSN to the altempl_migrator credential, or disable autoMigrate and run migrations out-of-band")
+		return errors.New("config: mode=cloud with autoMigrate and RLS enforced requires db.migrator.dsn — run scripts/db/provision.sh (APP=opensheet DB_NAME=opensheet) and set OPENSHEET_DB_MIGRATOR_DSN to the opensheet_migrator credential, or disable autoMigrate and run migrations out-of-band")
 	}
 	return nil
 }

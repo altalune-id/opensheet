@@ -61,8 +61,8 @@ func newInviteDefinerFixture(t *testing.T) *inviteDefinerFixture {
 	t.Helper()
 	h := pgtest.New(t)
 	suffix := uniqueInviteSuffix(t)
-	ownerRole := "altempl_invowner_" + suffix
-	appRole := "altempl_invapp_" + suffix
+	ownerRole := "opensheet_invowner_" + suffix
+	appRole := "opensheet_invapp_" + suffix
 	prefix := "t" + suffix + "_"
 
 	admin, err := db.Open(t.Context(), db.DBConfig{Driver: db.DriverPostgres, DSN: h.DSN}, nil)

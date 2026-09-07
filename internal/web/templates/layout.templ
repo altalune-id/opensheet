@@ -394,8 +394,8 @@ templ themeApplyScript() {
 		}
 		// Wire event listeners exactly once, even when this script is included
 		// multiple times (topNav + sidebar footers).
-		if (!window.__altemplThemeWired) {
-			window.__altemplThemeWired = true;
+		if (!window.__opensheetThemeWired) {
+			window.__opensheetThemeWired = true;
 			document.addEventListener('click', function(e) {
 				var t = e.target.closest('button[data-theme-key]');
 				if (t) { setTheme(t.getAttribute('data-theme-key')); closeParentDetails(t); return; }

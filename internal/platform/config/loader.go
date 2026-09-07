@@ -88,7 +88,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".opensheet", "opensheet.db"))
 	v.SetDefault("db.autoMigrate", true)
 	v.SetDefault("db.schema", "public")
-	v.SetDefault("db.tablePrefix", "altempl_")
+	v.SetDefault("db.tablePrefix", "opensheet_")
 	v.SetDefault("db.connectTimeout", "30s")
 	v.SetDefault("db.connectBackoff", "250ms")
 	v.SetDefault("db.health.interval", "30s")

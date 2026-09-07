@@ -61,7 +61,7 @@ func migrationsBookkeepingTable(cfg *config.Config) string {
 	if cfg.DB.Driver == db.DriverPostgres {
 		return cfg.DB.TablePrefix + "goose_db_version"
 	}
-	return "altempl_goose_db_version"
+	return "opensheet_goose_db_version"
 }
 
 func migrationProvider(sqldb *sql.DB, cfg *config.Config) (*goose.Provider, error) {

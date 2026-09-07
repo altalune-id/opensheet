@@ -101,7 +101,7 @@ func TestSQLiteStore_ByID_CrossTenantHidden(t *testing.T) {
 	foreignOrg := uuid.New()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := sqlDB.Exec(
-		"INSERT INTO altempl_orgs (id, slug, name, created_by, created_at, updated_at) "+
+		"INSERT INTO opensheet_orgs (id, slug, name, created_by, created_at, updated_at) "+
 			"VALUES (?, 'other', 'Other', ?, ?, ?)",
 		foreignOrg.String(), tcA.UserID.String(), now, now); err != nil {
 		t.Fatal(err)

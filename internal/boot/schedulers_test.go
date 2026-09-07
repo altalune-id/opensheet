@@ -261,7 +261,7 @@ func schedulerBootCfg(t *testing.T) *config.Config {
 		DB: db.DBConfig{
 			Driver:      db.DriverSQLite,
 			DSN:         filepath.Join(dir, "scheduler.db"),
-			TablePrefix: "altempl_",
+			TablePrefix: "opensheet_",
 			Schema:      "public",
 			AutoMigrate: true,
 			Health:      db.HealthConfig{Interval: 30 * time.Second, Timeout: 2 * time.Second},

@@ -14,11 +14,11 @@ import (
 
 func TestRenderTemplate_SubstitutesTablePrefix(t *testing.T) {
 	body := []byte(`CREATE TABLE {{.TablePrefix}}users (id TEXT);`)
-	got, err := renderTemplate("001.sql", body, templateVars{TablePrefix: "altempl_"})
+	got, err := renderTemplate("001.sql", body, templateVars{TablePrefix: "opensheet_"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "altempl_users") {
+	if !strings.Contains(string(got), "opensheet_users") {
 		t.Errorf("template did not substitute: %s", got)
 	}
 }
@@ -77,12 +77,12 @@ func TestTemplatedFS_ReadFileRenders(t *testing.T) {
 		"001.sql": &fstest.MapFile{Data: []byte(`SELECT '{{.TablePrefix}}';`)},
 		"README":  &fstest.MapFile{Data: []byte("noop")},
 	}
-	tfs := newTemplatedFS(base, templateVars{TablePrefix: "altempl_"}).(*templatedFS)
+	tfs := newTemplatedFS(base, templateVars{TablePrefix: "opensheet_"}).(*templatedFS)
 	got, err := tfs.ReadFile("001.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "altempl_") {
+	if !strings.Contains(string(got), "opensheet_") {
 		t.Errorf("expected rendered body, got %s", got)
 	}
 	nonSQL, err := tfs.ReadFile("README")
@@ -98,7 +98,7 @@ func TestTemplatedFS_OpenRenders(t *testing.T) {
 	base := fstest.MapFS{
 		"001.sql": &fstest.MapFile{Data: []byte(`SELECT '{{.TablePrefix}}';`)},
 	}
-	tfs := newTemplatedFS(base, templateVars{TablePrefix: "altempl_"})
+	tfs := newTemplatedFS(base, templateVars{TablePrefix: "opensheet_"})
 	f, err := tfs.Open("001.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestTemplatedFS_OpenRenders(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	buf := make([]byte, 128)
 	n, _ := f.Read(buf)
-	if !strings.Contains(string(buf[:n]), "altempl_") {
+	if !strings.Contains(string(buf[:n]), "opensheet_") {
 		t.Errorf("Open did not render: %s", buf[:n])
 	}
 	info, err := f.Stat()
@@ -131,18 +131,18 @@ func TestMigrateUp_SQLite_CreatesAllTables(t *testing.T) {
 	}
 
 	wantTables := []string{
-		"altempl_users",
-		"altempl_orgs",
-		"altempl_memberships",
-		"altempl_projects",
-		"altempl_invites",
-		"altempl_todos",
-		"altempl_credentials",
-		"altempl_spreadsheets",
-		"altempl_sheets",
-		"altempl_api_keys",
-		"altempl_api_key_sheets",
-		"altempl_sheet_snapshots",
+		"opensheet_users",
+		"opensheet_orgs",
+		"opensheet_memberships",
+		"opensheet_projects",
+		"opensheet_invites",
+		"opensheet_todos",
+		"opensheet_credentials",
+		"opensheet_spreadsheets",
+		"opensheet_sheets",
+		"opensheet_api_keys",
+		"opensheet_api_key_sheets",
+		"opensheet_sheet_snapshots",
 	}
 	for _, tbl := range wantTables {
 		var n int

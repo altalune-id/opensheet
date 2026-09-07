@@ -65,8 +65,8 @@ func newDefinerFixture(t *testing.T) *definerFixture {
 	t.Helper()
 	h := pgtest.New(t)
 	suffix := uniqueSuffix(t)
-	ownerRole := "altempl_orgowner_" + suffix
-	appRole := "altempl_orgapp_" + suffix
+	ownerRole := "opensheet_orgowner_" + suffix
+	appRole := "opensheet_orgapp_" + suffix
 	prefix := "t" + suffix + "_"
 
 	admin, err := db.Open(t.Context(), db.DBConfig{Driver: db.DriverPostgres, DSN: h.DSN}, nil)

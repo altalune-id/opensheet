@@ -27,7 +27,7 @@ func newSmokeCfg(t *testing.T) *config.Config {
 		DB: db.DBConfig{
 			Driver:      db.DriverSQLite,
 			DSN:         filepath.Join(dir, "smoke.db"),
-			TablePrefix: "altempl_",
+			TablePrefix: "opensheet_",
 			Schema:      "public",
 			AutoMigrate: true,
 		},

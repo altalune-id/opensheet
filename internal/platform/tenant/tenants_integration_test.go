@@ -48,8 +48,8 @@ func createRole(t *testing.T, admin *sql.DB, name, attrs string) {
 func TestEnumerator_Each_ReadsEveryOrgThroughTheDefinerWrapper(t *testing.T) {
 	h := pgtest.New(t)
 	suffix := uniqueSuffix(t)
-	ownerRole := "altempl_tenowner_" + suffix
-	appRole := "altempl_tenapp_" + suffix
+	ownerRole := "opensheet_tenowner_" + suffix
+	appRole := "opensheet_tenapp_" + suffix
 	prefix := "t" + suffix + "_"
 
 	admin, err := db.Open(t.Context(), db.DBConfig{Driver: db.DriverPostgres, DSN: h.DSN}, nil)

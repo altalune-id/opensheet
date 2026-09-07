@@ -337,8 +337,8 @@ func buildAltAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*a
 		Scopes:           cfg.OIDC.Scopes,
 		Resource:         cfg.OIDC.Resource,
 		RememberLastUser: true,
-		LastUserCookie:   "altempl_last_user",
-		StateCookie:      "altempl_oidc_state",
+		LastUserCookie:   "opensheet_last_user",
+		StateCookie:      "opensheet_oidc_state",
 		StateSecret:      secret,
 		CookieSecure:     cfg.HTTP.CookieSecure,
 	})

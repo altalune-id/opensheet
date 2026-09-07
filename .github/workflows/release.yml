@@ -48,4 +48,4 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: 'dist/altempl_*.tar.gz'
+          subject-path: 'dist/opensheet_*.tar.gz'

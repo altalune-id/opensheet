@@ -45,15 +45,15 @@ func TestGooseDialect_Postgres(t *testing.T) {
 func TestMigrationsBookkeepingTable_Sqlite(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
-	assert.Equal(t, "altempl_goose_db_version", migrationsBookkeepingTable(cfg))
+	assert.Equal(t, "opensheet_goose_db_version", migrationsBookkeepingTable(cfg))
 }
 
 func TestMigrationsBookkeepingTable_Postgres(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
 	cfg.DB.Driver = db.DriverPostgres
-	cfg.DB.TablePrefix = "altempl_"
-	assert.Equal(t, "altempl_goose_db_version", migrationsBookkeepingTable(cfg))
+	cfg.DB.TablePrefix = "opensheet_"
+	assert.Equal(t, "opensheet_goose_db_version", migrationsBookkeepingTable(cfg))
 }
 
 func TestMigrateStatus_ReportsPending(t *testing.T) {
@@ -112,7 +112,7 @@ func TestMigrateDownTo_RollsBackToZero(t *testing.T) {
 func TestTemplatedFS_MemoryFileStatFields(t *testing.T) {
 	t.Parallel()
 	base := memMapFS()
-	tfs := newTemplatedFS(base, templateVars{TablePrefix: "altempl_"})
+	tfs := newTemplatedFS(base, templateVars{TablePrefix: "opensheet_"})
 	f, err := tfs.Open("001.sql")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = f.Close() })

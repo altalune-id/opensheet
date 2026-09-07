@@ -17,9 +17,9 @@ func TestMigratorConfig_RoleAlwaysFromMigratorRole(t *testing.T) {
 		wantDSN     string
 		wantRole    string
 	}{
-		{"separate dsn uses migrator role", "postgres://mig@h/db", "altempl_service", "altempl_owner", "postgres://mig@h/db", "altempl_owner"},
-		{"single dsn still uses migrator role", "", "altempl_service", "altempl_owner", "postgres://app@h/db", "altempl_owner"},
-		{"no migrator role means none", "", "altempl_service", "", "postgres://app@h/db", ""},
+		{"separate dsn uses migrator role", "postgres://mig@h/db", "opensheet_service", "opensheet_owner", "postgres://mig@h/db", "opensheet_owner"},
+		{"single dsn still uses migrator role", "", "opensheet_service", "opensheet_owner", "postgres://app@h/db", "opensheet_owner"},
+		{"no migrator role means none", "", "opensheet_service", "", "postgres://app@h/db", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

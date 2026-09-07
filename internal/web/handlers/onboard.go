@@ -25,7 +25,7 @@ import (
 const minOnboardPasswordLen = 8
 
 // SetupCookieName carries the /onboard setup token across the OIDC round-trip.
-const SetupCookieName = "altempl_setup"
+const SetupCookieName = "opensheet_setup"
 
 const setupCookieTTL = 30 * time.Minute
 
