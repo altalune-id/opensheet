@@ -113,6 +113,9 @@ linters:
             # local principal type in the auth domain and drop the platform import,
             # then remove this exclusion.
             - "!**/internal/auth/auth.go"
+            # gsheets is a Google API client, not a domain aggregate; its errors.go
+            # legitimately imports googleapi to translate transport failures.
+            - "!**/internal/gsheets/**"
           allow:
             - $gostd
             - github.com/google/uuid
