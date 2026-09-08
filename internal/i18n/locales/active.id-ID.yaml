@@ -180,7 +180,6 @@ sheets.public_ack: "Saya paham siapa pun yang punya URL-nya dapat membaca baris 
 sheets.public_badge: "Publik"
 sheets.publish_submit: "Publikasikan"
 sheets.empty: "Belum ada sheet yang dipublikasikan."
-sheets.url_heading: "URL baris"
 sheets.url_key_hint: "Kirim kunci API sebagai bearer token untuk mengambilnya."
 sheets.preview_heading: "Baris"
 sheets.preview_subtitle: "Yang diterima konsumen saat ini."

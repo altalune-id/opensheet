@@ -178,7 +178,6 @@ sheets.public_ack: "URL を知る誰でもこれらの行を読めることを�
 sheets.public_badge: "公開"
 sheets.publish_submit: "公開"
 sheets.empty: "公開されたシートはまだありません。"
-sheets.url_heading: "行の URL"
 sheets.url_key_hint: "取得には API キーをベアラートークンとして送ります。"
 sheets.preview_heading: "行"
 sheets.preview_subtitle: "利用者が今受け取る内容です。"

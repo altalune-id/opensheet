@@ -183,7 +183,6 @@ sheets.public_ack: "أفهم أن أي شخص يملك الرابط يمكنه �
 sheets.public_badge: "عامة"
 sheets.publish_submit: "نشر"
 sheets.empty: "لا توجد أوراق منشورة بعد."
-sheets.url_heading: "رابط الصفوف"
 sheets.url_key_hint: "أرسل مفتاح API كرمز حامل لجلب هذا الرابط."
 sheets.preview_heading: "الصفوف"
 sheets.preview_subtitle: "ما يستلمه المستهلك الآن."

@@ -178,7 +178,6 @@ sheets.public_ack: "Saya faham sesiapa yang mempunyai URL boleh membaca baris in
 sheets.public_badge: "Awam"
 sheets.publish_submit: "Terbitkan"
 sheets.empty: "Belum ada sheet diterbitkan."
-sheets.url_heading: "URL baris"
 sheets.url_key_hint: "Hantar kunci API sebagai bearer token untuk mengambilnya."
 sheets.preview_heading: "Baris"
 sheets.preview_subtitle: "Apa yang diterima pengguna sekarang."
