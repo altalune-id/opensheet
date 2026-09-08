@@ -3,14 +3,17 @@ package boot
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/data"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -246,4 +249,55 @@ func membershipsFor(orgs *org.Service) auth.MembershipsFn {
 		}
 		return ids, nil
 	}
+}
+
+type orgsForData struct{ svc *org.Service }
+
+func (o orgsForData) BySlug(ctx context.Context, slug string) (data.OrgRef, error) {
+	found, err := o.svc.BySlug(ctx, slug)
+	if err != nil {
+		return data.OrgRef{}, err
+	}
+	return data.OrgRef{ID: found.ID}, nil
+}
+
+type projectsForData struct{ svc *project.Service }
+
+func (p projectsForData) BySlug(ctx context.Context, orgID uuid.UUID, slug string) (data.ProjectRef, error) {
+	found, err := p.svc.BySlug(tenant.WithOrg(ctx, orgID), orgID, slug)
+	if err != nil {
+		return data.ProjectRef{}, err
+	}
+	return data.ProjectRef{ID: found.ID}, nil
+}
+
+type sheetsForData struct {
+	svc        *sheet.Service
+	defaultTTL time.Duration
+}
+
+func (s sheetsForData) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (data.SheetRef, error) {
+	scoped := tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID})
+	found, err := s.svc.BySlug(scoped, slug)
+	if err != nil {
+		return data.SheetRef{}, err
+	}
+	ttl := found.CacheTTL
+	if ttl == sheet.DefaultCacheTTL {
+		ttl = s.defaultTTL
+	}
+	return data.SheetRef{ID: found.ID, Visibility: string(found.Visibility), CacheTTL: ttl}, nil
+}
+
+type readerForData struct {
+	svc  *sheet.Service
+	read *sheet.ReadWorkflow
+}
+
+func (r readerForData) Rows(ctx context.Context, sheetID uuid.UUID) (sheet.Rows, error) {
+	sh, err := r.svc.ByID(ctx, sheetID)
+	if err != nil {
+		return sheet.Rows{}, err
+	}
+	return r.read.Rows(ctx, sh)
 }

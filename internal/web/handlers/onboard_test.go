@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/handlers"
 )
 
@@ -85,4 +86,35 @@ func TestOnboardingGate_HonoursBasePath(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, rec.Code)
 	loc := rec.Header().Get("Location")
 	assert.True(t, strings.HasPrefix(loc, "/app/onboard"), "Location=%q must start with /app/onboard", loc)
+}
+
+// A machine caller must never receive an HTML redirect to /onboard.
+func TestOnboardingGate_DoesNotRedirectTheMachineSurfaces(t *testing.T) {
+	var required atomic.Bool
+	required.Store(true)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+
+	for _, bp := range []string{"", "/app"} {
+		gate := handlers.OnboardingGate(bp, &required)(next)
+		for _, p := range []string{
+			web.Path(bp, "/api") + "/v1/orgs/a/projects/b/sheets/prices",
+			web.Path(bp, "/api") + "/todo.v1.TodoService/List",
+		} {
+			r := httptest.NewRequest(http.MethodGet, p, nil)
+			w := httptest.NewRecorder()
+			gate.ServeHTTP(w, r)
+			if w.Code != http.StatusNoContent {
+				t.Errorf("basePath %q path %q: status = %d, want 204 (not a redirect)", bp, p, w.Code)
+			}
+		}
+	}
+
+	// The browser surface must still be gated.
+	gate := handlers.OnboardingGate("", &required)(next)
+	r := httptest.NewRequest(http.MethodGet, "/orgs/a", nil)
+	w := httptest.NewRecorder()
+	gate.ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("browser path status = %d, want 303", w.Code)
+	}
 }

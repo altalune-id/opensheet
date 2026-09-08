@@ -12,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/api"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/data"
 	i18npkg "altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
@@ -34,13 +35,29 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.
 		Auths: s.Auth, Users: s.Users, Orgs: s.Orgs, Projects: s.Projects,
 		Todos: s.Todos, Invites: s.Invites, Credentials: s.Credentials,
 		Spreadsheets: s.Spreadsheets, Sheets: s.Sheets, APIKeys: s.APIKeys,
-		TodoStore: s.TodoStore,
+		CredentialConnect: s.Connect,
+		TodoStore:         s.TodoStore,
 	})
 	if !cfg.API.Enabled {
 		return srv, nil
 	}
 	h := srv.Handler(cfg.HTTP.BasePath)
 	return srv, h
+}
+
+// NOTE: the data plane is built regardless of api.enabled — that flag gates only the RPC surface.
+func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *slog.Logger, s *Services) http.Handler {
+	return data.NewHandler(
+		cfg.HTTP.BasePath,
+		orgsForData{svc: s.Orgs},
+		projectsForData{svc: s.Projects},
+		sheetsForData{svc: s.Sheets, defaultTTL: cfg.Cache.DefaultTTL},
+		readerForData{svc: s.Sheets, read: s.Read},
+		s.Sheets,
+		s.KeyAuthn,
+		capsForSheet{caps: caps},
+		log,
+	)
 }
 
 func buildWebHandler(
@@ -60,6 +77,7 @@ func buildWebHandler(
 	required *atomic.Bool,
 	setupToken string,
 	apiHandler http.Handler,
+	dataHandler http.Handler,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
 ) http.Handler {
@@ -89,8 +107,9 @@ func buildWebHandler(
 		AppHandlers: []web.Register{
 			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
 		},
-		APIHandler: apiHandler,
-		RobotsCfg:  &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
+		APIHandler:  apiHandler,
+		DataHandler: dataHandler,
+		RobotsCfg:   &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
 		Middlewares: []web.Middleware{
 			webmw.RequestID,
 			webmw.RequestLog(slogger),

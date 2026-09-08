@@ -42,6 +42,7 @@ func probeRoutes() []probeRoute {
 		proj  = "probe-project"
 		base  = "/orgs/" + org
 		pbase = base + "/projects/" + proj
+		dbase = dataMount + pbase
 	)
 	id := uuid.NewString()
 	return []probeRoute{
@@ -61,6 +62,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, base + "/projects/new", nil},
 		{http.MethodGet, pbase + "/overview", nil},
 		{http.MethodGet, pbase + "/todos", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
@@ -79,6 +81,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/todos/" + id + "/toggle", url.Values{}},
 		{http.MethodPost, pbase + "/todos/" + id + "/delete", url.Values{}},
 		{http.MethodDelete, pbase + "/todos/" + id, nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -98,10 +101,13 @@ func probeRoutes() []probeRoute {
 	}
 }
 
-func newScopeProbeServer(t *testing.T, mode config.Mode) (*boot.Server, *bytes.Buffer) {
+func newScopeProbeServer(t *testing.T, mode config.Mode, tweak ...func(*config.Config)) (*boot.Server, *bytes.Buffer) {
 	t.Helper()
 	cfg := newSmokeCfg(t)
 	cfg.Mode = mode
+	for _, fn := range tweak {
+		fn(cfg)
+	}
 	if mode == config.ModeCloud {
 		// NOTE: org creation and the signup flow are cloud-only capabilities — the paths every tenant-scope bug so far landed on.
 		cfg.OIDC = config.OIDCConfig{
@@ -206,8 +212,25 @@ func TestRoutes_ListCoversEveryRegisteredRoute(t *testing.T) {
 	}
 }
 
+// dataMount is the prefix internal/data registers behind, stripped before its own mux sees a request.
+const dataMount = "/api/v1"
+
+// TestRoutes_EveryProbeMatchesARegisteredRoute is the reverse of the assertion above: a probe row no
+// handler registers walks nothing, so the walk would quietly stop proving anything about that route.
+func TestRoutes_EveryProbeMatchesARegisteredRoute(t *testing.T) {
+	registered := map[string]bool{}
+	for _, pat := range registeredRoutes(t) {
+		registered[pat] = true
+	}
+	for _, rt := range probeRoutes() {
+		pat := rt.method + " " + templatize(rt.path)
+		require.True(t, registered[pat],
+			"%q is walked by a probe but no handler registers it — drop the probe or fix its path", pat)
+	}
+}
+
 var (
-	reRegister = regexp.MustCompile(`mux\.HandleFunc\("([A-Z]+) ([^"]+)"`)
+	reRegister = regexp.MustCompile(`\w+\.HandleFunc\("([A-Z]+) ([^"]+)"`)
 	reUUID     = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 )
 
@@ -216,6 +239,7 @@ func templatize(path string) string {
 	path = reUUID.ReplaceAllString(path, "{id}")
 	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{org}", 1)
 	path = strings.Replace(path, "/projects/probe-project", "/projects/{project}", 1)
+	path = strings.Replace(path, "/sheets/probe-sheet", "/sheets/{slug}", 1)
 	if strings.HasPrefix(path, "/orgs/{org}/members/{id}/") {
 		path = strings.Replace(path, "/members/{id}/", "/members/{user}/", 1)
 	}
@@ -225,22 +249,32 @@ func templatize(path string) string {
 	return path
 }
 
+// registeredRoutes scrapes every surface mounted on srv.Web, prefixing each surface's patterns with
+// the mount its own mux sits behind so the results are comparable with a concrete probe path.
 func registeredRoutes(t *testing.T) []string {
 	t.Helper()
-	files, err := filepath.Glob("../web/handlers/*.go")
-	require.NoError(t, err)
-	var out []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		b, rErr := os.ReadFile(f)
-		require.NoError(t, rErr)
-		for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
-			out = append(out, m[1]+" "+m[2])
-		}
+	surfaces := []struct{ glob, mount string }{
+		{"../web/handlers/*.go", ""},
+		{"../data/*.go", dataMount},
 	}
-	require.NotEmpty(t, out, "found no registered routes — the scraper regex has gone stale")
+	var out []string
+	for _, s := range surfaces {
+		files, err := filepath.Glob(s.glob)
+		require.NoError(t, err)
+		found := 0
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, rErr := os.ReadFile(f)
+			require.NoError(t, rErr)
+			for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
+				out = append(out, m[1]+" "+s.mount+m[2])
+				found++
+			}
+		}
+		require.NotZero(t, found, "found no registered routes under %s — the scraper regex has gone stale", s.glob)
+	}
 	return out
 }
 
@@ -268,6 +302,44 @@ func stubIssuer(t *testing.T) string {
 		_, _ = w.Write([]byte(`{"keys":[]}`))
 	})
 	return ts.URL
+}
+
+// TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface drives the booted server: api.enabled is false in
+// the probe config, so buildAPIHandler returns nil, and the data plane must still answer with its JSON envelope.
+func TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted)
+	require.False(t, srv.Cfg.API.Enabled, "the probe config must leave the RPC surface off for this test to mean anything")
+
+	req := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.JSONEq(t, `{"error":{"code":"`+apperror.CodeSheetNotFound+`","message":"Sheet not found"}}`, rec.Body.String())
+}
+
+// TestRoutes_DataPlaneWinsTheAPISubtree locks the mount precedence on the booted server with both
+// surfaces mounted: /api/v1/ is more specific than /api/, so ServeMux routes it to the data plane.
+func TestRoutes_DataPlaneWinsTheAPISubtree(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
+		cfg.API.Enabled = true
+	})
+	require.True(t, srv.Cfg.API.Enabled)
+
+	data := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	dataRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(dataRec, data)
+	require.Equal(t, http.StatusNotFound, dataRec.Code)
+	require.Contains(t, dataRec.Body.String(), apperror.CodeSheetNotFound,
+		"the data plane must own /api/v1/, not the Connect handler")
+
+	rpc := httptest.NewRequest(http.MethodPost, "/api/todo.v1.TodoService/List", strings.NewReader("{}"))
+	rpc.Header.Set("Content-Type", "application/json")
+	rpcRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rpcRec, rpc)
+	require.NotContains(t, rpcRec.Body.String(), apperror.CodeSheetNotFound,
+		"the RPC subtree must not be swallowed by the data plane")
 }
 
 // TestRoutes_NonMemberCannotReachAnotherOrg locks the membership gate: the slug is attacker-supplied and RLS cannot gate it.

@@ -59,6 +59,7 @@ type Services struct {
 	Connect *credential.ConnectWorkflow
 
 	Authn    authn.Chain
+	KeyAuthn *apikey.Authenticator
 	KeyUsage *apikey.UsageWorker
 }
 
@@ -213,8 +214,9 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	)
 
 	keyUsage := apikey.NewUsageWorker(apiKeyStore, log, nil)
+	keyAuthn := apikey.NewAuthenticator(apiKeys, keyUsage)
 	chain := authn.Chain{
-		apikey.NewAuthenticator(apiKeys, keyUsage),
+		keyAuthn,
 		auth.NewTokenLogin(k.Verifier, ensureFromOIDC, membershipsFor(orgs), log, reporter.Unexpected),
 	}
 
@@ -244,6 +246,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Read:             readWorkflow,
 		Connect:          connectWorkflow,
 		Authn:            chain,
+		KeyAuthn:         keyAuthn,
 		KeyUsage:         keyUsage,
 	}
 	if wErr := assertServicesWiring(svcs); wErr != nil {
@@ -268,6 +271,7 @@ func assertServicesWiring(s *Services) error {
 		{"apikeys", s.APIKeys != nil},
 		{"read", s.Read != nil},
 		{"connect", s.Connect != nil},
+		{"keyAuthn", s.KeyAuthn != nil},
 		{"keyUsage", s.KeyUsage != nil},
 	}
 	missing := make([]string, 0, len(slots))

@@ -62,6 +62,7 @@ proj, r, ok := h.ProjectScopeFor(w, r, o.ID, r.PathValue("project"))
 | Entry point       | Source of scope                                                           |
 | ----------------- | ------------------------------------------------------------------------- |
 | Web handler       | `Deps.OrgScopeFor` / `Deps.ProjectScopeFor`, from the path                |
+| Data plane        | `internal/data`'s own resolver, from the path — no session, no membership |
 | Connect-RPC       | `interceptor.Tenant`, from the session principal                          |
 | CLI               | the resolved `--org` flag, via `tenant.Into`                              |
 | Scheduler         | one fan-out per tenant, from `tenant.NewEnumerator` — see below           |
@@ -117,7 +118,9 @@ disambiguate it. Keeping the org in the path means:
    `LayoutForProject(r, title, o.Slug, proj, navKey)`. Both switchers key off it — pass nothing and
    they fall back to the session, which is how an org once appeared under both Current and Switch.
 5. Add the route to the table in `internal/boot/route_scope_test.go`. It is asserted complete
-   against the handler sources, so a new route without a probe fails the build.
+   against the handler sources in both directions, so a new route without a probe and a probe
+   without a route both fail the build. The scraper covers `internal/web/handlers/` and
+   `internal/data/`; a data-plane probe carries the `/api/v1` mount in its path.
 
 ## Writes scope themselves
 
@@ -152,19 +155,24 @@ project: ByID  BySlug  List  Save
 todo:    ByID  ClearDone  Delete  List  Save
 ```
 
+The data plane cannot reuse `OrgScopeFor`: that helper takes a `session.Principal`, gates on
+`Orgs.MembershipOf`, and renders an HTML error page — an API-key caller has none of the three. So
+`internal/data/scope.go` resolves `org.BySlug` through the definer wrapper, enters org scope, then runs
+the tenanted `project.BySlug` and `sheet.BySlug`, and answers every failure with the same JSON 404.
+
 `org.BySlug`, `org.List`, `invite.ByTokenHash` and `invite.FindPendingForEmail` are deliberately
 **not** in that list: they run through `SECURITY DEFINER` wrappers because they are consulted
 before a tenant scope exists — resolving a slug, or an invite, is what establishes the scope.
 
 ## Tests that hold this together
 
-| Test                                                  | What it prevents                                           |
-| ----------------------------------------------------- | ---------------------------------------------------------- |
-| `internal/boot/route_scope_test.go`                   | a route reachable without scope, or a route with no probe  |
-| `TestRoutes_NonMemberCannotReachAnotherOrg`           | reading another org by guessing its slug                   |
-| `TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo` | the switcher disagreeing with the page                     |
-| `internal/org/definer_integration_test.go`            | writes that only pass because the test role bypasses RLS   |
-| `schema/tenant_policy_guard_test.go`                  | a migration inlining the GUC instead of calling the helper |
+| Test                                                  | What it prevents                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `internal/boot/route_scope_test.go`                   | a route reachable without scope, a route with no probe, or a probe with no route |
+| `TestRoutes_NonMemberCannotReachAnotherOrg`           | reading another org by guessing its slug                                         |
+| `TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo` | the switcher disagreeing with the page                                           |
+| `internal/org/definer_integration_test.go`            | writes that only pass because the test role bypasses RLS                         |
+| `schema/tenant_policy_guard_test.go`                  | a migration inlining the GUC instead of calling the helper                       |
 
 The route walk runs on SQLite, whose org store scopes by explicit argument rather than by context,
 so it cannot see org-domain scope bugs. Those are covered by the Postgres integration tests running

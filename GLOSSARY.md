@@ -6,20 +6,22 @@ which is canonical.
 
 ## Surfaces
 
-A **surface** is one way the outside world reaches the app. There are three,
+A **surface** is one way the outside world reaches the app. There are four,
 and they all live in one process behind one HTTP listener.
 
-| Term  | Where           | What it is                                                                                                                                                                                                                      |
-| ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web` | `internal/web/` | Browser surface: templ-rendered HTML, HTMX partials, session-cookie auth (`webmw.Session`), i18n middleware, `/static/`.                                                                                                        |
-| `api` | `internal/api/` | Machine surface: Connect-RPC (gRPC-compatible + JSON), contracts in `api/*/v1/*.proto` generated into `gen/`, bearer-token auth (`internal/api/interceptor/auth.go` + `tokens.Verifier`), OpenAPI docs. Gated by `api.enabled`. |
-| `cli` | `internal/cli/` | Operator surface: Cobra tree, contract in [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md). Some commands boot the full server graph locally (`ServerBootFn`); others talk to a remote over the API (`ClientBootFn`).             |
+| Term   | Where            | What it is                                                                                                                                                                                                                                          |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web`  | `internal/web/`  | Browser surface: templ-rendered HTML, HTMX partials, session-cookie auth (`webmw.Session`), i18n middleware, `/static/`.                                                                                                                            |
+| `api`  | `internal/api/`  | Machine surface: Connect-RPC (gRPC-compatible + JSON), contracts in `api/*/v1/*.proto` generated into `gen/`, bearer-token auth (`internal/api/interceptor/auth.go` + `tokens.Verifier`), OpenAPI docs. Gated by `api.enabled`.                     |
+| `data` | `internal/data/` | Data plane: a published sheet's rows as a JSON array, plain HTTP, API-key auth (`internal/platform/authn` + the resource-level `Authorizer`), scope from the path. Mounted at `<basePath>/api/v1/`. Not gated by `api.enabled` — it is the product. |
+| `cli`  | `internal/cli/`  | Operator surface: Cobra tree, contract in [`docs/CLI_CONTRACT.md`](docs/CLI_CONTRACT.md). Some commands boot the full server graph locally (`ServerBootFn`); others talk to a remote over the API (`ClientBootFn`).                                 |
 
-NOTE: web and api are **not** peers. `web.NewServer` is also the outer mux — it
-owns `/healthz`, `/readyz` and `/robots.txt` unprefixed, mounts the API at
-`<basePath>/api/` (`internal/web/server.go:71-72`), and mounts the app itself
-(including `/static/`) under `basePath`. The api surface is nested inside the
-web one.
+NOTE: web, api and data are **not** peers. `web.NewServer` is also the outer mux
+— it owns `/healthz`, `/readyz` and `/robots.txt` unprefixed, mounts the API at
+`<basePath>/api/` and the data plane at `<basePath>/api/v1/`
+(`internal/web/server.go:70-79`), and mounts the app itself (including
+`/static/`) under `basePath`. ServeMux resolves `/api/v1/` over `/api/` by
+specificity. The api and data surfaces are nested inside the web one.
 
 ## Architecture
 
