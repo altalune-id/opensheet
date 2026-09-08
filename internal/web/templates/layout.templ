@@ -485,9 +485,6 @@ templ projectMenu(d web.LayoutData, slug string) {
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
 			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
 		</a>
-		<a href={ templ.SafeURL(d.ProjectPath(slug, "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
-			@icons.Icon("list-checks", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.todos") }</span>
-		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/credentials")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "credentials") }>
 			@icons.Icon("shield", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.credentials") }</span>
 		</a>

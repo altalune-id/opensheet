@@ -380,6 +380,19 @@ func TestOpensheetHandlers_EmptyStates(t *testing.T) {
 	}
 }
 
+func TestOpensheetHandlers_ProjectSidebarOmitsTodos(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	rec := f.do(t, http.MethodGet, f.path("/sheets"), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	for _, want := range []string{"/credentials", "/spreadsheets", "/sheets", "/keys"} {
+		assert.Contains(t, body, f.path(want), "the project sidebar must link every opensheet section")
+	}
+	assert.NotContains(t, body, f.path("/todos"),
+		"todos stays routable but is no longer a navigable section")
+}
+
 func TestCredentialHandler_UploadStoresAndReportsUnverified(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
