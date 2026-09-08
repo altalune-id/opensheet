@@ -12,6 +12,7 @@ type Spreadsheets struct {
 	CredentialID postgres.ColumnString
 	GoogleFileID postgres.ColumnString
 	Title        postgres.ColumnString
+	Writable     postgres.ColumnBool
 	CreatedAt    postgres.ColumnTimestampz
 	UpdatedAt    postgres.ColumnTimestampz
 
@@ -31,13 +32,14 @@ func NewSpreadsheets(schema, tablePrefix string) *Spreadsheets {
 		credentialID = postgres.StringColumn("credential_id")
 		googleFileID = postgres.StringColumn("google_file_id")
 		title        = postgres.StringColumn("title")
+		writable     = postgres.BoolColumn("writable")
 		createdAt    = postgres.TimestampzColumn("created_at")
 		updatedAt    = postgres.TimestampzColumn("updated_at")
 		all          = postgres.ColumnList{
-			id, orgID, projectID, credentialID, googleFileID, title, createdAt, updatedAt,
+			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt,
 		}
 		mutable = postgres.ColumnList{
-			orgID, projectID, credentialID, googleFileID, title, updatedAt,
+			orgID, projectID, credentialID, googleFileID, title, writable, updatedAt,
 		}
 	)
 	return &Spreadsheets{
@@ -48,6 +50,7 @@ func NewSpreadsheets(schema, tablePrefix string) *Spreadsheets {
 		CredentialID:   credentialID,
 		GoogleFileID:   googleFileID,
 		Title:          title,
+		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 		AllColumns:     all,

@@ -117,6 +117,73 @@ func TestSpreadsheet_Update_WithNoFieldsSet_LeavesTheRowAlone(t *testing.T) {
 	}
 }
 
+func TestSpreadsheet_Update_WritableRoundTripsAndDefaultsToFalse(t *testing.T) {
+	orgID := uuid.New()
+	h := newHarness(t, humanPrincipal(orgID))
+	proj := h.seedProject(orgID)
+	sp := h.seedSpreadsheet(orgID, proj.ID)
+	client := h.spreadsheetClient()
+
+	get := connect.NewRequest(&spreadsheetv1.GetRequest{ProjectId: proj.ID.String(), SpreadsheetId: sp.ID.String()})
+	withBearer(get.Header())
+	getResp, err := client.Get(t.Context(), get)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if getResp.Msg.GetSpreadsheet().GetWritable() {
+		t.Fatal("a registered spreadsheet must not be writable")
+	}
+
+	for _, want := range []bool{true, false} {
+		req := connect.NewRequest(&spreadsheetv1.UpdateRequest{
+			ProjectId:     proj.ID.String(),
+			SpreadsheetId: sp.ID.String(),
+			Writable:      &want,
+		})
+		withBearer(req.Header())
+		resp, updErr := client.Update(t.Context(), req)
+		if updErr != nil {
+			t.Fatalf("Update(writable=%v): %v", want, updErr)
+		}
+		if got := resp.Msg.GetSpreadsheet().GetWritable(); got != want {
+			t.Errorf("response writable = %v, want %v", got, want)
+		}
+		stored, storeErr := h.sprds.ByID(t.Context(), sp.ID)
+		if storeErr != nil {
+			t.Fatalf("ByID: %v", storeErr)
+		}
+		if stored.Writable != want {
+			t.Errorf("stored writable = %v, want %v: the dispatch branch must reach the service", stored.Writable, want)
+		}
+	}
+}
+
+func TestSpreadsheet_Update_AbsentWritableLeavesTheFlagAlone(t *testing.T) {
+	orgID := uuid.New()
+	h := newHarness(t, humanPrincipal(orgID))
+	proj := h.seedProject(orgID)
+	sp := h.seedSpreadsheet(orgID, proj.ID)
+	sp.SetWritable(true)
+	if err := h.sprds.Save(t.Context(), sp); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	title := "Renamed"
+	req := connect.NewRequest(&spreadsheetv1.UpdateRequest{
+		ProjectId:     proj.ID.String(),
+		SpreadsheetId: sp.ID.String(),
+		Title:         &title,
+	})
+	withBearer(req.Header())
+	resp, err := h.spreadsheetClient().Update(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !resp.Msg.GetSpreadsheet().GetWritable() {
+		t.Error("an absent writable field must not clear the flag")
+	}
+}
+
 func TestSpreadsheet_ListTabs_ReturnsGoogleTabTitles(t *testing.T) {
 	orgID := uuid.New()
 	h := newHarness(t, humanPrincipal(orgID))

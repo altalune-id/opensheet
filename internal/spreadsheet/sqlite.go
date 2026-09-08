@@ -33,6 +33,7 @@ type sqliteSpreadsheetRow struct {
 	CredentialID string `alias:"spreadsheets.credential_id"`
 	GoogleFileID string `alias:"spreadsheets.google_file_id"`
 	Title        string `alias:"spreadsheets.title"`
+	Writable     int64  `alias:"spreadsheets.writable"`
 	CreatedAt    string `alias:"spreadsheets.created_at"`
 	UpdatedAt    string `alias:"spreadsheets.updated_at"`
 }
@@ -69,6 +70,7 @@ func (r *sqliteSpreadsheetRow) toSpreadsheet() (*Spreadsheet, error) {
 		CredentialID: credentialID,
 		GoogleFileID: r.GoogleFileID,
 		Title:        r.Title,
+		Writable:     r.Writable != 0,
 		CreatedAt:    createdAt.UTC(),
 		UpdatedAt:    updatedAt.UTC(),
 	}, nil
@@ -78,6 +80,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 	if _, err := tenant.From(ctx); err != nil {
 		return err
 	}
+	writable := boolToInt(sp.Writable)
 	updatedAt := sp.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
@@ -87,6 +90,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 			sp.CredentialID.String(),
 			sp.GoogleFileID,
 			sp.Title,
+			writable,
 			sp.CreatedAt.UTC().Format(time.RFC3339Nano),
 			updatedAt,
 		).
@@ -96,6 +100,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 				s.table.CredentialID.SET(sqlite.String(sp.CredentialID.String())),
 				s.table.GoogleFileID.SET(sqlite.String(sp.GoogleFileID)),
 				s.table.Title.SET(sqlite.String(sp.Title)),
+				s.table.Writable.SET(sqlite.Int(writable)),
 				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
 			),
 		)
@@ -202,6 +207,13 @@ func (s *sqliteStore) queryOne(ctx context.Context, cond sqlite.BoolExpression, 
 		return nil, fmt.Errorf("spreadsheet.sqlite.queryOne: %w", err)
 	}
 	return row.toSpreadsheet()
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func isSQLiteUniqueViolation(err error) bool {

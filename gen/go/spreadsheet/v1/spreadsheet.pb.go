@@ -31,6 +31,7 @@ type Spreadsheet struct {
 	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Writable      bool                   `protobuf:"varint,8,opt,name=writable,proto3" json:"writable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -112,6 +113,13 @@ func (x *Spreadsheet) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Spreadsheet) GetWritable() bool {
+	if x != nil {
+		return x.Writable
+	}
+	return false
 }
 
 type ListRequest struct {
@@ -416,6 +424,7 @@ type UpdateRequest struct {
 	SpreadsheetId string                 `protobuf:"bytes,2,opt,name=spreadsheet_id,json=spreadsheetId,proto3" json:"spreadsheet_id,omitempty"`
 	Title         *string                `protobuf:"bytes,3,opt,name=title,proto3,oneof" json:"title,omitempty"`
 	CredentialId  *string                `protobuf:"bytes,4,opt,name=credential_id,json=credentialId,proto3,oneof" json:"credential_id,omitempty"`
+	Writable      *bool                  `protobuf:"varint,5,opt,name=writable,proto3,oneof" json:"writable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -476,6 +485,13 @@ func (x *UpdateRequest) GetCredentialId() string {
 		return *x.CredentialId
 	}
 	return ""
+}
+
+func (x *UpdateRequest) GetWritable() bool {
+	if x != nil && x.Writable != nil {
+		return *x.Writable
+	}
+	return false
 }
 
 type UpdateResponse struct {
@@ -710,7 +726,7 @@ var File_spreadsheet_v1_spreadsheet_proto protoreflect.FileDescriptor
 
 const file_spreadsheet_v1_spreadsheet_proto_rawDesc = "" +
 	"\n" +
-	" spreadsheet/v1/spreadsheet.proto\x12\x0espreadsheet.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x93\x02\n" +
+	" spreadsheet/v1/spreadsheet.proto\x12\x0espreadsheet.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x02\n" +
 	"\vSpreadsheet\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -721,7 +737,8 @@ const file_spreadsheet_v1_spreadsheet_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\",\n" +
+	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x1a\n" +
+	"\bwritable\x18\b \x01(\bR\bwritable\",\n" +
 	"\vListRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"O\n" +
@@ -741,15 +758,17 @@ const file_spreadsheet_v1_spreadsheet_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12%\n" +
 	"\x0espreadsheet_id\x18\x02 \x01(\tR\rspreadsheetId\"L\n" +
 	"\vGetResponse\x12=\n" +
-	"\vspreadsheet\x18\x01 \x01(\v2\x1b.spreadsheet.v1.SpreadsheetR\vspreadsheet\"\xb6\x01\n" +
+	"\vspreadsheet\x18\x01 \x01(\v2\x1b.spreadsheet.v1.SpreadsheetR\vspreadsheet\"\xe4\x01\n" +
 	"\rUpdateRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12%\n" +
 	"\x0espreadsheet_id\x18\x02 \x01(\tR\rspreadsheetId\x12\x19\n" +
 	"\x05title\x18\x03 \x01(\tH\x00R\x05title\x88\x01\x01\x12(\n" +
-	"\rcredential_id\x18\x04 \x01(\tH\x01R\fcredentialId\x88\x01\x01B\b\n" +
+	"\rcredential_id\x18\x04 \x01(\tH\x01R\fcredentialId\x88\x01\x01\x12\x1f\n" +
+	"\bwritable\x18\x05 \x01(\bH\x02R\bwritable\x88\x01\x01B\b\n" +
 	"\x06_titleB\x10\n" +
-	"\x0e_credential_id\"O\n" +
+	"\x0e_credential_idB\v\n" +
+	"\t_writable\"O\n" +
 	"\x0eUpdateResponse\x12=\n" +
 	"\vspreadsheet\x18\x01 \x01(\v2\x1b.spreadsheet.v1.SpreadsheetR\vspreadsheet\"U\n" +
 	"\rDeleteRequest\x12\x1d\n" +

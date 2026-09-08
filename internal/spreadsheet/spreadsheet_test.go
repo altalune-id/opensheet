@@ -156,6 +156,30 @@ func TestRebind(t *testing.T) {
 	})
 }
 
+func TestSetWritable(t *testing.T) {
+	t.Run("registration is not writable", func(t *testing.T) {
+		s := mustNew(t)
+		if s.Writable {
+			t.Fatal("registration must not imply write permission")
+		}
+	})
+	t.Run("toggles both ways and advances UpdatedAt", func(t *testing.T) {
+		s := mustNew(t)
+		before := s.UpdatedAt
+		s.SetWritable(true)
+		if !s.Writable {
+			t.Error("SetWritable(true) did not set the flag")
+		}
+		if s.UpdatedAt.Before(before) {
+			t.Error("UpdatedAt went backwards")
+		}
+		s.SetWritable(false)
+		if s.Writable {
+			t.Error("SetWritable(false) did not clear the flag")
+		}
+	})
+}
+
 func mustNew(t *testing.T) *Spreadsheet {
 	t.Helper()
 	s, err := New(uuid.New(), uuid.New(), uuid.New(), "ABC", "old")

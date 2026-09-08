@@ -427,6 +427,85 @@ func TestService_Retitle(t *testing.T) {
 	})
 }
 
+func TestService_SetWritable(t *testing.T) {
+	t.Run("persists both directions", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		svc, _ := newStoreSvc(t, store)
+		ctx, tc := tenantCtx(t)
+		sp := seed(t, store, tc, goodFileID)
+		if sp.Writable {
+			t.Fatal("registration must not imply write permission")
+		}
+
+		got, err := svc.SetWritable(ctx, sp.ID, true)
+		if err != nil {
+			t.Fatalf("SetWritable: %v", err)
+		}
+		if !got.Writable {
+			t.Error("returned spreadsheet is not writable")
+		}
+		reread, err := store.ByID(ctx, sp.ID)
+		if err != nil {
+			t.Fatalf("ByID: %v", err)
+		}
+		if !reread.Writable {
+			t.Error("not persisted: the flag must reach the store, not just the returned aggregate")
+		}
+
+		if _, err := svc.SetWritable(ctx, sp.ID, false); err != nil {
+			t.Fatalf("SetWritable(false): %v", err)
+		}
+		reread, err = store.ByID(ctx, sp.ID)
+		if err != nil {
+			t.Fatalf("ByID: %v", err)
+		}
+		if reread.Writable {
+			t.Error("clearing the flag was not persisted")
+		}
+	})
+	t.Run("unknown id is NotFoundError", func(t *testing.T) {
+		svc, _ := newStoreSvc(t, fakes.NewSpreadsheet())
+		ctx, _ := tenantCtx(t)
+		_, err := svc.SetWritable(ctx, uuid.New(), true)
+		if !spreadsheet.IsNotFoundError(err) {
+			t.Fatalf("want IsNotFoundError, got %T: %v", err, err)
+		}
+	})
+	t.Run("another project cannot reach the row", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		svc, _ := newStoreSvc(t, store)
+		_, tc := tenantCtx(t)
+		sp := seed(t, store, tc, goodFileID)
+
+		other := tenant.Into(context.Background(), tenant.Context{OrgID: tc.OrgID, ProjectID: uuid.New()})
+		_, err := svc.SetWritable(other, sp.ID, true)
+		if !spreadsheet.IsNotFoundError(err) {
+			t.Fatalf("want IsNotFoundError, got %T: %v", err, err)
+		}
+	})
+	t.Run("missing tenant returns MissingError", func(t *testing.T) {
+		svc, _ := newStoreSvc(t, fakes.NewSpreadsheet())
+		_, err := svc.SetWritable(context.Background(), uuid.New(), true)
+		if !tenant.IsMissingError(err) {
+			t.Fatalf("want tenant.MissingError, got %T: %v", err, err)
+		}
+	})
+	t.Run("save failure routes through unexpected", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		svc, unex := newStoreSvc(t, store)
+		ctx, tc := tenantCtx(t)
+		sp := seed(t, store, tc, goodFileID)
+		store.SaveFn = func(context.Context, *spreadsheet.Spreadsheet) error { return errors.New("boom") }
+
+		if _, err := svc.SetWritable(ctx, sp.ID, true); err == nil {
+			t.Fatal("want error")
+		}
+		if *unex != 1 {
+			t.Errorf("unexpected() called %d times, want 1", *unex)
+		}
+	})
+}
+
 func TestService_Rebind(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		store := fakes.NewSpreadsheet()

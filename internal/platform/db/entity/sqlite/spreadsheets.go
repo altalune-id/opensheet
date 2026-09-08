@@ -12,6 +12,7 @@ type Spreadsheets struct {
 	CredentialID sqlite.ColumnString
 	GoogleFileID sqlite.ColumnString
 	Title        sqlite.ColumnString
+	Writable     sqlite.ColumnInteger
 	CreatedAt    sqlite.ColumnString
 	UpdatedAt    sqlite.ColumnString
 
@@ -28,13 +29,14 @@ func NewSpreadsheets(tablePrefix string) *Spreadsheets {
 		credentialID = sqlite.StringColumn("credential_id")
 		googleFileID = sqlite.StringColumn("google_file_id")
 		title        = sqlite.StringColumn("title")
+		writable     = sqlite.IntegerColumn("writable")
 		createdAt    = sqlite.StringColumn("created_at")
 		updatedAt    = sqlite.StringColumn("updated_at")
 		all          = sqlite.ColumnList{
-			id, orgID, projectID, credentialID, googleFileID, title, createdAt, updatedAt,
+			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt,
 		}
 		mutable = sqlite.ColumnList{
-			orgID, projectID, credentialID, googleFileID, title, updatedAt,
+			orgID, projectID, credentialID, googleFileID, title, writable, updatedAt,
 		}
 	)
 	return &Spreadsheets{
@@ -45,6 +47,7 @@ func NewSpreadsheets(tablePrefix string) *Spreadsheets {
 		CredentialID:   credentialID,
 		GoogleFileID:   googleFileID,
 		Title:          title,
+		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 		AllColumns:     all,

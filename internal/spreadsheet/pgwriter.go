@@ -17,7 +17,7 @@ func (s *postgresStore) Save(ctx context.Context, sp *Spreadsheet) error {
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sp.ID, sp.OrgID, sp.ProjectID, sp.CredentialID,
-			sp.GoogleFileID, sp.Title, sp.CreatedAt.UTC(), updatedAt,
+			sp.GoogleFileID, sp.Title, sp.Writable, sp.CreatedAt.UTC(), updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(
@@ -25,6 +25,7 @@ func (s *postgresStore) Save(ctx context.Context, sp *Spreadsheet) error {
 				s.table.CredentialID.SET(postgres.UUID(sp.CredentialID)),
 				s.table.GoogleFileID.SET(postgres.String(sp.GoogleFileID)),
 				s.table.Title.SET(postgres.String(sp.Title)),
+				s.table.Writable.SET(postgres.Bool(sp.Writable)),
 				s.table.UpdatedAt.SET(postgres.TimestampzT(updatedAt)),
 			),
 		)

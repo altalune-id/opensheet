@@ -70,7 +70,7 @@ func (s *SpreadsheetService) Get(ctx context.Context, req *connect.Request[sprea
 	return connect.NewResponse(&spreadsheetv1.GetResponse{Spreadsheet: toSpreadsheetProto(sp)}), nil
 }
 
-// Update retitles and rebinds the referenced spreadsheet; an absent field is left alone.
+// Update retitles, rebinds and re-gates the referenced spreadsheet; an absent field is left alone.
 func (s *SpreadsheetService) Update(ctx context.Context, req *connect.Request[spreadsheetv1.UpdateRequest]) (*connect.Response[spreadsheetv1.UpdateResponse], error) {
 	tctx, id, err := s.scoped(ctx, req.Msg.GetProjectId(), req.Msg.GetSpreadsheetId())
 	if err != nil {
@@ -92,6 +92,12 @@ func (s *SpreadsheetService) Update(ctx context.Context, req *connect.Request[sp
 			return nil, perr
 		}
 		sp, err = s.spreadsheets.Rebind(tctx, id, credID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if req.Msg.Writable != nil {
+		sp, err = s.spreadsheets.SetWritable(tctx, id, req.Msg.GetWritable())
 		if err != nil {
 			return nil, err
 		}
@@ -143,6 +149,7 @@ func toSpreadsheetProto(sp *spreadsheet.Spreadsheet) *spreadsheetv1.Spreadsheet 
 		CredentialId: sp.CredentialID.String(),
 		GoogleFileId: sp.GoogleFileID,
 		Title:        sp.Title,
+		Writable:     sp.Writable,
 		CreatedAt:    timestamppb.New(sp.CreatedAt),
 		UpdatedAt:    timestamppb.New(sp.UpdatedAt),
 	}

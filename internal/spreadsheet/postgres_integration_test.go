@@ -185,6 +185,43 @@ func TestPostgres_Spreadsheet_SaveAndLookup(t *testing.T) {
 	assert.Equal(t, sp.ID, byFileID.ID)
 }
 
+func TestPostgres_Spreadsheet_WritableRoundTrips(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.ctxA()
+
+	for name, writable := range map[string]bool{"writable": true, "not-writable": false} {
+		t.Run(name, func(t *testing.T) {
+			sp := f.save(t, ctx, f.a, "W"+strings.ToUpper(name[:3]), "Prices")
+			if writable {
+				sp.SetWritable(true)
+				require.NoError(t, f.store.Save(ctx, sp))
+			}
+			got, err := f.store.ByID(ctx, sp.ID)
+			require.NoError(t, err)
+			assert.Equal(t, writable, got.Writable, "writable must survive save then load")
+		})
+	}
+}
+
+func TestPostgres_Spreadsheet_WritableSurvivesAnUpsert(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.ctxA()
+	sp := f.save(t, ctx, f.a, "1AbC-_dEf", "Prices")
+	assert.False(t, sp.Writable, "registration must not imply write permission")
+
+	sp.SetWritable(true)
+	require.NoError(t, f.store.Save(ctx, sp))
+	got, err := f.store.ByID(ctx, sp.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Writable, "the ON CONFLICT DO UPDATE branch must carry writable")
+
+	got.SetWritable(false)
+	require.NoError(t, f.store.Save(ctx, got))
+	back, err := f.store.ByID(ctx, sp.ID)
+	require.NoError(t, err)
+	assert.False(t, back.Writable, "the same branch must be able to clear it")
+}
+
 func TestPostgres_Spreadsheet_NotFound(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.ctxA()

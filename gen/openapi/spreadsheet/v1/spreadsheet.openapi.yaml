@@ -501,6 +501,9 @@ components:
         updatedAt:
           title: updated_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        writable:
+          type: boolean
+          title: writable
       title: Spreadsheet
       additionalProperties: false
     spreadsheet.v1.UpdateRequest:
@@ -522,6 +525,11 @@ components:
             - string
             - "null"
           title: credential_id
+        writable:
+          type:
+            - boolean
+            - "null"
+          title: writable
       title: UpdateRequest
       additionalProperties: false
     spreadsheet.v1.UpdateResponse:

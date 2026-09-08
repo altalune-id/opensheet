@@ -34,6 +34,7 @@ type pgSpreadsheetRow struct {
 	CredentialID uuid.UUID `alias:"spreadsheets.credential_id"`
 	GoogleFileID string    `alias:"spreadsheets.google_file_id"`
 	Title        string    `alias:"spreadsheets.title"`
+	Writable     bool      `alias:"spreadsheets.writable"`
 	CreatedAt    time.Time `alias:"spreadsheets.created_at"`
 	UpdatedAt    time.Time `alias:"spreadsheets.updated_at"`
 }
@@ -46,6 +47,7 @@ func (r *pgSpreadsheetRow) toSpreadsheet() *Spreadsheet {
 		CredentialID: r.CredentialID,
 		GoogleFileID: r.GoogleFileID,
 		Title:        r.Title,
+		Writable:     r.Writable,
 		CreatedAt:    r.CreatedAt.UTC(),
 		UpdatedAt:    r.UpdatedAt.UTC(),
 	}

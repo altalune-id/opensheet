@@ -122,6 +122,68 @@ func TestSQLiteStore_SaveAndByID(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WritableRoundTrips(t *testing.T) {
+	f := newSQLiteFixture(t)
+
+	for _, tc := range []struct {
+		name     string
+		fileID   string
+		writable bool
+	}{
+		{name: "writable", fileID: "WRITABLE", writable: true},
+		{name: "not-writable", fileID: "READONLY", writable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := f.save(t, tc.fileID, "Prices")
+			if tc.writable {
+				sp.SetWritable(true)
+				if err := f.store.Save(f.ctx(), sp); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+			}
+			got, err := f.store.ByID(f.ctx(), sp.ID)
+			if err != nil {
+				t.Fatalf("ByID: %v", err)
+			}
+			if got.Writable != tc.writable {
+				t.Fatalf("Writable = %v, want %v", got.Writable, tc.writable)
+			}
+		})
+	}
+}
+
+func TestSQLiteStore_WritableSurvivesAnUpsert(t *testing.T) {
+	f := newSQLiteFixture(t)
+	sp := f.save(t, goodFileID, "Prices")
+	if sp.Writable {
+		t.Fatal("registration must not imply write permission")
+	}
+
+	sp.SetWritable(true)
+	if err := f.store.Save(f.ctx(), sp); err != nil {
+		t.Fatalf("re-Save: %v", err)
+	}
+	got, err := f.store.ByID(f.ctx(), sp.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if !got.Writable {
+		t.Error("Writable = false after an upsert that set it, want true: the DO_UPDATE branch must carry it")
+	}
+
+	got.SetWritable(false)
+	if err := f.store.Save(f.ctx(), got); err != nil {
+		t.Fatalf("third Save: %v", err)
+	}
+	back, err := f.store.ByID(f.ctx(), sp.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if back.Writable {
+		t.Error("Writable = true after an upsert that cleared it, want false")
+	}
+}
+
 func TestSQLiteStore_ByID_NotFound(t *testing.T) {
 	f := newSQLiteFixture(t)
 	_, err := f.store.ByID(f.ctx(), uuid.New())

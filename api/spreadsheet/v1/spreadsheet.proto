@@ -23,6 +23,7 @@ message Spreadsheet {
   string title = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  bool writable = 8;
 }
 
 message ListRequest {
@@ -58,6 +59,7 @@ message UpdateRequest {
   string spreadsheet_id = 2;
   optional string title = 3;
   optional string credential_id = 4;
+  optional bool writable = 5;
 }
 
 message UpdateResponse {

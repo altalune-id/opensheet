@@ -535,6 +535,49 @@ func TestSpreadsheetHandler_RegisterAndEdit(t *testing.T) {
 	assert.Equal(t, "Q2 Report", updated.Title)
 }
 
+func TestSpreadsheetHandler_WritableCheckboxRoundTrips(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+	require.False(t, sp.Writable, "registration must not imply write permission")
+
+	page := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()), "")
+	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
+	assert.Contains(t, page.Body.String(), `data-spreadsheet-writable`)
+	assert.NotRegexp(t, `<input data-spreadsheet-writable[^>]* checked`, page.Body.String())
+
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()),
+		url.Values{"title": {sp.Title}, "credential_id": {c.ID.String()}, "writable": {"1"}}.Encode())
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+
+	updated, err := f.Sprds.ByID(f.ctx(), sp.ID)
+	require.NoError(t, err)
+	require.True(t, updated.Writable, "the ticked checkbox must reach the aggregate")
+
+	page = f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()), "")
+	require.Equal(t, http.StatusOK, page.Code)
+	assert.Regexp(t, `<input data-spreadsheet-writable[^>]* checked`, page.Body.String(),
+		"the detail page must render the checkbox ticked")
+
+	list := f.do(t, http.MethodGet, f.path("/spreadsheets"), "")
+	require.Equal(t, http.StatusOK, list.Code)
+	assert.Contains(t, list.Body.String(), `data-spreadsheet-writable-badge`,
+		"the registry must mark a writable document")
+
+	rec = f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()),
+		url.Values{"title": {sp.Title}, "credential_id": {c.ID.String()}}.Encode())
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+
+	cleared, err := f.Sprds.ByID(f.ctx(), sp.ID)
+	require.NoError(t, err)
+	assert.False(t, cleared.Writable, "an unticked checkbox must clear the flag")
+
+	list = f.do(t, http.MethodGet, f.path("/spreadsheets"), "")
+	require.Equal(t, http.StatusOK, list.Code)
+	assert.NotContains(t, list.Body.String(), `data-spreadsheet-writable-badge`)
+}
+
 // A fragment renders with its own LayoutData, and LayoutData.ProjectPath collapses to "/orgs" when no
 // org is pinned — so an HTMX swap would replace the list with rows linking nowhere.
 func TestOpensheetHandlers_FragmentLinksStayProjectScoped(t *testing.T) {

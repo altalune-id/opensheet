@@ -27,6 +27,7 @@ type Spreadsheet struct {
 	CredentialID uuid.UUID
 	GoogleFileID string
 	Title        string
+	Writable     bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -76,6 +77,12 @@ func (s *Spreadsheet) Rebind(credentialID uuid.UUID) error {
 	s.CredentialID = credentialID
 	s.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// SetWritable decides whether the data plane may mutate this document's structure.
+func (s *Spreadsheet) SetWritable(writable bool) {
+	s.Writable = writable
+	s.UpdatedAt = time.Now().UTC()
 }
 
 // NOTE: a pasted edit URL fails the alphabet, so it is rejected here rather than at Google call time.

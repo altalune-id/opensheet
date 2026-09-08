@@ -188,6 +188,28 @@ func (s *Service) Rebind(ctx context.Context, id, credentialID uuid.UUID) (*Spre
 	return sp, nil
 }
 
+// SetWritable decides whether the data plane may mutate the identified document's structure.
+func (s *Service) SetWritable(ctx context.Context, id uuid.UUID, writable bool) (*Spreadsheet, error) {
+	ctx, span := tracer.Start(ctx, "spreadsheet.SetWritable",
+		trace.WithAttributes(
+			attribute.String("spreadsheet.id", id.String()),
+			attribute.Bool("writable", writable),
+		))
+	defer span.End()
+
+	sp, err := s.resolve(ctx, id, "SetWritable")
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	sp.SetWritable(writable)
+	if err := s.store.Save(ctx, sp); err != nil {
+		span.RecordError(err)
+		return nil, s.unexpected(ctx, "spreadsheet.SetWritable: save", err, "spreadsheet_id", id)
+	}
+	return sp, nil
+}
+
 // Delete removes the identified document, cascading the sheets published from it.
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	ctx, span := tracer.Start(ctx, "spreadsheet.Delete",

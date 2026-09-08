@@ -95,7 +95,7 @@ func (h *SpreadsheetHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	))
 }
 
-// PostUpdate retitles the spreadsheet and rebinds its credential.
+// PostUpdate retitles the spreadsheet, rebinds its credential and re-gates its writes.
 func (h *SpreadsheetHandler) PostUpdate(w http.ResponseWriter, r *http.Request) {
 	sc, sp, ok := h.requireSpreadsheet(w, r)
 	if !ok {
@@ -115,6 +115,12 @@ func (h *SpreadsheetHandler) PostUpdate(w http.ResponseWriter, r *http.Request) 
 	if err == nil && credID != sp.CredentialID {
 		if _, rErr := h.Spreadsheets.Rebind(sc.req.Context(), sp.ID, credID); rErr != nil {
 			h.renderDetailError(w, sc, sp, rErr)
+			return
+		}
+	}
+	if writable := sc.req.PostForm.Get("writable") == "1"; writable != sp.Writable {
+		if _, wErr := h.Spreadsheets.SetWritable(sc.req.Context(), sp.ID, writable); wErr != nil {
+			h.renderDetailError(w, sc, sp, wErr)
 			return
 		}
 	}
@@ -216,6 +222,7 @@ func (h *SpreadsheetHandler) fill(w http.ResponseWriter, sc projectScope, view t
 			Title:          spreadsheetTitle(sp),
 			GoogleFileID:   sp.GoogleFileID,
 			CredentialName: names[sp.CredentialID],
+			Writable:       sp.Writable,
 		})
 	}
 	return view, true
@@ -232,6 +239,7 @@ func (h *SpreadsheetHandler) detail(w http.ResponseWriter, sc projectScope, sp *
 	view.GoogleFileID = sp.GoogleFileID
 	view.CredentialID = sp.CredentialID.String()
 	view.Credentials = credentialSelect(creds)
+	view.Writable = sp.Writable
 	return view, true
 }
 
