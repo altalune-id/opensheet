@@ -52,7 +52,7 @@ func (s *SheetService) Create(ctx context.Context, req *connect.Request[sheetv1.
 		return nil, err
 	}
 	sh, err := s.sheets.Create(tctx, sprdID, req.Msg.GetTab(), req.Msg.GetSlug(),
-		sheet.Visibility(req.Msg.GetVisibility()), req.Msg.GetCacheTtl().AsDuration())
+		sheet.Visibility(req.Msg.GetVisibility()), req.Msg.GetCacheTtl().AsDuration(), req.Msg.GetWritable())
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *SheetService) Get(ctx context.Context, req *connect.Request[sheetv1.Get
 	return connect.NewResponse(&sheetv1.GetResponse{Sheet: toSheetProto(sh)}), nil
 }
 
-// Update changes the tab, visibility and cache TTL of the referenced sheet; an absent field is left alone.
+// Update changes the tab, visibility, cache TTL and writable flag of the referenced sheet; an absent field is left alone.
 func (s *SheetService) Update(ctx context.Context, req *connect.Request[sheetv1.UpdateRequest]) (*connect.Response[sheetv1.UpdateResponse], error) {
 	tctx, id, err := s.scoped(ctx, req.Msg.GetProjectId(), req.Msg.GetSheetId())
 	if err != nil {
@@ -87,6 +87,7 @@ func (s *SheetService) Update(ctx context.Context, req *connect.Request[sheetv1.
 		ttl := req.Msg.GetCacheTtl().AsDuration()
 		in.CacheTTL = &ttl
 	}
+	in.Writable = req.Msg.Writable
 	sh, err := s.sheets.Update(tctx, id, in)
 	if err != nil {
 		return nil, err
@@ -139,6 +140,7 @@ func toSheetProto(sh *sheet.Sheet) *sheetv1.Sheet {
 		Slug:          sh.Slug,
 		Visibility:    string(sh.Visibility),
 		CacheTtl:      durationpb.New(sh.CacheTTL),
+		Writable:      sh.Writable,
 		CreatedAt:     timestamppb.New(sh.CreatedAt),
 		UpdatedAt:     timestamppb.New(sh.UpdatedAt),
 	}

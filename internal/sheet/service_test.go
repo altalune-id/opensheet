@@ -57,7 +57,7 @@ func TestService_Create(t *testing.T) {
 		ctx, tc := tenantCtx(t)
 		spreadsheetID := uuid.New()
 
-		got, err := svc.Create(ctx, spreadsheetID, "Kamar", "prices", sheet.VisibilityKey, 90*time.Second)
+		got, err := svc.Create(ctx, spreadsheetID, "Kamar", "prices", sheet.VisibilityKey, 90*time.Second, false)
 		if err != nil {
 			t.Fatalf("Create err = %v", err)
 		}
@@ -78,7 +78,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		created, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		created, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatalf("Create err = %v", err)
 		}
@@ -94,7 +94,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatalf("Create with empty tab err = %v, want nil", err)
 		}
@@ -106,7 +106,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, fakes.NewSheet(), true)
 		ctx, _ := tenantCtx(t)
 
-		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityPublic, 0)
+		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityPublic, 0, false)
 		if err != nil {
 			t.Fatalf("Create err = %v", err)
 		}
@@ -121,7 +121,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityPublic, 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityPublic, 0, false)
 		if !sheet.IsPublicDisabledError(err) {
 			t.Fatalf("err = %v (%T), want *PublicDisabledError", err, err)
 		}
@@ -133,7 +133,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		got, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatalf("Create err = %v, want nil: the gate covers public only", err)
 		}
@@ -145,7 +145,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "Prices", sheet.VisibilityKey, 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "Prices", sheet.VisibilityKey, 0, false)
 		if !sheet.IsInvalidSlugError(err) {
 			t.Fatalf("err = %v, want *InvalidSlugError", err)
 		}
@@ -157,7 +157,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "rows", sheet.VisibilityKey, 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "rows", sheet.VisibilityKey, 0, false)
 		if !sheet.IsInvalidSlugError(err) {
 			t.Fatalf("err = %v, want *InvalidSlugError", err)
 		}
@@ -166,7 +166,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), true)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "prices", "secret", 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "prices", "secret", 0, false)
 		if !sheet.IsInvalidVisibilityError(err) {
 			t.Fatalf("err = %v, want *InvalidVisibilityError", err)
 		}
@@ -175,7 +175,7 @@ func TestService_Create(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 25*time.Hour)
+		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 25*time.Hour, false)
 		if !sheet.IsInvalidTTLError(err) {
 			t.Fatalf("err = %v, want *InvalidTTLError", err)
 		}
@@ -183,11 +183,11 @@ func TestService_Create(t *testing.T) {
 	t.Run("a slug already taken in the project is refused", func(t *testing.T) {
 		svc, unexCalls := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
-		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0); err != nil {
+		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false); err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if !sheet.IsAlreadyExistsError(err) {
 			t.Fatalf("err = %v, want *AlreadyExistsError", err)
 		}
@@ -201,11 +201,11 @@ func TestService_Create(t *testing.T) {
 		orgID := uuid.New()
 		projectA, projectB := uuid.New(), uuid.New()
 
-		a, err := svc.Create(scopedTo(orgID, projectA), uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		a, err := svc.Create(scopedTo(orgID, projectA), uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatalf("Create in project A err = %v", err)
 		}
-		b, err := svc.Create(scopedTo(orgID, projectB), uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		b, err := svc.Create(scopedTo(orgID, projectB), uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatalf("Create in project B err = %v, want nil: slug is unique per project", err)
 		}
@@ -216,7 +216,7 @@ func TestService_Create(t *testing.T) {
 	t.Run("missing tenant returns MissingError", func(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 
-		_, err := svc.Create(context.Background(), uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		_, err := svc.Create(context.Background(), uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if !tenant.IsMissingError(err) {
 			t.Fatalf("err = %v, want tenant.MissingError", err)
 		}
@@ -229,7 +229,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
 
-		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0); err == nil {
+		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false); err == nil {
 			t.Fatal("want error")
 		}
 		if *unexCalls != 1 {
@@ -242,7 +242,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
 
-		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0); err == nil {
+		if _, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false); err == nil {
 			t.Fatal("want error")
 		}
 		if *unexCalls != 1 {
@@ -257,7 +257,7 @@ func TestService_Create(t *testing.T) {
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
 
-		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		_, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if !sheet.IsAlreadyExistsError(err) {
 			t.Fatalf("err = %v, want *AlreadyExistsError", err)
 		}
@@ -271,7 +271,7 @@ func TestService_ByID(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
-		created, err := svc.Create(ctx, uuid.New(), "Kamar", "prices", sheet.VisibilityKey, 0)
+		created, err := svc.Create(ctx, uuid.New(), "Kamar", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,7 +300,7 @@ func TestService_ByID(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, _ := newSvc(t, store, false)
 		ctxA, _ := tenantCtx(t)
-		created, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		created, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -315,7 +315,7 @@ func TestService_ByID(t *testing.T) {
 		svc, _ := newSvc(t, store, false)
 		orgID := uuid.New()
 		projectA, projectB := uuid.New(), uuid.New()
-		created, err := svc.Create(scopedTo(orgID, projectA), uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		created, err := svc.Create(scopedTo(orgID, projectA), uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -349,7 +349,7 @@ func TestService_BySlug(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
-		created, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		created, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -380,11 +380,11 @@ func TestService_BySlug(t *testing.T) {
 		projectA, projectB := uuid.New(), uuid.New()
 		ctxA, ctxB := scopedTo(orgID, projectA), scopedTo(orgID, projectB)
 
-		a, err := svc.Create(ctxA, uuid.New(), "Kamar A", "prices", sheet.VisibilityKey, 0)
+		a, err := svc.Create(ctxA, uuid.New(), "Kamar A", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := svc.Create(ctxB, uuid.New(), "Kamar B", "prices", sheet.VisibilityKey, 0)
+		b, err := svc.Create(ctxB, uuid.New(), "Kamar B", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +411,7 @@ func TestService_BySlug(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, _ := newSvc(t, store, false)
 		ctxA, _ := tenantCtx(t)
-		if _, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0); err != nil {
+		if _, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false); err != nil {
 			t.Fatal(err)
 		}
 
@@ -452,11 +452,11 @@ func TestService_List(t *testing.T) {
 		ctxA := scopedTo(orgID, projectA)
 
 		for _, slug := range []string{"prices", "rooms"} {
-			if _, err := svc.Create(ctxA, uuid.New(), "", slug, sheet.VisibilityKey, 0); err != nil {
+			if _, err := svc.Create(ctxA, uuid.New(), "", slug, sheet.VisibilityKey, 0, false); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if _, err := svc.Create(scopedTo(orgID, projectB), uuid.New(), "", "prices", sheet.VisibilityKey, 0); err != nil {
+		if _, err := svc.Create(scopedTo(orgID, projectB), uuid.New(), "", "prices", sheet.VisibilityKey, 0, false); err != nil {
 			t.Fatal(err)
 		}
 
@@ -496,7 +496,7 @@ func TestService_Update(t *testing.T) {
 		t.Helper()
 		svc, unexCalls := newSvc(t, fakes.NewSheet(), publicEnabled)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "Kamar", "prices", sheet.VisibilityKey, time.Minute)
+		sh, err := svc.Create(ctx, uuid.New(), "Kamar", "prices", sheet.VisibilityKey, time.Minute, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -630,7 +630,7 @@ func TestService_Update(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, _ := newSvc(t, store, false)
 		ctxA, _ := tenantCtx(t)
-		sh, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -663,7 +663,7 @@ func TestService_Update(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -680,7 +680,7 @@ func TestService_Update(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -701,7 +701,7 @@ func TestService_Delete(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewSheet(), false)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -728,7 +728,7 @@ func TestService_Delete(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, _ := newSvc(t, store, false)
 		ctxA, _ := tenantCtx(t)
-		sh, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctxA, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -764,7 +764,7 @@ func TestService_Delete(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -783,7 +783,7 @@ func TestService_Delete(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, unexCalls := newSvc(t, store, false)
 		ctx, _ := tenantCtx(t)
-		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0)
+		sh, err := svc.Create(ctx, uuid.New(), "", "prices", sheet.VisibilityKey, 0, false)
 		if err != nil {
 			t.Fatal(err)
 		}

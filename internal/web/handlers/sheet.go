@@ -70,6 +70,7 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		Tab:           strings.TrimSpace(form.Get("tab")),
 		CacheTTL:      strings.TrimSpace(form.Get("cache_ttl")),
 		Public:        form.Get("visibility") == string(sheet.VisibilityPublic),
+		Writable:      form.Get("writable") == "1",
 	}
 	sprdID, err := uuid.Parse(in.SpreadsheetID)
 	if err != nil {
@@ -88,7 +89,7 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		h.writeSection(w, sc, in)
 		return
 	}
-	if _, err := h.Sheets.Create(sc.req.Context(), sprdID, in.Tab, in.Slug, visibilityOf(in.Public), ttl); err != nil {
+	if _, err := h.Sheets.Create(sc.req.Context(), sprdID, in.Tab, in.Slug, visibilityOf(in.Public), ttl, in.Writable); err != nil {
 		h.LogErr("web sheet: create", err)
 		in.Error, in.ErrorCode = publishMessage(err), ErrorRef(err)
 		h.writeSection(w, sc, in)
@@ -132,7 +133,8 @@ func (h *SheetHandler) PostUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	tab := strings.TrimSpace(form.Get("tab"))
 	vis := visibilityOf(public)
-	if _, err := h.Sheets.Update(sc.req.Context(), sh.ID, sheet.UpdateInput{Tab: &tab, Visibility: &vis, CacheTTL: &ttl}); err != nil {
+	writable := form.Get("writable") == "1"
+	if _, err := h.Sheets.Update(sc.req.Context(), sh.ID, sheet.UpdateInput{Tab: &tab, Visibility: &vis, CacheTTL: &ttl, Writable: &writable}); err != nil {
 		h.LogErr("web sheet: update", err)
 		h.renderDetail(w, sc, sh, publishMessage(err), err)
 		return
@@ -307,12 +309,13 @@ func (h *SheetHandler) publishTicked(sc projectScope, sp *spreadsheet.Spreadshee
 	view.NoneSelected = attempted == 0
 }
 
+// NOTE: the bulk panel carries no writable control, so every bulk-published sheet starts unwritable.
 func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, row *templates.BulkTabRow, vis sheet.Visibility, ttl time.Duration) {
 	if row.Slug == "" {
 		row.SlugEmpty = true
 		return
 	}
-	sh, err := h.Sheets.Create(sc.req.Context(), sp.ID, row.Tab, row.Slug, vis, ttl)
+	sh, err := h.Sheets.Create(sc.req.Context(), sp.ID, row.Tab, row.Slug, vis, ttl, false)
 	if err != nil {
 		h.LogErr("web sheet: bulk create", err)
 		row.Failure = publishMessage(err)
@@ -418,6 +421,7 @@ func (h *SheetHandler) fill(w http.ResponseWriter, sc projectScope, view templat
 			TTL:              ttlLabel(sh.CacheTTL),
 			SpreadsheetTitle: titles[sh.SpreadsheetID],
 			Public:           sh.Visibility == sheet.VisibilityPublic,
+			Writable:         sh.Writable,
 		})
 	}
 	return view, true
@@ -437,6 +441,7 @@ func (h *SheetHandler) detail(sc projectScope, sh *sheet.Sheet, failure string) 
 		CacheTTL:         strconv.FormatInt(int64(sh.CacheTTL/time.Second), 10),
 		SpreadsheetTitle: title,
 		Public:           sh.Visibility == sheet.VisibilityPublic,
+		Writable:         sh.Writable,
 		Error:            failure,
 	}
 }

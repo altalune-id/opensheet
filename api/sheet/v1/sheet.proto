@@ -26,6 +26,7 @@ message Sheet {
   google.protobuf.Duration cache_ttl = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+  bool writable = 10;
 }
 
 message ListRequest {
@@ -43,6 +44,7 @@ message CreateRequest {
   string slug = 4;
   string visibility = 5;
   google.protobuf.Duration cache_ttl = 6;
+  bool writable = 7;
 }
 
 message CreateResponse {
@@ -64,6 +66,7 @@ message UpdateRequest {
   optional string tab = 3;
   optional string visibility = 4;
   google.protobuf.Duration cache_ttl = 5;
+  optional bool writable = 6;
 }
 
 message UpdateResponse {

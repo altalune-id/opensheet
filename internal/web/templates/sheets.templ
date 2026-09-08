@@ -12,6 +12,7 @@ type SheetRow struct {
 	TTL              string
 	SpreadsheetTitle string
 	Public           bool
+	Writable         bool
 }
 
 type SheetsView struct {
@@ -23,6 +24,7 @@ type SheetsView struct {
 	Tab           string
 	CacheTTL      string
 	Public        bool
+	Writable      bool
 	Error         string
 	ErrorCode     string
 }
@@ -35,6 +37,7 @@ type SheetView struct {
 	CacheTTL         string
 	SpreadsheetTitle string
 	Public           bool
+	Writable         bool
 	DataURL          string
 	Error            string
 	ErrorCode        string
@@ -101,6 +104,7 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 					</div>
 				</div>
 				@visibilityFields(d, v.Public)
+				@writableField(d, v.Writable)
 				<button type="submit" class="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
 					@icons.Icon("plus", "h-4 w-4")
 					<span>{ d.Tr("sheets.publish_submit") }</span>
@@ -124,6 +128,9 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 									<span class="truncate font-mono text-sm font-medium text-foreground">{ s.Slug }</span>
 									if s.Public {
 										<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-800 ring-1 ring-inset ring-red-200 dark:bg-red-500/15 dark:text-red-300">{ d.Tr("sheets.public_badge") }</span>
+									}
+									if s.Writable {
+										<span data-writable-badge class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300">{ d.Tr("sheets.writable_badge") }</span>
 									}
 								</span>
 								<span class="mt-0.5 block truncate text-xs text-muted-foreground">
@@ -160,6 +167,19 @@ templ visibilityFields(d web.LayoutData, public bool) {
 				</label>
 			</div>
 		}
+	</fieldset>
+}
+
+// SECURITY: the flag is enforced on the server; this checkbox only carries the operator's intent.
+templ writableField(d web.LayoutData, writable bool) {
+	<fieldset class="mt-4">
+		<label class="flex items-start gap-2 text-sm text-foreground">
+			<input data-writable type="checkbox" name="writable" value="1" checked?={ writable } class="mt-0.5 size-4"/>
+			<span>
+				{ d.Tr("sheets.writable") }
+				<span class="mt-0.5 block text-xs text-muted-foreground">{ d.Tr("sheets.writable_hint") }</span>
+			</span>
+		</label>
 	</fieldset>
 }
 
@@ -214,6 +234,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 				</div>
 			</div>
 			@visibilityFields(d, v.Public)
+			@writableField(d, v.Writable)
 			<button type="submit" class="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("common.save") }</button>
 		</form>
 		<div class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">

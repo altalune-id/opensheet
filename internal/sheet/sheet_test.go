@@ -37,7 +37,7 @@ func TestNew_Slug(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := New(uuid.New(), uuid.New(), uuid.New(), "Sheet1", tc.slug, VisibilityKey, 0)
+			got, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "Sheet1", Slug: tc.slug, Visibility: VisibilityKey, CacheTTL: 0})
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("New(%q) err = %v, want nil", tc.slug, err)
@@ -57,7 +57,7 @@ func TestNew_Slug(t *testing.T) {
 func TestNew_RejectsReservedSlugs(t *testing.T) {
 	for _, slug := range []string{"cache", "rows", "tabs", "api", "health", "healthz", "readyz", "static", "robots.txt"} {
 		t.Run(slug, func(t *testing.T) {
-			_, err := New(uuid.New(), uuid.New(), uuid.New(), "", slug, VisibilityKey, 0)
+			_, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "", Slug: slug, Visibility: VisibilityKey, CacheTTL: 0})
 			if !IsInvalidSlugError(err) {
 				t.Fatalf("New(%q) err = %v, want *InvalidSlugError", slug, err)
 			}
@@ -70,7 +70,7 @@ func TestNew_RejectsReservedSlugs(t *testing.T) {
 }
 
 func TestNew_TabMayBeEmpty(t *testing.T) {
-	got, err := New(uuid.New(), uuid.New(), uuid.New(), "", "prices", VisibilityKey, 0)
+	got, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "", Slug: "prices", Visibility: VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatalf("New with empty tab err = %v, want nil (empty means the spreadsheet's first tab)", err)
 	}
@@ -80,7 +80,7 @@ func TestNew_TabMayBeEmpty(t *testing.T) {
 }
 
 func TestNew_TabIsCarriedVerbatim(t *testing.T) {
-	got, err := New(uuid.New(), uuid.New(), uuid.New(), "Harga Kamar 2026", "prices", VisibilityKey, 0)
+	got, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "Harga Kamar 2026", Slug: "prices", Visibility: VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatalf("New err = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestNew_Visibility(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := New(uuid.New(), uuid.New(), uuid.New(), "", "prices", tc.vis, 0)
+			got, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "", Slug: "prices", Visibility: tc.vis, CacheTTL: 0})
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("New(%q) err = %v, want nil", tc.vis, err)
@@ -152,7 +152,7 @@ func TestNew_CacheTTL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := New(uuid.New(), uuid.New(), uuid.New(), "", "prices", VisibilityKey, tc.ttl)
+			got, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "", Slug: "prices", Visibility: VisibilityKey, CacheTTL: tc.ttl})
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("New(ttl=%v) err = %v, want nil", tc.ttl, err)
@@ -172,7 +172,7 @@ func TestNew_CacheTTL(t *testing.T) {
 func TestNew_StampsIdentityAndTimestamps(t *testing.T) {
 	orgID, projectID, spreadsheetID := uuid.New(), uuid.New(), uuid.New()
 
-	got, err := New(orgID, projectID, spreadsheetID, "Sheet1", "prices", VisibilityPublic, time.Minute)
+	got, err := New(NewParams{OrgID: orgID, ProjectID: projectID, SpreadsheetID: spreadsheetID, Tab: "Sheet1", Slug: "prices", Visibility: VisibilityPublic, CacheTTL: time.Minute})
 	if err != nil {
 		t.Fatalf("New err = %v", err)
 	}
@@ -405,7 +405,7 @@ func TestIsPredicates_RejectForeignErrors(t *testing.T) {
 
 func mustSheet(t *testing.T, slug string, vis Visibility, ttl time.Duration) *Sheet {
 	t.Helper()
-	sh, err := New(uuid.New(), uuid.New(), uuid.New(), "Sheet1", slug, vis, ttl)
+	sh, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "Sheet1", Slug: slug, Visibility: vis, CacheTTL: ttl})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -429,14 +429,66 @@ func assertAppError(t *testing.T, ae *apperror.AppError, wantCode string) {
 // representable in whole seconds — otherwise it silently truncates on save.
 func TestNew_RejectsSubSecondTTL(t *testing.T) {
 	for _, ttl := range []time.Duration{1500 * time.Millisecond, 2*time.Second + time.Nanosecond, 90*time.Second + 500*time.Millisecond} {
-		_, err := New(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "Q1", "prices", VisibilityKey, ttl)
+		_, err := New(NewParams{OrgID: uuid.Must(uuid.NewV7()), ProjectID: uuid.Must(uuid.NewV7()), SpreadsheetID: uuid.Must(uuid.NewV7()), Tab: "Q1", Slug: "prices", Visibility: VisibilityKey, CacheTTL: ttl})
 		if !IsInvalidTTLError(err) {
 			t.Errorf("New(ttl=%v) error = %v, want InvalidTTLError", ttl, err)
 		}
 	}
 	for _, ttl := range []time.Duration{DefaultCacheTTL, time.Second, 90 * time.Second, MaxCacheTTL} {
-		if _, err := New(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "Q1", "prices", VisibilityKey, ttl); err != nil {
+		if _, err := New(NewParams{OrgID: uuid.Must(uuid.NewV7()), ProjectID: uuid.Must(uuid.NewV7()), SpreadsheetID: uuid.Must(uuid.NewV7()), Tab: "Q1", Slug: "prices", Visibility: VisibilityKey, CacheTTL: ttl}); err != nil {
 			t.Errorf("New(ttl=%v) = %v, want nil", ttl, err)
 		}
+	}
+}
+
+func TestNew_DefaultsToNotWritable(t *testing.T) {
+	got, err := New(NewParams{
+		OrgID:         uuid.Must(uuid.NewV7()),
+		ProjectID:     uuid.Must(uuid.NewV7()),
+		SpreadsheetID: uuid.Must(uuid.NewV7()),
+		Tab:           "Rates",
+		Slug:          "rates",
+		Visibility:    VisibilityKey,
+		CacheTTL:      time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("New err = %v", err)
+	}
+	if got.Writable {
+		t.Error("Writable = true, want false: a sheet must not be writable unless asked for")
+	}
+}
+
+func TestNew_CarriesWritable(t *testing.T) {
+	got, err := New(NewParams{
+		OrgID:         uuid.Must(uuid.NewV7()),
+		ProjectID:     uuid.Must(uuid.NewV7()),
+		SpreadsheetID: uuid.Must(uuid.NewV7()),
+		Slug:          "rates",
+		Visibility:    VisibilityKey,
+		Writable:      true,
+	})
+	if err != nil {
+		t.Fatalf("New err = %v", err)
+	}
+	if !got.Writable {
+		t.Error("Writable = false, want true")
+	}
+}
+
+func TestSetWritable_TogglesAndBumpsUpdatedAt(t *testing.T) {
+	sh := mustSheet(t, "prices", VisibilityKey, 0)
+	before := sh.UpdatedAt
+
+	sh.SetWritable(true)
+	if !sh.Writable {
+		t.Error("Writable = false, want true")
+	}
+	if !sh.UpdatedAt.After(before) && !sh.UpdatedAt.Equal(before) {
+		t.Errorf("UpdatedAt = %v, want at or after %v", sh.UpdatedAt, before)
+	}
+	sh.SetWritable(false)
+	if sh.Writable {
+		t.Error("Writable = true, want false")
 	}
 }

@@ -179,7 +179,7 @@ func TestPostgres_Sheet_SaveAndByID(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
 
-	want, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "Kamar", "prices", sheet.VisibilityPublic, 90*time.Second)
+	want, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Kamar", Slug: "prices", Visibility: sheet.VisibilityPublic, CacheTTL: 90 * time.Second})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctx, want))
 
@@ -205,7 +205,7 @@ func TestPostgres_Sheet_CacheTTLRoundTripsInSeconds(t *testing.T) {
 		"24h":  24 * time.Hour,
 	} {
 		t.Run(name, func(t *testing.T) {
-			sh, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "", "ttl-"+strings.ToLower(name), sheet.VisibilityKey, ttl)
+			sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "", Slug: "ttl-" + strings.ToLower(name), Visibility: sheet.VisibilityKey, CacheTTL: ttl})
 			require.NoError(t, err)
 			require.NoError(t, f.store.Save(ctx, sh))
 
@@ -214,6 +214,46 @@ func TestPostgres_Sheet_CacheTTLRoundTripsInSeconds(t *testing.T) {
 			assert.Equal(t, ttl, got.CacheTTL)
 		})
 	}
+}
+
+func TestPostgres_Sheet_WritableRoundTrips(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+
+	for name, writable := range map[string]bool{"writable": true, "not-writable": false} {
+		t.Run(name, func(t *testing.T) {
+			sh, err := sheet.New(sheet.NewParams{
+				OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+				Slug: "w-" + name, Visibility: sheet.VisibilityKey, Writable: writable,
+			})
+			require.NoError(t, err)
+			require.NoError(t, f.store.Save(ctx, sh))
+
+			got, err := f.store.ByID(ctx, sh.ID)
+			require.NoError(t, err)
+			assert.Equal(t, writable, got.Writable, "writable must survive save then load")
+		})
+	}
+}
+
+func TestPostgres_Sheet_WritableSurvivesAnUpsert(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.Save(ctx, sh))
+	assert.False(t, sh.Writable)
+
+	sh.SetWritable(true)
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Writable, "the ON CONFLICT DO UPDATE branch must carry writable")
 }
 
 func TestPostgres_Sheet_NotFound(t *testing.T) {
@@ -255,9 +295,9 @@ func TestPostgres_Sheet_SameSlugInTwoProjectsResolvesToDifferentSheets(t *testin
 		OrgID: f.a.orgID, ProjectID: otherProject, UserID: f.a.userID,
 	})
 
-	a, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "Kamar A", "prices", sheet.VisibilityKey, 0)
+	a, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Kamar A", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
-	b, err := sheet.New(f.a.orgID, otherProject, otherSpreadsheet, "Kamar B", "prices", sheet.VisibilityKey, 0)
+	b, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: otherProject, SpreadsheetID: otherSpreadsheet, Tab: "Kamar B", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctx, a))
 	require.NoError(t, f.store.Save(ctxOther, b), "the same slug must be free in another project")
@@ -277,11 +317,11 @@ func TestPostgres_Sheet_SlugIsUniquePerProject(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
 
-	first, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	first, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctx, first))
 
-	second, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	second, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 
 	err = f.store.Save(ctx, second)
@@ -292,7 +332,7 @@ func TestPostgres_Sheet_SaveIsUpsert(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
 
-	sh, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "Kamar", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Kamar", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctx, sh))
 
@@ -318,7 +358,7 @@ func TestPostgres_Sheet_ListAndDelete(t *testing.T) {
 
 	ids := map[string]uuid.UUID{}
 	for _, slug := range []string{"rooms", "prices"} {
-		sh, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "", slug, sheet.VisibilityKey, 0)
+		sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "", Slug: slug, Visibility: sheet.VisibilityKey, CacheTTL: 0})
 		require.NoError(t, err)
 		require.NoError(t, f.store.Save(ctx, sh))
 		ids[slug] = sh.ID
@@ -343,11 +383,11 @@ func TestPostgres_Sheet_AnotherOrgSeesZeroRows(t *testing.T) {
 	f := newPgFixture(t)
 	ctxA, ctxB := f.a.ctx(t), f.b.ctx(t)
 
-	shA, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "Kamar A", "prices", sheet.VisibilityKey, 0)
+	shA, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Kamar A", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctxA, shA))
 
-	shB, err := sheet.New(f.b.orgID, f.b.projectID, f.b.spreadsheetID, "Kamar B", "prices", sheet.VisibilityKey, 0)
+	shB, err := sheet.New(sheet.NewParams{OrgID: f.b.orgID, ProjectID: f.b.projectID, SpreadsheetID: f.b.spreadsheetID, Tab: "Kamar B", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctxB, shB))
 
@@ -377,7 +417,7 @@ func TestPostgres_Sheet_AnotherOrgSeesZeroRows(t *testing.T) {
 func TestPostgres_Sheet_RequiresTenantScope(t *testing.T) {
 	f := newPgFixture(t)
 
-	sh, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 
 	assert.True(t, tenant.IsMissingError(f.store.Save(t.Context(), sh)))

@@ -15,7 +15,7 @@ import (
 
 func (h *harness) seedSheet(orgID, projectID uuid.UUID, slug string) *sheet.Sheet {
 	h.t.Helper()
-	sh, err := sheet.New(orgID, projectID, uuid.New(), "Q1", slug, sheet.VisibilityKey, time.Minute)
+	sh, err := sheet.New(sheet.NewParams{OrgID: orgID, ProjectID: projectID, SpreadsheetID: uuid.New(), Tab: "Q1", Slug: slug, Visibility: sheet.VisibilityKey, CacheTTL: time.Minute})
 	if err != nil {
 		h.t.Fatalf("sheet.New: %v", err)
 	}

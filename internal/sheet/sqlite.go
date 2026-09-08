@@ -35,6 +35,7 @@ type sqliteSheetRow struct {
 	Slug          string `alias:"sheets.slug"`
 	Visibility    string `alias:"sheets.visibility"`
 	CacheTTLSecs  int64  `alias:"sheets.cache_ttl_secs"`
+	Writable      int64  `alias:"sheets.writable"`
 	CreatedAt     string `alias:"sheets.created_at"`
 	UpdatedAt     string `alias:"sheets.updated_at"`
 }
@@ -73,6 +74,7 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 		Slug:          r.Slug,
 		Visibility:    Visibility(r.Visibility),
 		CacheTTL:      ttlFromSecs(r.CacheTTLSecs),
+		Writable:      r.Writable != 0,
 		CreatedAt:     createdAt.UTC(),
 		UpdatedAt:     updatedAt.UTC(),
 	}, nil
@@ -83,6 +85,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 		return err
 	}
 	secs := secsFromTTL(sh.CacheTTL)
+	writable := boolToInt(sh.Writable)
 	updatedAt := sh.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
@@ -94,6 +97,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			sh.Slug,
 			string(sh.Visibility),
 			secs,
+			writable,
 			sh.CreatedAt.UTC().Format(time.RFC3339Nano),
 			updatedAt,
 		).
@@ -104,6 +108,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 				s.table.Slug.SET(sqlite.String(sh.Slug)),
 				s.table.Visibility.SET(sqlite.String(string(sh.Visibility))),
 				s.table.CacheTTLSecs.SET(sqlite.Int(secs)),
+				s.table.Writable.SET(sqlite.Int(writable)),
 				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
 			),
 		)
@@ -208,6 +213,13 @@ func (s *sqliteStore) queryOne(ctx context.Context, where sqlite.BoolExpression,
 		return nil, fmt.Errorf("sheet.sqlite.queryOne: %w", err)
 	}
 	return row.toSheet()
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func isSQLiteUniqueViolation(err error) bool {

@@ -41,6 +41,7 @@ type pgSheetRow struct {
 	Slug          string    `alias:"sheets.slug"`
 	Visibility    string    `alias:"sheets.visibility"`
 	CacheTTLSecs  int64     `alias:"sheets.cache_ttl_secs"`
+	Writable      bool      `alias:"sheets.writable"`
 	CreatedAt     time.Time `alias:"sheets.created_at"`
 	UpdatedAt     time.Time `alias:"sheets.updated_at"`
 }
@@ -55,6 +56,7 @@ func (r *pgSheetRow) toSheet() *Sheet {
 		Slug:          r.Slug,
 		Visibility:    Visibility(r.Visibility),
 		CacheTTL:      ttlFromSecs(r.CacheTTLSecs),
+		Writable:      r.Writable,
 		CreatedAt:     r.CreatedAt.UTC(),
 		UpdatedAt:     r.UpdatedAt.UTC(),
 	}

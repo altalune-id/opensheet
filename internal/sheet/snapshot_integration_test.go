@@ -118,7 +118,7 @@ func TestPostgres_SnapshotStore_DeletingTheSheetCascades(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
 
-	sh, err := sheet.New(f.a.orgID, f.a.projectID, f.a.spreadsheetID, "Q1", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	require.NoError(t, err)
 	require.NoError(t, f.store.Save(ctx, sh))
 

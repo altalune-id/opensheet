@@ -17,7 +17,7 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sh.ID, sh.OrgID, sh.ProjectID, sh.SpreadsheetID,
-			sh.Tab, sh.Slug, string(sh.Visibility), secs,
+			sh.Tab, sh.Slug, string(sh.Visibility), secs, sh.Writable,
 			sh.CreatedAt.UTC(), sh.UpdatedAt.UTC(),
 		).
 		ON_CONFLICT(s.table.ID).
@@ -27,6 +27,7 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 				s.table.Slug.SET(postgres.String(sh.Slug)),
 				s.table.Visibility.SET(postgres.String(string(sh.Visibility))),
 				s.table.CacheTTLSecs.SET(postgres.Int64(secs)),
+				s.table.Writable.SET(postgres.Bool(sh.Writable)),
 				s.table.UpdatedAt.SET(postgres.TimestampzT(sh.UpdatedAt.UTC())),
 			),
 		)

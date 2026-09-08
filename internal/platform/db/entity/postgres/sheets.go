@@ -14,6 +14,7 @@ type Sheets struct {
 	Slug          postgres.ColumnString
 	Visibility    postgres.ColumnString
 	CacheTTLSecs  postgres.ColumnInteger
+	Writable      postgres.ColumnBool
 	CreatedAt     postgres.ColumnTimestampz
 	UpdatedAt     postgres.ColumnTimestampz
 
@@ -35,15 +36,16 @@ func NewSheets(schema, tablePrefix string) *Sheets {
 		slug          = postgres.StringColumn("slug")
 		visibility    = postgres.StringColumn("visibility")
 		cacheTTLSecs  = postgres.IntegerColumn("cache_ttl_secs")
+		writable      = postgres.BoolColumn("writable")
 		createdAt     = postgres.TimestampzColumn("created_at")
 		updatedAt     = postgres.TimestampzColumn("updated_at")
 		all           = postgres.ColumnList{
 			id, orgID, projectID, spreadsheetID, tab, slug,
-			visibility, cacheTTLSecs, createdAt, updatedAt,
+			visibility, cacheTTLSecs, writable, createdAt, updatedAt,
 		}
 		mutable = postgres.ColumnList{
 			orgID, projectID, spreadsheetID, tab, slug,
-			visibility, cacheTTLSecs, updatedAt,
+			visibility, cacheTTLSecs, writable, updatedAt,
 		}
 	)
 	return &Sheets{
@@ -56,6 +58,7 @@ func NewSheets(schema, tablePrefix string) *Sheets {
 		Slug:           slug,
 		Visibility:     visibility,
 		CacheTTLSecs:   cacheTTLSecs,
+		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 		AllColumns:     all,

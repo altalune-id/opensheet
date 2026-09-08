@@ -49,7 +49,7 @@ func NewService(
 }
 
 // Create publishes a tab of spreadsheetID under slug in the caller's tenant scope.
-func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string, vis Visibility, ttl time.Duration) (*Sheet, error) {
+func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string, vis Visibility, ttl time.Duration, writable bool) (*Sheet, error) {
 	ctx, span := tracer.Start(ctx, "sheet.Create",
 		trace.WithAttributes(
 			attribute.String("spreadsheet_id", spreadsheetID.String()),
@@ -71,7 +71,16 @@ func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug
 		return nil, err
 	}
 
-	sh, err := New(tc.OrgID, tc.ProjectID, spreadsheetID, tab, slug, vis, ttl)
+	sh, err := New(NewParams{
+		OrgID:         tc.OrgID,
+		ProjectID:     tc.ProjectID,
+		SpreadsheetID: spreadsheetID,
+		Tab:           tab,
+		Slug:          slug,
+		Visibility:    vis,
+		CacheTTL:      ttl,
+		Writable:      writable,
+	})
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -199,6 +208,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Sh
 	}
 	if in.Tab != nil {
 		sh.Retab(*in.Tab)
+	}
+	if in.Writable != nil {
+		sh.SetWritable(*in.Writable)
 	}
 
 	if err := s.store.Save(ctx, sh); err != nil {

@@ -73,6 +73,12 @@ type publicCaps bool
 
 func (c publicCaps) PublicSheetsEnabled() bool { return bool(c) }
 
+type readScopedTokens struct{ svc *credential.Service }
+
+func (t readScopedTokens) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+}
+
 func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *sheetsFixture {
 	t.Helper()
 	base := newFixture(t)
@@ -99,7 +105,8 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		credential.WithGoogleOAuth(testOAuthConfig(google.tokenURL)))
 
 	sprdStore := fakes.NewSpreadsheet()
-	sprds := spreadsheet.NewService(sprdStore, discardLogger(), passthroughUnexpected(), creds, clients)
+	sprds := spreadsheet.NewService(sprdStore, discardLogger(), passthroughUnexpected(),
+		readScopedTokens{svc: creds}, clients)
 
 	snaps := fakes.NewSheetSnapshots()
 	sheetStore := fakes.NewSheet()
@@ -107,7 +114,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		publicCaps(caps.PublicSheets), snaps)
 
 	sources := fakes.NewSheetSources()
-	read := sheet.NewReadWorkflow(snaps, sources, creds, fakes.NewSheetReauthers(), clients,
+	read := sheet.NewReadWorkflow(snaps, sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
 		publicCaps(caps.PublicSheets), 30*time.Second, 1<<20, discardLogger(), passthroughUnexpected())
 
 	keyStore := fakes.NewAPIKey()
@@ -221,7 +228,7 @@ func (f *sheetsFixture) seedSpreadsheet(t *testing.T, credID uuid.UUID) *spreads
 
 func (f *sheetsFixture) seedSheet(t *testing.T, sprdID uuid.UUID, slug string, vis sheet.Visibility) *sheet.Sheet {
 	t.Helper()
-	sh, err := f.Sheets.Create(f.ctx(), sprdID, "", slug, vis, 0)
+	sh, err := f.Sheets.Create(f.ctx(), sprdID, "", slug, vis, 0, false)
 	require.NoError(t, err)
 	return sh
 }
@@ -701,6 +708,71 @@ func TestSheetHandler_ShowRendersTheDataPlaneURLAndUpdate(t *testing.T) {
 	assert.Equal(t, 2*time.Minute, updated.CacheTTL)
 }
 
+func TestSheetHandler_WritableCheckboxRoundTrips(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+
+	rec := f.do(t, http.MethodPost, f.path("/sheets"), url.Values{
+		"spreadsheet_id": {sp.ID.String()},
+		"slug":           {"q1"},
+		"visibility":     {"key"},
+		"writable":       {"1"},
+	}.Encode())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	items, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.True(t, items[0].Writable, "the publish form's writable checkbox must reach the aggregate")
+
+	list := f.do(t, http.MethodGet, f.path("/sheets"), "")
+	require.Equal(t, http.StatusOK, list.Code)
+	assert.Contains(t, list.Body.String(), `data-writable-badge`, "the list must mark a writable sheet")
+
+	page := f.do(t, http.MethodGet, f.path("/sheets/"+items[0].ID.String()), "")
+	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
+	assert.Contains(t, page.Body.String(), `data-writable`)
+	assert.Regexp(t, `<input data-writable[^>]* checked`, page.Body.String(),
+		"the detail page must render the checkbox ticked")
+
+	rec = f.do(t, http.MethodPost, f.path("/sheets/"+items[0].ID.String()),
+		url.Values{"tab": {""}, "visibility": {"key"}, "cache_ttl": {"0"}}.Encode())
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+
+	updated, err := f.Sheets.ByID(f.ctx(), items[0].ID)
+	require.NoError(t, err)
+	assert.False(t, updated.Writable, "an unticked checkbox must clear the flag")
+}
+
+func TestSheetHandler_PublishDefaultsToNotWritable(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+
+	rec := f.do(t, http.MethodPost, f.path("/sheets"), url.Values{
+		"spreadsheet_id": {sp.ID.String()},
+		"slug":           {"q1"},
+		"visibility":     {"key"},
+	}.Encode())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	items, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.False(t, items[0].Writable, "an absent checkbox must not publish a writable sheet")
+
+	list := f.do(t, http.MethodGet, f.path("/sheets"), "")
+	require.Equal(t, http.StatusOK, list.Code)
+	assert.NotContains(t, list.Body.String(), `data-writable-badge`)
+
+	page := f.do(t, http.MethodGet, f.path("/sheets/"+items[0].ID.String()), "")
+	require.Equal(t, http.StatusOK, page.Code)
+	assert.NotRegexp(t, `<input data-writable[^>]* checked`, page.Body.String())
+}
+
 func TestSheetHandler_PreviewRendersRowsAndHeaderWarnings(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
@@ -1068,7 +1140,7 @@ func TestSheetHandler_BulkPublishSkipsATabThatIsAlreadyPublished(t *testing.T) {
 	f := newSheetsFixture(t)
 	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	sp := f.seedSpreadsheet(t, cred.ID)
-	_, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0)
+	_, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0, false)
 	require.NoError(t, err)
 
 	body := "tab=0&slug.0=first-again&tab=1&slug.1=second&visibility=key&cache_ttl=300"
@@ -1090,7 +1162,7 @@ func TestSheetHandler_BulkPanelDisablesAnAlreadyPublishedTab(t *testing.T) {
 	f := newSheetsFixture(t)
 	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	sp := f.seedSpreadsheet(t, cred.ID)
-	sh, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0)
+	sh, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0, false)
 	require.NoError(t, err)
 
 	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")

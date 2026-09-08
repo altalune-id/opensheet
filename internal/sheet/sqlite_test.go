@@ -125,7 +125,7 @@ func TestSQLiteStore_SaveAndByID(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
 
-	want, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "Kamar", "prices", sheet.VisibilityPublic, 90*time.Second)
+	want, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "Kamar", Slug: "prices", Visibility: sheet.VisibilityPublic, CacheTTL: 90 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestSQLiteStore_CacheTTLRoundTripsInSeconds(t *testing.T) {
 		{name: "24h upper bound", ttl: 24 * time.Hour},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "ttl-"+tc.name[:2], sheet.VisibilityKey, tc.ttl)
+			sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "ttl-" + tc.name[:2], Visibility: sheet.VisibilityKey, CacheTTL: tc.ttl})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -180,6 +180,66 @@ func TestSQLiteStore_CacheTTLRoundTripsInSeconds(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WritableRoundTrips(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := f.ctx()
+
+	for _, tc := range []struct {
+		name     string
+		writable bool
+	}{
+		{name: "writable", writable: true},
+		{name: "not-writable", writable: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sh, err := sheet.New(sheet.NewParams{
+				OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+				Slug: "w-" + tc.name, Visibility: sheet.VisibilityKey, Writable: tc.writable,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.Save(ctx, sh); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+			got, err := f.store.ByID(ctx, sh.ID)
+			if err != nil {
+				t.Fatalf("ByID: %v", err)
+			}
+			if got.Writable != tc.writable {
+				t.Fatalf("Writable = %v, want %v", got.Writable, tc.writable)
+			}
+		})
+	}
+}
+
+func TestSQLiteStore_WritableSurvivesAnUpsert(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := f.ctx()
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	sh.SetWritable(true)
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("re-Save: %v", err)
+	}
+	got, err := f.store.ByID(ctx, sh.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if !got.Writable {
+		t.Error("Writable = false after an upsert that set it, want true")
+	}
+}
+
 func TestSQLiteStore_ByID_NotFound(t *testing.T) {
 	f := newSQLiteFixture(t)
 	if _, err := f.store.ByID(f.ctx(), uuid.New()); !sheet.IsNotFoundError(err) {
@@ -190,7 +250,7 @@ func TestSQLiteStore_ByID_NotFound(t *testing.T) {
 func TestSQLiteStore_BySlug(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
-	sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,11 +282,11 @@ func TestSQLiteStore_SameSlugInTwoProjectsResolvesToDifferentSheets(t *testing.T
 		OrgID: f.orgID, ProjectID: otherProject, UserID: f.userID,
 	})
 
-	a, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "Kamar A", "prices", sheet.VisibilityKey, 0)
+	a, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "Kamar A", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := sheet.New(f.orgID, otherProject, otherSpreadsheet, "Kamar B", "prices", sheet.VisibilityKey, 0)
+	b, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: otherProject, SpreadsheetID: otherSpreadsheet, Tab: "Kamar B", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,14 +319,14 @@ func TestSQLiteStore_SameSlugInTwoProjectsResolvesToDifferentSheets(t *testing.T
 func TestSQLiteStore_SaveRejectsDuplicateSlugInOneProject(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
-	first, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	first, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.Save(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	second, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	second, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +339,7 @@ func TestSQLiteStore_SaveRejectsDuplicateSlugInOneProject(t *testing.T) {
 func TestSQLiteStore_SaveIsUpsert(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
-	sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "Kamar", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "Kamar", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +378,7 @@ func TestSQLiteStore_List(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
 	for _, slug := range []string{"rooms", "prices"} {
-		sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", slug, sheet.VisibilityKey, 0)
+		sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: slug, Visibility: sheet.VisibilityKey, CacheTTL: 0})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -342,7 +402,7 @@ func TestSQLiteStore_List(t *testing.T) {
 func TestSQLiteStore_Delete(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
-	sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +424,7 @@ func TestSQLiteStore_Delete(t *testing.T) {
 func TestSQLiteStore_AnotherOrgSeesNothing(t *testing.T) {
 	f := newSQLiteFixture(t)
 	ctx := f.ctx()
-	sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +460,7 @@ func TestSQLiteStore_AnotherOrgSeesNothing(t *testing.T) {
 
 func TestSQLiteStore_RequiresTenantScope(t *testing.T) {
 	f := newSQLiteFixture(t)
-	sh, err := sheet.New(f.orgID, f.projectID, f.spreadsheetID, "", "prices", sheet.VisibilityKey, 0)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID, Tab: "", Slug: "prices", Visibility: sheet.VisibilityKey, CacheTTL: 0})
 	if err != nil {
 		t.Fatal(err)
 	}

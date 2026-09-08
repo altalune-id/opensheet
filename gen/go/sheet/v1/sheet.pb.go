@@ -34,6 +34,7 @@ type Sheet struct {
 	CacheTtl      *durationpb.Duration   `protobuf:"bytes,7,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Writable      bool                   `protobuf:"varint,10,opt,name=writable,proto3" json:"writable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -129,6 +130,13 @@ func (x *Sheet) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Sheet) GetWritable() bool {
+	if x != nil {
+		return x.Writable
+	}
+	return false
 }
 
 type ListRequest struct {
@@ -227,6 +235,7 @@ type CreateRequest struct {
 	Slug          string                 `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`
 	Visibility    string                 `protobuf:"bytes,5,opt,name=visibility,proto3" json:"visibility,omitempty"`
 	CacheTtl      *durationpb.Duration   `protobuf:"bytes,6,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
+	Writable      bool                   `protobuf:"varint,7,opt,name=writable,proto3" json:"writable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -301,6 +310,13 @@ func (x *CreateRequest) GetCacheTtl() *durationpb.Duration {
 		return x.CacheTtl
 	}
 	return nil
+}
+
+func (x *CreateRequest) GetWritable() bool {
+	if x != nil {
+		return x.Writable
+	}
+	return false
 }
 
 type CreateResponse struct {
@@ -450,6 +466,7 @@ type UpdateRequest struct {
 	Tab           *string                `protobuf:"bytes,3,opt,name=tab,proto3,oneof" json:"tab,omitempty"`
 	Visibility    *string                `protobuf:"bytes,4,opt,name=visibility,proto3,oneof" json:"visibility,omitempty"`
 	CacheTtl      *durationpb.Duration   `protobuf:"bytes,5,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
+	Writable      *bool                  `protobuf:"varint,6,opt,name=writable,proto3,oneof" json:"writable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -517,6 +534,13 @@ func (x *UpdateRequest) GetCacheTtl() *durationpb.Duration {
 		return x.CacheTtl
 	}
 	return nil
+}
+
+func (x *UpdateRequest) GetWritable() bool {
+	if x != nil && x.Writable != nil {
+		return *x.Writable
+	}
+	return false
 }
 
 type UpdateResponse struct {
@@ -743,7 +767,7 @@ var File_sheet_v1_sheet_proto protoreflect.FileDescriptor
 
 const file_sheet_v1_sheet_proto_rawDesc = "" +
 	"\n" +
-	"\x14sheet/v1/sheet.proto\x12\bsheet.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd1\x02\n" +
+	"\x14sheet/v1/sheet.proto\x12\bsheet.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xed\x02\n" +
 	"\x05Sheet\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -758,12 +782,14 @@ const file_sheet_v1_sheet_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\",\n" +
+	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x1a\n" +
+	"\bwritable\x18\n" +
+	" \x01(\bR\bwritable\",\n" +
 	"\vListRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"7\n" +
 	"\fListResponse\x12'\n" +
-	"\x06sheets\x18\x01 \x03(\v2\x0f.sheet.v1.SheetR\x06sheets\"\xd3\x01\n" +
+	"\x06sheets\x18\x01 \x03(\v2\x0f.sheet.v1.SheetR\x06sheets\"\xef\x01\n" +
 	"\rCreateRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12%\n" +
@@ -773,7 +799,8 @@ const file_sheet_v1_sheet_proto_rawDesc = "" +
 	"\n" +
 	"visibility\x18\x05 \x01(\tR\n" +
 	"visibility\x126\n" +
-	"\tcache_ttl\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\bcacheTtl\"7\n" +
+	"\tcache_ttl\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\bcacheTtl\x12\x1a\n" +
+	"\bwritable\x18\a \x01(\bR\bwritable\"7\n" +
 	"\x0eCreateResponse\x12%\n" +
 	"\x05sheet\x18\x01 \x01(\v2\x0f.sheet.v1.SheetR\x05sheet\"F\n" +
 	"\n" +
@@ -782,7 +809,7 @@ const file_sheet_v1_sheet_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x19\n" +
 	"\bsheet_id\x18\x02 \x01(\tR\asheetId\"4\n" +
 	"\vGetResponse\x12%\n" +
-	"\x05sheet\x18\x01 \x01(\v2\x0f.sheet.v1.SheetR\x05sheet\"\xd4\x01\n" +
+	"\x05sheet\x18\x01 \x01(\v2\x0f.sheet.v1.SheetR\x05sheet\"\x82\x02\n" +
 	"\rUpdateRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x19\n" +
@@ -791,9 +818,11 @@ const file_sheet_v1_sheet_proto_rawDesc = "" +
 	"\n" +
 	"visibility\x18\x04 \x01(\tH\x01R\n" +
 	"visibility\x88\x01\x01\x126\n" +
-	"\tcache_ttl\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bcacheTtlB\x06\n" +
+	"\tcache_ttl\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bcacheTtl\x12\x1f\n" +
+	"\bwritable\x18\x06 \x01(\bH\x02R\bwritable\x88\x01\x01B\x06\n" +
 	"\x04_tabB\r\n" +
-	"\v_visibility\"7\n" +
+	"\v_visibilityB\v\n" +
+	"\t_writable\"7\n" +
 	"\x0eUpdateResponse\x12%\n" +
 	"\x05sheet\x18\x01 \x01(\v2\x0f.sheet.v1.SheetR\x05sheet\"I\n" +
 	"\rDeleteRequest\x12\x1d\n" +

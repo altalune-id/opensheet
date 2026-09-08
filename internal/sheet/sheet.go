@@ -40,8 +40,21 @@ type Sheet struct {
 	Slug          string
 	Visibility    Visibility
 	CacheTTL      time.Duration
+	Writable      bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// NewParams is the input to New.
+type NewParams struct {
+	OrgID         uuid.UUID
+	ProjectID     uuid.UUID
+	SpreadsheetID uuid.UUID
+	Tab           string
+	Slug          string
+	Visibility    Visibility
+	CacheTTL      time.Duration
+	Writable      bool
 }
 
 // UpdateInput carries the mutable fields of a sheet; a nil field is left alone.
@@ -49,32 +62,34 @@ type UpdateInput struct {
 	Tab        *string
 	Visibility *Visibility
 	CacheTTL   *time.Duration
+	Writable   *bool
 }
 
 // Valid reports whether v is one of the two defined visibilities.
 func (v Visibility) Valid() bool { return v == VisibilityKey || v == VisibilityPublic }
 
 // New enforces creation invariants: slug format and reservation, visibility, cache TTL bounds.
-func New(orgID, projectID, spreadsheetID uuid.UUID, tab, slug string, vis Visibility, ttl time.Duration) (*Sheet, error) {
-	if err := validateSlug(slug); err != nil {
+func New(p NewParams) (*Sheet, error) {
+	if err := validateSlug(p.Slug); err != nil {
 		return nil, err
 	}
-	if err := validateVisibility(vis); err != nil {
+	if err := validateVisibility(p.Visibility); err != nil {
 		return nil, err
 	}
-	if err := validateTTL(ttl); err != nil {
+	if err := validateTTL(p.CacheTTL); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	return &Sheet{
 		ID:            uuid.Must(uuid.NewV7()),
-		OrgID:         orgID,
-		ProjectID:     projectID,
-		SpreadsheetID: spreadsheetID,
-		Tab:           tab,
-		Slug:          slug,
-		Visibility:    vis,
-		CacheTTL:      ttl,
+		OrgID:         p.OrgID,
+		ProjectID:     p.ProjectID,
+		SpreadsheetID: p.SpreadsheetID,
+		Tab:           p.Tab,
+		Slug:          p.Slug,
+		Visibility:    p.Visibility,
+		CacheTTL:      p.CacheTTL,
+		Writable:      p.Writable,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil
@@ -104,6 +119,12 @@ func (s *Sheet) SetTTL(ttl time.Duration) error {
 	s.CacheTTL = ttl
 	s.UpdatedAt = time.Now().UTC()
 	return nil
+}
+
+// SetWritable decides whether the data plane may mutate this sheet's rows.
+func (s *Sheet) SetWritable(writable bool) {
+	s.Writable = writable
+	s.UpdatedAt = time.Now().UTC()
 }
 
 func validateSlug(slug string) error {

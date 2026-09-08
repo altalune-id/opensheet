@@ -14,6 +14,7 @@ type Sheets struct {
 	Slug          sqlite.ColumnString
 	Visibility    sqlite.ColumnString
 	CacheTTLSecs  sqlite.ColumnInteger
+	Writable      sqlite.ColumnInteger
 	CreatedAt     sqlite.ColumnString
 	UpdatedAt     sqlite.ColumnString
 
@@ -32,15 +33,16 @@ func NewSheets(tablePrefix string) *Sheets {
 		slug          = sqlite.StringColumn("slug")
 		visibility    = sqlite.StringColumn("visibility")
 		cacheTTLSecs  = sqlite.IntegerColumn("cache_ttl_secs")
+		writable      = sqlite.IntegerColumn("writable")
 		createdAt     = sqlite.StringColumn("created_at")
 		updatedAt     = sqlite.StringColumn("updated_at")
 		all           = sqlite.ColumnList{
 			id, orgID, projectID, spreadsheetID, tab, slug,
-			visibility, cacheTTLSecs, createdAt, updatedAt,
+			visibility, cacheTTLSecs, writable, createdAt, updatedAt,
 		}
 		mutable = sqlite.ColumnList{
 			orgID, projectID, spreadsheetID, tab, slug,
-			visibility, cacheTTLSecs, updatedAt,
+			visibility, cacheTTLSecs, writable, updatedAt,
 		}
 	)
 	return &Sheets{
@@ -53,6 +55,7 @@ func NewSheets(tablePrefix string) *Sheets {
 		Slug:           slug,
 		Visibility:     visibility,
 		CacheTTLSecs:   cacheTTLSecs,
+		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 		AllColumns:     all,
