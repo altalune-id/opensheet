@@ -51,11 +51,12 @@ func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *s
 		cfg.HTTP.BasePath,
 		orgsForData{svc: s.Orgs},
 		projectsForData{svc: s.Projects},
-		sheetsForData{svc: s.Sheets, defaultTTL: cfg.Cache.DefaultTTL},
-		readerForData{svc: s.Sheets, read: s.Read},
+		sheetsForData{svc: s.Sheets},
+		s.Read,
 		s.Sheets,
 		s.KeyAuthn,
 		capsForSheet{caps: caps},
+		cfg.Cache.DefaultTTL,
 		log,
 	)
 }

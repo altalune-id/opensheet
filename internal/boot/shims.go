@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"slices"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -271,33 +270,10 @@ func (p projectsForData) BySlug(ctx context.Context, orgID uuid.UUID, slug strin
 	return data.ProjectRef{ID: found.ID}, nil
 }
 
-type sheetsForData struct {
-	svc        *sheet.Service
-	defaultTTL time.Duration
-}
+type sheetsForData struct{ svc *sheet.Service }
 
-func (s sheetsForData) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (data.SheetRef, error) {
+// NOTE: sheet.Service.BySlug reads org and project off the context, so the shim scopes them explicitly.
+func (s sheetsForData) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (*sheet.Sheet, error) {
 	scoped := tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID})
-	found, err := s.svc.BySlug(scoped, slug)
-	if err != nil {
-		return data.SheetRef{}, err
-	}
-	ttl := found.CacheTTL
-	if ttl == sheet.DefaultCacheTTL {
-		ttl = s.defaultTTL
-	}
-	return data.SheetRef{ID: found.ID, Visibility: string(found.Visibility), CacheTTL: ttl}, nil
-}
-
-type readerForData struct {
-	svc  *sheet.Service
-	read *sheet.ReadWorkflow
-}
-
-func (r readerForData) Rows(ctx context.Context, sheetID uuid.UUID) (sheet.Rows, error) {
-	sh, err := r.svc.ByID(ctx, sheetID)
-	if err != nil {
-		return sheet.Rows{}, err
-	}
-	return r.read.Rows(ctx, sh)
+	return s.svc.BySlug(scoped, slug)
 }

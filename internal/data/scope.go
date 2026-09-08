@@ -2,11 +2,11 @@ package data
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/sheet"
 )
 
 // Orgs resolves an org slug before any tenant scope exists.
@@ -21,7 +21,7 @@ type Projects interface {
 
 // Sheets resolves a sheet slug inside a project.
 type Sheets interface {
-	BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (SheetRef, error)
+	BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (*sheet.Sheet, error)
 }
 
 // OrgRef is the org the data plane needs, referenced across the module boundary by id.
@@ -30,20 +30,10 @@ type OrgRef struct{ ID uuid.UUID }
 // ProjectRef is the project the data plane needs, referenced across the module boundary by id.
 type ProjectRef struct{ ID uuid.UUID }
 
-// SheetRef is the sheet the data plane needs: id, visibility and cache TTL.
-type SheetRef struct {
-	ID         uuid.UUID
-	Visibility string
-	CacheTTL   time.Duration
-}
-
-// VisibilityPublic is the visibility that serves rows without a credential.
-const VisibilityPublic = "public"
-
 type scope struct {
 	orgID     uuid.UUID
 	projectID uuid.UUID
-	sheet     SheetRef
+	sheet     *sheet.Sheet
 }
 
 type resolver struct {

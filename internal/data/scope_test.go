@@ -16,15 +16,8 @@ import (
 func newResolverRig() (resolver, *fakeOrgs, *fakeProjects, *fakeSheets) {
 	orgs := &fakeOrgs{ref: OrgRef{ID: uuid.Must(uuid.NewV7())}}
 	projects := &fakeProjects{ref: ProjectRef{ID: uuid.Must(uuid.NewV7())}}
-	sheets := &fakeSheets{ref: SheetRef{ID: uuid.Must(uuid.NewV7()), Visibility: "key", CacheTTL: time.Minute}}
+	sheets := &fakeSheets{ref: &sheet.Sheet{ID: uuid.Must(uuid.NewV7()), Visibility: sheet.VisibilityKey, CacheTTL: time.Minute}}
 	return resolver{orgs: orgs, projects: projects, sheets: sheets}, orgs, projects, sheets
-}
-
-// SECURITY: boot stringifies sheet.Visibility into SheetRef, so a drift here would silently key-gate a public sheet.
-func TestVisibilityPublicMatchesTheSheetDomain(t *testing.T) {
-	if got, want := VisibilityPublic, string(sheet.VisibilityPublic); got != want {
-		t.Errorf("data.VisibilityPublic = %q, want sheet.VisibilityPublic %q", got, want)
-	}
 }
 
 func TestResolver_ResolvesOrgThenProjectThenSheet(t *testing.T) {

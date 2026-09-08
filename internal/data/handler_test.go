@@ -44,12 +44,12 @@ func (f *fakeProjects) BySlug(ctx context.Context, _ uuid.UUID, _ string) (Proje
 }
 
 type fakeSheets struct {
-	ref  SheetRef
+	ref  *sheet.Sheet
 	err  error
 	ctxs []context.Context
 }
 
-func (f *fakeSheets) BySlug(ctx context.Context, _, _ uuid.UUID, _ string) (SheetRef, error) {
+func (f *fakeSheets) BySlug(ctx context.Context, _, _ uuid.UUID, _ string) (*sheet.Sheet, error) {
 	f.ctxs = append(f.ctxs, ctx)
 	return f.ref, f.err
 }
@@ -60,8 +60,8 @@ type fakeReader struct {
 	calls []uuid.UUID
 }
 
-func (f *fakeReader) Rows(_ context.Context, sheetID uuid.UUID) (sheet.Rows, error) {
-	f.calls = append(f.calls, sheetID)
+func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error) {
+	f.calls = append(f.calls, sh.ID)
 	return f.rows, f.err
 }
 
@@ -115,9 +115,9 @@ func newRig() *rig {
 	return &rig{
 		orgs:     &fakeOrgs{ref: OrgRef{ID: uuid.Must(uuid.NewV7())}},
 		projects: &fakeProjects{ref: ProjectRef{ID: uuid.Must(uuid.NewV7())}},
-		sheets: &fakeSheets{ref: SheetRef{
+		sheets: &fakeSheets{ref: &sheet.Sheet{
 			ID:         uuid.Must(uuid.NewV7()),
-			Visibility: "key",
+			Visibility: sheet.VisibilityKey,
 			CacheTTL:   time.Minute,
 		}},
 		reader: &fakeReader{rows: sheet.Rows{
@@ -133,7 +133,7 @@ func newRig() *rig {
 
 func (g *rig) handler() http.Handler {
 	return NewHandler(g.basePath, g.orgs, g.projects, g.sheets, g.reader, g.purger, g.authz, g.caps,
-		slog.New(slog.DiscardHandler))
+		30*time.Second, slog.New(slog.DiscardHandler))
 }
 
 func (g *rig) do(t *testing.T, method, path string, header http.Header) *httptest.ResponseRecorder {
@@ -153,7 +153,7 @@ const rowsPath = "/api/v1/orgs/acme/projects/default/sheets/prices"
 
 func TestHandler_GetServesRowsAsAJSONArrayKeyedByTheHeaderRow(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	rec := g.do(t, http.MethodGet, rowsPath, nil)
 
@@ -176,7 +176,7 @@ func TestHandler_GetServesRowsAsAJSONArrayKeyedByTheHeaderRow(t *testing.T) {
 
 func TestHandler_GetNeedsNoCredentialForAPublicSheet(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	rec := g.do(t, http.MethodGet, rowsPath, nil)
 
@@ -190,7 +190,7 @@ func TestHandler_GetNeedsNoCredentialForAPublicSheet(t *testing.T) {
 
 func TestHandler_GetEmptySheetServesAnEmptyArray(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 	g.reader.rows.Values = nil
 
 	rec := g.do(t, http.MethodGet, rowsPath, nil)
@@ -239,7 +239,7 @@ func TestHandler_GetMissingForbiddenAndCapabilityOffAreIndistinguishable(t *test
 			g.authz.err = apperror.New(apperror.CodeAPIKeyUnauthorized, "Unauthorized", codes.Unauthenticated)
 		},
 		"public sheet while the capability is off": func(g *rig) {
-			g.sheets.ref.Visibility = VisibilityPublic
+			g.sheets.ref.Visibility = sheet.VisibilityPublic
 			g.caps = fakeCaps{public: false}
 		},
 	}
@@ -271,7 +271,7 @@ func TestHandler_GetMissingForbiddenAndCapabilityOffAreIndistinguishable(t *test
 // must collapse it to the same 404 rather than let it become a distinguishable 403.
 func TestHandler_GetPublicDisabledFromTheReadPathIsTheSame404(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 	g.reader.err = apperror.New(apperror.CodeSheetPublicDisabled,
 		"Public sheets are disabled on this deployment", codes.FailedPrecondition)
 
@@ -301,7 +301,7 @@ func TestHandler_GetMaskedProjectMissStillReportsTheSheetNotFoundCode(t *testing
 
 func TestHandler_GetNotModifiedOnAMatchingIfNoneMatch(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	for _, header := range []string{`"deadbeef"`, `W/"deadbeef"`, `"other", "deadbeef"`, "*"} {
 		t.Run(header, func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestHandler_GetNotModifiedOnAMatchingIfNoneMatch(t *testing.T) {
 
 func TestHandler_GetStaleETagStillServesTheBody(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	rec := g.do(t, http.MethodGet, rowsPath, http.Header{"If-None-Match": {`"stale"`}})
 
@@ -335,7 +335,7 @@ func TestHandler_GetStaleETagStillServesTheBody(t *testing.T) {
 
 func TestHandler_GetStaleSnapshotIsFlaggedWithAnAge(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 	g.reader.rows.Cached = true
 	g.reader.rows.Stale = true
 	g.reader.rows.FetchedAt = time.Now().UTC().Add(-90 * time.Second)
@@ -363,7 +363,7 @@ func TestHandler_GetStaleSnapshotIsFlaggedWithAnAge(t *testing.T) {
 
 func TestHandler_GetReauthNeededIs424AndNeverServesStale(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 	g.reader.err = apperror.New(apperror.CodeCredentialReauthNeeded,
 		"The Google credential needs to be reconnected", codes.FailedPrecondition)
 
@@ -382,7 +382,7 @@ func TestHandler_GetReauthNeededIs424AndNeverServesStale(t *testing.T) {
 
 func TestHandler_GetGoogleOutageWithNoSnapshotMapsThroughTheEnvelope(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 	g.reader.err = apperror.New(apperror.CodeGoogleUnavailable, "Google Sheets is unavailable", codes.Unavailable)
 
 	rec := g.do(t, http.MethodGet, rowsPath, nil)
@@ -438,7 +438,7 @@ func TestHandler_DeleteCachePurgesThroughTheCachePurgeScope(t *testing.T) {
 
 func TestHandler_DeleteCacheOnAPublicSheetStillNeedsTheScope(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	rec := g.do(t, http.MethodDelete, rowsPath+"/cache", nil)
 
@@ -497,7 +497,7 @@ func TestHandler_UnknownPathUnderTheMountAnswersJSON(t *testing.T) {
 func TestHandler_MountsUnderTheConfiguredBasePath(t *testing.T) {
 	g := newRig()
 	g.basePath = "/app"
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	if rec := g.do(t, http.MethodGet, "/app"+rowsPath, nil); rec.Code != http.StatusOK {
 		t.Errorf("GET /app%s: status = %d, want 200; body=%s", rowsPath, rec.Code, rec.Body.String())
@@ -509,7 +509,7 @@ func TestHandler_MountsUnderTheConfiguredBasePath(t *testing.T) {
 
 func TestHandler_ReaderReceivesTheResolvedSheetID(t *testing.T) {
 	g := newRig()
-	g.sheets.ref.Visibility = VisibilityPublic
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
 
 	g.do(t, http.MethodGet, rowsPath, nil)
 
@@ -518,13 +518,16 @@ func TestHandler_ReaderReceivesTheResolvedSheetID(t *testing.T) {
 	}
 }
 
-func TestHandler_CacheControlFallsBackToZeroWhenNoTTLIsSet(t *testing.T) {
+// A sheet with CacheTTL 0 means "use the configured default", so max-age must advertise
+// the lifetime the server actually caches for — not 0, which would tell clients not to
+// cache something the server does cache.
+func TestHandler_CacheControlFallsBackToTheConfiguredDefault(t *testing.T) {
 	g := newRig()
 	g.sheets.ref.CacheTTL = 0
 
 	rec := g.do(t, http.MethodGet, rowsPath, nil)
 
-	if got, want := rec.Header().Get("Cache-Control"), "private, max-age=0"; got != want {
+	if got, want := rec.Header().Get("Cache-Control"), "private, max-age=30"; got != want {
 		t.Errorf("Cache-Control = %q, want %q", got, want)
 	}
 }
@@ -532,16 +535,17 @@ func TestHandler_CacheControlFallsBackToZeroWhenNoTTLIsSet(t *testing.T) {
 func TestCacheControl(t *testing.T) {
 	cases := []struct {
 		name string
-		in   SheetRef
+		in   *sheet.Sheet
 		want string
 	}{
-		{"public", SheetRef{Visibility: VisibilityPublic, CacheTTL: 30 * time.Second}, "public, max-age=30"},
-		{"key", SheetRef{Visibility: "key", CacheTTL: 2 * time.Minute}, "private, max-age=120"},
-		{"negative ttl", SheetRef{Visibility: "key", CacheTTL: -time.Second}, "private, max-age=0"},
+		{"public", &sheet.Sheet{Visibility: sheet.VisibilityPublic, CacheTTL: 30 * time.Second}, "public, max-age=30"},
+		{"key", &sheet.Sheet{Visibility: sheet.VisibilityKey, CacheTTL: 2 * time.Minute}, "private, max-age=120"},
+		{"negative ttl falls back too", &sheet.Sheet{Visibility: sheet.VisibilityKey, CacheTTL: -time.Second}, "private, max-age=45"},
+		{"zero ttl falls back to the configured default", &sheet.Sheet{Visibility: sheet.VisibilityKey}, "private, max-age=45"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cacheControl(tc.in); got != tc.want {
+			if got := cacheControl(tc.in, 45*time.Second); got != tc.want {
 				t.Errorf("cacheControl = %q, want %q", got, tc.want)
 			}
 		})

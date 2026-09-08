@@ -21,7 +21,7 @@ import (
 
 // Reader reads the rows of one published sheet.
 type Reader interface {
-	Rows(ctx context.Context, sheetID uuid.UUID) (sheet.Rows, error)
+	Rows(ctx context.Context, sh *sheet.Sheet) (sheet.Rows, error)
 }
 
 // Purger drops every cached tab of one sheet.
@@ -48,12 +48,13 @@ const StaleHeader = "X-Opensheet-Stale"
 const mountSuffix = "/api/v1"
 
 type handler struct {
-	resolver resolver
-	reader   Reader
-	purger   Purger
-	authz    Authorizer
-	caps     Capabilities
-	log      *slog.Logger
+	resolver   resolver
+	reader     Reader
+	purger     Purger
+	authz      Authorizer
+	caps       Capabilities
+	defaultTTL time.Duration
+	log        *slog.Logger
 }
 
 // NewHandler returns the data plane mounted under basePath+"/api/v1".
@@ -66,15 +67,17 @@ func NewHandler(
 	purger Purger,
 	authz Authorizer,
 	caps Capabilities,
+	defaultTTL time.Duration,
 	log *slog.Logger,
 ) http.Handler {
 	h := &handler{
-		resolver: resolver{orgs: orgs, projects: projects, sheets: sheets},
-		reader:   reader,
-		purger:   purger,
-		authz:    authz,
-		caps:     caps,
-		log:      log.With("surface", "data"),
+		resolver:   resolver{orgs: orgs, projects: projects, sheets: sheets},
+		reader:     reader,
+		purger:     purger,
+		authz:      authz,
+		caps:       caps,
+		defaultTTL: defaultTTL,
+		log:        log.With("surface", "data"),
 	}
 	inner := http.NewServeMux()
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}", h.rows)
@@ -95,7 +98,7 @@ func (h *handler) rows(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, aErr)
 		return
 	}
-	rows, err := h.reader.Rows(r.Context(), sc.sheet.ID)
+	rows, err := h.reader.Rows(r.Context(), sc.sheet)
 	if err != nil {
 		h.fail(w, r, maskPublicDisabled(err))
 		return
@@ -135,7 +138,7 @@ func (h *handler) resolve(r *http.Request) (*http.Request, scope, error) {
 }
 
 func (h *handler) allowRead(r *http.Request, sc scope) error {
-	if sc.sheet.Visibility != VisibilityPublic {
+	if sc.sheet.Visibility != sheet.VisibilityPublic {
 		return h.authorize(r, sc, authn.ScopeSheetsRead)
 	}
 	// SECURITY: the capability gates the read, not only the create, so a sheet published while it was on stops serving once it is off.
@@ -154,7 +157,7 @@ func (h *handler) authorize(r *http.Request, sc scope, scopeName string) error {
 	return nil
 }
 
-func (h *handler) writeRows(w http.ResponseWriter, r *http.Request, sh SheetRef, rows sheet.Rows) {
+func (h *handler) writeRows(w http.ResponseWriter, r *http.Request, sh *sheet.Sheet, rows sheet.Rows) {
 	body := []byte("[]")
 	if rows.Values != nil {
 		marshaled, err := json.Marshal(rows.Values)
@@ -167,7 +170,7 @@ func (h *handler) writeRows(w http.ResponseWriter, r *http.Request, sh SheetRef,
 
 	head := w.Header()
 	head.Set("Content-Type", "application/json; charset=utf-8")
-	head.Set("Cache-Control", cacheControl(sh))
+	head.Set("Cache-Control", cacheControl(sh, h.defaultTTL))
 	if rows.ETag != "" {
 		head.Set("ETag", strconv.Quote(rows.ETag))
 	}
@@ -216,14 +219,18 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	_, _ = w.Write(body)
 }
 
-func cacheControl(sh SheetRef) string {
+func cacheControl(sh *sheet.Sheet, defaultTTL time.Duration) string {
 	directive := "private"
-	if sh.Visibility == VisibilityPublic {
+	if sh.Visibility == sheet.VisibilityPublic {
 		directive = "public"
 	}
+	ttl := sh.CacheTTL
+	if ttl <= 0 {
+		ttl = defaultTTL
+	}
 	secs := int64(0)
-	if sh.CacheTTL > 0 {
-		secs = int64(sh.CacheTTL.Seconds())
+	if ttl > 0 {
+		secs = int64(ttl.Seconds())
 	}
 	return directive + ", max-age=" + strconv.FormatInt(secs, 10)
 }
