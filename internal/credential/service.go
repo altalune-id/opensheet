@@ -224,7 +224,6 @@ type serviceAccountFile struct {
 
 // SECURITY: the credential type is pinned to service_account. An inferred type would accept an
 // external_account config pointing at an attacker-controlled token URL.
-// See internal/gsheets and the pilot's gsheets/client.go for the same pin on the read path.
 func serviceAccountEmail(raw []byte) (string, error) {
 	var f serviceAccountFile
 	if err := json.Unmarshal(raw, &f); err != nil {
