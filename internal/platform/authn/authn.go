@@ -55,16 +55,21 @@ func (c Chain) Authenticate(ctx context.Context, raw string) (session.Principal,
 	return session.Principal{}, &UnauthorizedError{}
 }
 
-// CredentialFrom extracts a raw credential from the Authorization or X-API-Key header.
-// SECURITY: query strings are not consulted — they leak into access logs and Referer.
+// CredentialFrom extracts a raw credential from the request's Authorization or X-API-Key header.
 func CredentialFrom(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); h != "" {
+	return CredentialFromHeader(r.Header)
+}
+
+// CredentialFromHeader extracts a raw credential from the Authorization or X-API-Key header.
+// SECURITY: query strings are not consulted — they leak into access logs and Referer.
+func CredentialFromHeader(h http.Header) string {
+	if v := h.Get("Authorization"); v != "" {
 		for _, scheme := range []string{"Bearer ", "bearer "} {
-			if raw, ok := strings.CutPrefix(h, scheme); ok {
+			if raw, ok := strings.CutPrefix(v, scheme); ok {
 				return strings.TrimSpace(raw)
 			}
 		}
 		return ""
 	}
-	return strings.TrimSpace(r.Header.Get("X-API-Key"))
+	return strings.TrimSpace(h.Get("X-API-Key"))
 }
