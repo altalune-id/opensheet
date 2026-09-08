@@ -382,3 +382,50 @@ func TestPostgres_APIKey_TenantScopeIsRequired(t *testing.T) {
 	require.True(t, tenant.IsMissingError(err))
 	require.True(t, tenant.IsMissingError(f.store.Delete(bare, k.ID)))
 }
+
+func TestPostgres_APIKey_TouchLastUsed(t *testing.T) {
+	f := newPGFixture(t)
+	f.requireNoBypassRLS(t)
+	ctx := f.a.ctx()
+
+	k, _, err := f.svc.Create(ctx, apikey.CreateRequest{Name: "bot", Scopes: []string{authn.ScopeSheetsRead}})
+	require.NoError(t, err)
+	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+
+	require.NoError(t, f.store.TouchLastUsed(ctx, f.a.orgID, f.a.projectID, k.ID, at))
+
+	got, err := f.store.ByID(ctx, k.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastUsedAt)
+	require.True(t, got.LastUsedAt.Equal(at), "LastUsedAt = %v, want %v", got.LastUsedAt, at)
+	require.Equal(t, k.Name, got.Name)
+	require.Equal(t, k.Scopes, got.Scopes)
+	require.Nil(t, got.RevokedAt)
+}
+
+func TestPostgres_APIKey_TouchLastUsedMissingRowIsNotAnError(t *testing.T) {
+	f := newPGFixture(t)
+	f.requireNoBypassRLS(t)
+	require.NoError(t, f.store.TouchLastUsed(f.a.ctx(), f.a.orgID, f.a.projectID, uuid.New(), time.Now().UTC()))
+}
+
+func TestPostgres_APIKey_TouchLastUsedCannotCrossOrgsUnderRLS(t *testing.T) {
+	f := newPGFixture(t)
+	f.requireNoBypassRLS(t)
+
+	kb, _, err := f.svc.Create(f.b.ctx(), apikey.CreateRequest{Name: "b key", Scopes: []string{authn.ScopeSheetsRead}})
+	require.NoError(t, err)
+
+	require.NoError(t, f.store.TouchLastUsed(f.a.ctx(), f.a.orgID, f.a.projectID, kb.ID, time.Now().UTC()),
+		"a touch that matches no visible row is a no-op, not an error")
+
+	got, err := f.store.ByID(f.b.ctx(), kb.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.LastUsedAt, "org A stamped org B's key")
+}
+
+func TestPostgres_APIKey_TouchLastUsedRequiresTenantScope(t *testing.T) {
+	f := newPGFixture(t)
+	err := f.store.TouchLastUsed(context.Background(), f.a.orgID, f.a.projectID, uuid.New(), time.Now().UTC())
+	require.True(t, tenant.IsMissingError(err), "want tenant.MissingError, got %T: %v", err, err)
+}

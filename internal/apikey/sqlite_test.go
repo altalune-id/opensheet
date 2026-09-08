@@ -381,3 +381,74 @@ func TestSQLiteStore_TenantScopeIsRequired(t *testing.T) {
 		t.Errorf("Delete err = %v, want tenant.MissingError", err)
 	}
 }
+
+func TestSQLiteStore_TouchLastUsed(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := tenant.Into(context.Background(), f.tc)
+	k, _ := mintFor(t, f.tc, []string{authn.ScopeSheetsRead}, nil, nil)
+	if err := f.store.Save(ctx, k); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	at := time.Now().UTC().Truncate(time.Millisecond)
+
+	if err := f.store.TouchLastUsed(ctx, f.tc.OrgID, f.tc.ProjectID, k.ID, at); err != nil {
+		t.Fatalf("TouchLastUsed: %v", err)
+	}
+	got, err := f.store.ByID(ctx, k.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.LastUsedAt == nil || !got.LastUsedAt.Equal(at) {
+		t.Errorf("LastUsedAt = %v, want %v", got.LastUsedAt, at)
+	}
+	if got.Name != k.Name || len(got.Scopes) != 1 || got.RevokedAt != nil {
+		t.Errorf("TouchLastUsed disturbed another column: %+v", got)
+	}
+}
+
+// TestSQLiteStore_TouchLastUsedMissingRowIsNotAnError pins the worker's contract: a key may be deleted
+// between the request that used it and the flush that records the use.
+func TestSQLiteStore_TouchLastUsedMissingRowIsNotAnError(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := tenant.Into(context.Background(), f.tc)
+	if err := f.store.TouchLastUsed(ctx, f.tc.OrgID, f.tc.ProjectID, uuid.New(), time.Now().UTC()); err != nil {
+		t.Fatalf("TouchLastUsed on an absent key: %v", err)
+	}
+}
+
+func TestSQLiteStore_TouchLastUsedIsScopedToTheOrgAndProject(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := tenant.Into(context.Background(), f.tc)
+	k, _ := mintFor(t, f.tc, []string{authn.ScopeSheetsRead}, nil, nil)
+	if err := f.store.Save(ctx, k); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	at := time.Now().UTC().Truncate(time.Millisecond)
+
+	foreignOrg := uuid.New()
+	cases := map[string]struct{ orgID, projectID uuid.UUID }{
+		"another org":     {orgID: foreignOrg, projectID: f.tc.ProjectID},
+		"another project": {orgID: f.tc.OrgID, projectID: uuid.New()},
+	}
+	for name, c := range cases {
+		scoped := tenant.Into(context.Background(), tenant.Context{OrgID: c.orgID, ProjectID: c.projectID})
+		if err := f.store.TouchLastUsed(scoped, c.orgID, c.projectID, k.ID, at); err != nil {
+			t.Fatalf("TouchLastUsed under %s: %v", name, err)
+		}
+	}
+	got, err := f.store.ByID(ctx, k.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.LastUsedAt != nil {
+		t.Errorf("LastUsedAt = %v, want nil — an out-of-tenant touch wrote the row", got.LastUsedAt)
+	}
+}
+
+func TestSQLiteStore_TouchLastUsedRequiresTenantScope(t *testing.T) {
+	f := newSQLiteFixture(t)
+	err := f.store.TouchLastUsed(context.Background(), f.tc.OrgID, f.tc.ProjectID, uuid.New(), time.Now().UTC())
+	if !tenant.IsMissingError(err) {
+		t.Fatalf("err = %v, want tenant.MissingError", err)
+	}
+}

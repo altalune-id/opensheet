@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,13 +17,14 @@ type APIKey struct {
 	mu       sync.Mutex
 	byID     map[uuid.UUID]*apikey.APIKey
 	byPrefix map[string]uuid.UUID
-	// SaveErr, ByIDErr, ByPrefixErr, ListErr, DeleteErr — inject failures.
-	SaveErr     error
-	ByIDErr     error
-	ByPrefixErr error
-	ListErr     error
-	DeleteErr   error
-	StickyError bool
+	// SaveErr, ByIDErr, ByPrefixErr, ListErr, DeleteErr, TouchLastUsedErr — inject failures.
+	SaveErr          error
+	ByIDErr          error
+	ByPrefixErr      error
+	ListErr          error
+	DeleteErr        error
+	TouchLastUsedErr error
+	StickyError      bool
 }
 
 // NewAPIKey builds an empty fake apikey.Store.
@@ -149,6 +151,26 @@ func (f *APIKey) Delete(_ context.Context, id uuid.UUID) error {
 	}
 	delete(f.byPrefix, k.KeyPrefix)
 	delete(f.byID, id)
+	return nil
+}
+
+// TouchLastUsed stamps the key's LastUsedAt; an unknown or out-of-tenant row is a no-op, not an error.
+func (f *APIKey) TouchLastUsed(_ context.Context, orgID, projectID, id uuid.UUID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.TouchLastUsedErr != nil {
+		err := f.TouchLastUsedErr
+		if !f.StickyError {
+			f.TouchLastUsedErr = nil
+		}
+		return err
+	}
+	k, ok := f.byID[id]
+	if !ok || k.OrgID != orgID || k.ProjectID != projectID {
+		return nil
+	}
+	t := at.UTC()
+	k.LastUsedAt = &t
 	return nil
 }
 

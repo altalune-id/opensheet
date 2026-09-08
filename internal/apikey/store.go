@@ -2,6 +2,7 @@ package apikey
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -18,4 +19,7 @@ type Store interface {
 	// List returns the project's keys, without secret material.
 	List(ctx context.Context, orgID, projectID uuid.UUID) ([]*APIKey, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	// TouchLastUsed stamps the key's last_used_at without loading the aggregate.
+	// NOTE: a missing row is not an error — the key may have been deleted between use and flush.
+	TouchLastUsed(ctx context.Context, orgID, projectID, id uuid.UUID, at time.Time) error
 }

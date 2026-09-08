@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
@@ -107,6 +108,24 @@ func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	if n == 0 {
 		return s.endTx(tx, owned, &NotFoundError{ID: id.String()})
+	}
+	return s.endTx(tx, owned, nil)
+}
+
+// SECURITY: the explicit org and project predicates keep the write inside the tenant even though RLS already scopes the transaction.
+func (s *postgresStore) TouchLastUsed(ctx context.Context, orgID, projectID, id uuid.UUID, at time.Time) error {
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	stmt := s.table.
+		UPDATE(s.table.LastUsedAt).
+		SET(postgres.TimestampzT(at.UTC())).
+		WHERE(s.table.ID.EQ(postgres.UUID(id)).
+			AND(s.table.OrgID.EQ(postgres.UUID(orgID))).
+			AND(s.table.ProjectID.EQ(postgres.UUID(projectID))))
+	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+		return s.endTx(tx, owned, fmt.Errorf("apikey.postgres.TouchLastUsed: %w", execErr))
 	}
 	return s.endTx(tx, owned, nil)
 }

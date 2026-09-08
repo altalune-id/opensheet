@@ -15,6 +15,7 @@ const (
 	SourceOIDC    Source = "oidc"
 	SourceToken   Source = "token"
 	SourceLocal   Source = "local"
+	SourceAPIKey  Source = "apikey"
 )
 
 type Principal struct {
@@ -24,6 +25,7 @@ type Principal struct {
 	Source          Source
 	IDPIssuer       string
 	IDPSubject      string
+	IDPOrgID        string
 	IDToken         string
 	Scopes          []string
 	ActiveOrgID     uuid.UUID

@@ -292,6 +292,25 @@ func (s *sqliteStore) Delete(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
+// SECURITY: SQLite has no RLS, so the org and project predicates are the only thing keeping the write inside the tenant.
+func (s *sqliteStore) TouchLastUsed(ctx context.Context, orgID, projectID, id uuid.UUID, at time.Time) error {
+	if _, err := tenant.From(ctx); err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := s.table.
+			UPDATE(s.table.LastUsedAt).
+			SET(sqlite.String(at.UTC().Format(time.RFC3339Nano))).
+			WHERE(s.table.ID.EQ(sqlite.String(id.String())).
+				AND(s.table.OrgID.EQ(sqlite.String(orgID.String()))).
+				AND(s.table.ProjectID.EQ(sqlite.String(projectID.String()))))
+		if _, err := stmt.ExecContext(ctx, tx); err != nil {
+			return fmt.Errorf("apikey.sqlite.TouchLastUsed: %w", err)
+		}
+		return nil
+	})
+}
+
 func (s *sqliteStore) attachGrants(ctx context.Context, keys []*APIKey) error {
 	if len(keys) == 0 {
 		return nil
