@@ -174,6 +174,24 @@ func TestHandler_GetServesRowsAsAJSONArrayKeyedByTheHeaderRow(t *testing.T) {
 	}
 }
 
+func TestHandler_GetServesTheSnapshotBytesVerbatimSoTheETagStillDescribesTheBody(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	// Key order and spacing a re-marshal of Values would never reproduce: if the handler
+	// re-serialized, ETag would describe bytes the client never saw.
+	stored := []byte(`[{"role":"eng","name":"ada"}]`)
+	g.reader.rows.Payload = stored
+
+	rec := g.do(t, http.MethodGet, rowsPath, nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != string(stored) {
+		t.Errorf("body = %s, want the stored payload %s", got, stored)
+	}
+}
+
 func TestHandler_GetNeedsNoCredentialForAPublicSheet(t *testing.T) {
 	g := newRig()
 	g.sheets.ref.Visibility = sheet.VisibilityPublic

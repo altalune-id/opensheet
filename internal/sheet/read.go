@@ -48,7 +48,9 @@ type Reauthers interface {
 
 // Rows is one read of a published tab, carrying its cache provenance.
 type Rows struct {
-	Values    []gsheet.Row
+	Values []gsheet.Row
+	// SECURITY: Payload is the exact bytes ETag hashes, shared across singleflight callers. Read it, never mutate it.
+	Payload   []byte
 	Warnings  []string
 	ETag      string
 	FetchedAt time.Time
@@ -232,7 +234,7 @@ func (w *ReadWorkflow) load(ctx context.Context, client *gsheet.Client, sh *Shee
 	if pErr := w.snaps.Put(ctx, key, snap, w.ttl(sh)); pErr != nil {
 		_ = w.unexpected(ctx, "sheet.Rows: snapshot put", pErr, "sheet_id", sh.ID, "tab", key.Tab)
 	}
-	return Rows{Values: values, Warnings: warnings, ETag: etag, FetchedAt: fetchedAt}, nil
+	return Rows{Values: values, Payload: payload, Warnings: warnings, ETag: etag, FetchedAt: fetchedAt}, nil
 }
 
 func (w *ReadWorkflow) fromSnapshot(ctx context.Context, sh *Sheet, snap Snapshot, stale bool) (Rows, error) {
@@ -246,6 +248,7 @@ func (w *ReadWorkflow) fromSnapshot(ctx context.Context, sh *Sheet, snap Snapsho
 	}
 	return Rows{
 		Values:    values,
+		Payload:   snap.Payload,
 		ETag:      snap.ETag,
 		FetchedAt: snap.FetchedAt,
 		Cached:    true,

@@ -158,14 +158,18 @@ func (h *handler) authorize(r *http.Request, sc scope, scopeName string) error {
 }
 
 func (h *handler) writeRows(w http.ResponseWriter, r *http.Request, sh *sheet.Sheet, rows sheet.Rows) {
-	body := []byte("[]")
-	if rows.Values != nil {
-		marshaled, err := json.Marshal(rows.Values)
-		if err != nil {
-			h.fail(w, r, err)
-			return
+	// The snapshot's stored bytes are what ETag hashes, so serving them verbatim keeps the two in step.
+	body := rows.Payload
+	if body == nil {
+		body = []byte("[]")
+		if rows.Values != nil {
+			marshaled, err := json.Marshal(rows.Values)
+			if err != nil {
+				h.fail(w, r, err)
+				return
+			}
+			body = marshaled
 		}
-		body = marshaled
 	}
 
 	head := w.Header()
