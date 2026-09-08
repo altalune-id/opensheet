@@ -661,9 +661,6 @@ func TestService_TokenSourceFor_ReturnsNoPlaintext(t *testing.T) {
 	}
 }
 
-// TODO: replace with gsheet.ScopeReadWrite once gworkspace/gsheet/writer.go lands.
-const scopeSpreadsheetsReadWrite = "https://www.googleapis.com/auth/spreadsheets"
-
 // NOTE: serviceAccountJSON's private_key is base64 of an ASCII string, so nothing ever parses it and
 // a scope test built on it would pass while proving nothing. This one is a real RSA key.
 func realServiceAccountJSON(t *testing.T) []byte {
@@ -700,7 +697,7 @@ func TestService_TokenSourceForAcceptsAWriteScope(t *testing.T) {
 		scope string
 	}{
 		{"read scope", gsheet.ScopeReadOnly},
-		{"write scope", scopeSpreadsheetsReadWrite},
+		{"write scope", gsheet.ScopeReadWrite},
 	}
 	for _, tc := range scopes {
 		t.Run(tc.name, func(t *testing.T) {

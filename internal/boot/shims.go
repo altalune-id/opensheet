@@ -215,9 +215,6 @@ func (s spreadsheetsForSheet) SourceFor(ctx context.Context, spreadsheetID uuid.
 	return sheet.Source{GoogleFileID: sp.GoogleFileID, CredentialID: sp.CredentialID}, nil
 }
 
-// TODO: replace with gsheet.ScopeReadWrite once gworkspace/gsheet/writer.go lands.
-const scopeSpreadsheetsReadWrite = "https://www.googleapis.com/auth/spreadsheets"
-
 type tokensForSheetRead struct{ svc *credential.Service }
 
 func (t tokensForSheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
@@ -227,7 +224,7 @@ func (t tokensForSheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (o
 type tokensForSheetWrite struct{ svc *credential.Service }
 
 func (t tokensForSheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, scopeSpreadsheetsReadWrite)
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
 }
 
 type tokensForSpreadsheetRead struct{ svc *credential.Service }
@@ -239,7 +236,7 @@ func (t tokensForSpreadsheetRead) TokenSourceFor(ctx context.Context, id uuid.UU
 type tokensForSpreadsheetWrite struct{ svc *credential.Service }
 
 func (t tokensForSpreadsheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, scopeSpreadsheetsReadWrite)
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
 }
 
 var (
