@@ -46,6 +46,7 @@ opensheet/
 │   ├── invite/, org/, project/, todo/, user/    # domain modules
 │   ├── platform/       # capabilities, config, db, notify, session, tenant, tokens
 │   └── web/            # templ + htmx handlers, icons, i18n
+├── gworkspace/         # shared Google Workspace client layer + gsheet subpackage
 ├── logger/, mailer/, nanoid/, reqid/, scheduler/, telemetry/, worker/   # exported roots
 ├── schema/             # embedded goose migrations + RLS guard
 └── version/            # build-time version info
@@ -55,16 +56,17 @@ opensheet/
 
 Safe for external Go projects to import:
 
-| Package     | Purpose                                                                 |
-| ----------- | ----------------------------------------------------------------------- |
-| `authl`     | OIDC client + PKCE loopback                                             |
-| `reqid`     | UUIDv7 request-ID propagation                                           |
-| `nanoid`    | 21-char nanoid generator                                                |
-| `worker`    | Supervisor + Worker interface + HTTP/Func adapters                      |
-| `scheduler` | Cron/interval job runner — system and per-tenant scope, leader election |
-| `logger`    | `slog.Handler` — auto-attaches request_id/trace_id, key redaction       |
-| `telemetry` | OTel tracer + meter + Prometheus reader                                 |
-| `mailer`    | Transactional mail — `console`, `smtp`, `resend` drivers                |
+| Package      | Purpose                                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------------------- |
+| `authl`      | OIDC client + PKCE loopback                                                                           |
+| `reqid`      | UUIDv7 request-ID propagation                                                                         |
+| `nanoid`     | 21-char nanoid generator                                                                              |
+| `worker`     | Supervisor + Worker interface + HTTP/Func adapters                                                    |
+| `scheduler`  | Cron/interval job runner — system and per-tenant scope, leader election                               |
+| `logger`     | `slog.Handler` — auto-attaches request_id/trace_id, key redaction                                     |
+| `telemetry`  | OTel tracer + meter + Prometheus reader                                                               |
+| `mailer`     | Transactional mail — `console`, `smtp`, `resend` drivers                                              |
+| `gworkspace` | Google Workspace clients — shared transport + typed provider errors; `gworkspace/gsheet` reads Sheets |
 
 Pre-1.0.0: minor releases may break; pin exact versions. Post-1.0.0:
 exported surface is frozen, additive changes only. Everything under

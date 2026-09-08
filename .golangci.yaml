@@ -113,9 +113,6 @@ linters:
             # local principal type in the auth domain and drop the platform import,
             # then remove this exclusion.
             - "!**/internal/auth/auth.go"
-            # gsheets is a Google API client, not a domain aggregate; its errors.go
-            # legitimately imports googleapi to translate transport failures.
-            - "!**/internal/gsheets/**"
           allow:
             - $gostd
             - github.com/google/uuid
@@ -201,6 +198,7 @@ linters:
             - "**/telemetry/**"
             - "**/mailer/**"
             - "**/httpclient/**"
+            - "**/gworkspace/**"
           deny:
             - pkg: "altalune.id/opensheet/internal"
               desc: "root-level shared packages must NOT depend on any internal/ package (import inversion)"
