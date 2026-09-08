@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
 	"altalune.id/opensheet/internal/platform/tenant"
@@ -38,12 +40,13 @@ func (o orgTree) ctx(t *testing.T) context.Context {
 }
 
 type pgFixture struct {
-	store   sheet.Store
-	appDB   *sql.DB
-	ownerDB *sql.DB
-	prefix  string
-	a       orgTree
-	b       orgTree
+	store     sheet.Store
+	snapshots sheet.SnapshotStore
+	appDB     *sql.DB
+	ownerDB   *sql.DB
+	prefix    string
+	a         orgTree
+	b         orgTree
 }
 
 // newPgFixture migrates as a BYPASSRLS owner and hands back a store bound to a NOBYPASSRLS app role, so RLS actually applies.
@@ -83,9 +86,11 @@ func newPgFixture(t *testing.T) *pgFixture {
 	pgCreateRole(t, admin, appRole, "LOGIN PASSWORD 'pw' NOBYPASSRLS")
 	_, err = admin.ExecContext(t.Context(), fmt.Sprintf(`GRANT USAGE ON SCHEMA public TO %q`, appRole))
 	require.NoError(t, err)
-	_, err = migDB.ExecContext(t.Context(),
-		fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON public.%s TO %q`, prefix+"sheets", appRole))
-	require.NoError(t, err)
+	for _, table := range []string{prefix + "sheets", prefix + "sheet_snapshots"} {
+		_, err = migDB.ExecContext(t.Context(),
+			fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON public.%s TO %q`, table, appRole))
+		require.NoError(t, err)
+	}
 
 	appDB, err := db.Open(t.Context(), db.DBConfig{
 		Driver: db.DriverPostgres, DSN: pgtest.DSNWithUser(t, h.DSN, appRole, "pw"), MaxOpenConns: 1,
@@ -99,11 +104,15 @@ func newPgFixture(t *testing.T) *pgFixture {
 	require.False(t, bypass, "the store must run as a NOBYPASSRLS role or the RLS assertions below prove nothing")
 
 	f.appDB = appDB
-	f.store = sheet.NewStore(
-		db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix},
-		db.Pool{W: appDB, R: appDB},
-		tenant.NewPgConn(appDB),
+	dbCfg := db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: prefix}
+	pool := db.Pool{W: appDB, R: appDB}
+	pc := tenant.NewPgConn(appDB)
+	f.store = sheet.NewStore(dbCfg, pool, pc)
+	f.snapshots, err = sheet.NewSnapshotStore(
+		config.CacheConfig{Driver: config.CacheDriverPostgres, MaxBytes: 1 << 20},
+		dbCfg, pc, slog.New(slog.DiscardHandler),
 	)
+	require.NoError(t, err)
 	return f
 }
 

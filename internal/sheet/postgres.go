@@ -17,14 +17,19 @@ import (
 
 const pgUniqueViolation = "23505"
 
+type pgTxn struct {
+	pc *tenant.PgConn
+}
+
 type postgresStore struct {
+	pgTxn
+
 	pool  pdb.Pool
-	pc    *tenant.PgConn
 	table *pgent.Sheets
 }
 
 func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix string) *postgresStore {
-	return &postgresStore{pool: pool, pc: pc, table: pgent.NewSheets(schema, tablePrefix)}
+	return &postgresStore{pgTxn: pgTxn{pc: pc}, pool: pool, table: pgent.NewSheets(schema, tablePrefix)}
 }
 
 type pgSheetRow struct {
@@ -55,7 +60,7 @@ func (r *pgSheetRow) toSheet() *Sheet {
 	}
 }
 
-func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
+func (s pgTxn) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
 	if tx, ok := pdb.CurrentTx(ctx); ok {
 		return tx, false, nil
 	}
@@ -70,7 +75,7 @@ func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
 	return tx, true, nil
 }
 
-func (s *postgresStore) endTx(tx *sql.Tx, owned bool, err error) error {
+func (s pgTxn) endTx(tx *sql.Tx, owned bool, err error) error {
 	if !owned {
 		return err
 	}

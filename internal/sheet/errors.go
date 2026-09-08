@@ -3,6 +3,7 @@ package sheet
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -218,5 +219,66 @@ func (e *PublicDisabledError) ToAppError() *apperror.AppError {
 // IsPublicDisabledError reports whether err's tree contains a *PublicDisabledError.
 func IsPublicDisabledError(err error) bool {
 	_, ok := errors.AsType[*PublicDisabledError](err)
+	return ok
+}
+
+// SnapshotTooLargeError signals a payload larger than the whole snapshot cache budget.
+type SnapshotTooLargeError struct {
+	Bytes    int64
+	MaxBytes int64
+}
+
+func (e *SnapshotTooLargeError) Error() string {
+	return fmt.Sprintf("sheet: snapshot payload: %d bytes over the %d byte cache budget", e.Bytes, e.MaxBytes)
+}
+
+// ToAppError maps SnapshotTooLargeError to the canonical payload-too-large envelope.
+func (e *SnapshotTooLargeError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetPayloadTooLarge,
+		"Sheet payload is too large to cache",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetPayloadTooLarge,
+			Meta: map[string]string{
+				"bytes":     strconv.FormatInt(e.Bytes, 10),
+				"max_bytes": strconv.FormatInt(e.MaxBytes, 10),
+			},
+		},
+	)
+}
+
+// IsSnapshotTooLargeError reports whether err's tree contains a *SnapshotTooLargeError.
+func IsSnapshotTooLargeError(err error) bool {
+	_, ok := errors.AsType[*SnapshotTooLargeError](err)
+	return ok
+}
+
+// CacheUnavailableError signals that the configured snapshot cache driver cannot be built.
+type CacheUnavailableError struct {
+	Driver string
+	Reason string
+}
+
+func (e *CacheUnavailableError) Error() string {
+	return fmt.Sprintf("sheet: snapshot cache driver %s: unavailable: %s", e.Driver, e.Reason)
+}
+
+// ToAppError maps CacheUnavailableError to the canonical internal-failure envelope.
+func (e *CacheUnavailableError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeUnexpectedError,
+		"Sheet cache is not available on this deployment",
+		codes.Internal,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeUnexpectedError,
+			Meta: map[string]string{"driver": e.Driver, "reason": e.Reason},
+		},
+	)
+}
+
+// IsCacheUnavailableError reports whether err's tree contains a *CacheUnavailableError.
+func IsCacheUnavailableError(err error) bool {
+	_, ok := errors.AsType[*CacheUnavailableError](err)
 	return ok
 }
