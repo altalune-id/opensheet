@@ -572,3 +572,19 @@ func TestWriteWorkflow_PatchRowStringifiesNonStringPatchValues(t *testing.T) {
 type stubError string
 
 func (e stubError) Error() string { return string(e) }
+
+// The GET path keys its rows with gsheet's header normalizer, so PATCH must key its response the same
+// way or a client diffing the two sees different keys for the same row.
+func TestWriteWorkflow_PatchRowKeysTheResponseLikeTheReadPath(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setTable(http.StatusOK, `{"values":[["id","","name","name"],["1","x","ada","dup"]]}`)
+
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+
+	names, _ := gsheet.NormalizeHeaders([]string{"id", "", "name", "name"})
+	assert.Equal(t, []string{"id", "col_2", "name", "name_2"}, names)
+	assert.Equal(t, gsheet.Row{"id": "1", "col_2": "x", "name": "ada2", "name_2": "dup"}, row)
+}

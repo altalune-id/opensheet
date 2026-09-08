@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/session"
@@ -29,9 +30,22 @@ type Purger interface {
 	PurgeCache(ctx context.Context, sheetID uuid.UUID) error
 }
 
-// Authorizer decides whether a raw credential may act on one sheet.
+// Writer mutates the rows of one published sheet.
+type Writer interface {
+	Append(ctx context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error)
+	PatchRow(ctx context.Context, sh *sheet.Sheet, id string, patch map[string]any) (gsheet.Row, error)
+}
+
+// Tabber lists and creates the tabs of one registered spreadsheet.
+type Tabber interface {
+	ListTabs(ctx context.Context, spreadsheetID uuid.UUID) ([]string, error)
+	AddTab(ctx context.Context, spreadsheetID uuid.UUID, title string) error
+}
+
+// Authorizer decides whether a raw credential may act on one sheet, or project-wide where no sheet is named.
 type Authorizer interface {
 	Authorize(ctx context.Context, raw, scope string, orgID, projectID, sheetID uuid.UUID) (session.Principal, error)
+	AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error)
 }
 
 // Capabilities reports the config-derived feature flags the data plane must honour.
@@ -51,39 +65,52 @@ type handler struct {
 	resolver   resolver
 	reader     Reader
 	purger     Purger
+	writer     Writer
+	tabs       Tabber
 	authz      Authorizer
 	caps       Capabilities
 	defaultTTL time.Duration
 	log        *slog.Logger
 }
 
-// NewHandler returns the data plane mounted under basePath+"/api/v1".
-func NewHandler(
-	basePath string,
-	orgs Orgs,
-	projects Projects,
-	sheets Sheets,
-	reader Reader,
-	purger Purger,
-	authz Authorizer,
-	caps Capabilities,
-	defaultTTL time.Duration,
-	log *slog.Logger,
-) http.Handler {
+// HandlerParams collects the data plane's dependencies.
+type HandlerParams struct {
+	BasePath   string
+	Orgs       Orgs
+	Projects   Projects
+	Sheets     Sheets
+	Reader     Reader
+	Purger     Purger
+	Writer     Writer
+	Tabs       Tabber
+	Authz      Authorizer
+	Caps       Capabilities
+	DefaultTTL time.Duration
+	Log        *slog.Logger
+}
+
+// NewHandler returns the data plane mounted under p.BasePath+"/api/v1".
+func NewHandler(p HandlerParams) http.Handler {
 	h := &handler{
-		resolver:   resolver{orgs: orgs, projects: projects, sheets: sheets},
-		reader:     reader,
-		purger:     purger,
-		authz:      authz,
-		caps:       caps,
-		defaultTTL: defaultTTL,
-		log:        log.With("surface", "data"),
+		resolver:   resolver{orgs: p.Orgs, projects: p.Projects, sheets: p.Sheets},
+		reader:     p.Reader,
+		purger:     p.Purger,
+		writer:     p.Writer,
+		tabs:       p.Tabs,
+		authz:      p.Authz,
+		caps:       p.Caps,
+		defaultTTL: p.DefaultTTL,
+		log:        p.Log.With("surface", "data"),
 	}
 	inner := http.NewServeMux()
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}", h.rows)
+	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}", h.appendRow)
+	inner.HandleFunc("PATCH /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.patchRow)
 	inner.HandleFunc("DELETE /orgs/{org}/projects/{project}/sheets/{slug}/cache", h.purge)
+	inner.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.listTabs)
+	inner.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.createTab)
 	inner.HandleFunc("/", h.unknown)
-	return http.StripPrefix(strings.TrimRight(basePath, "/")+mountSuffix, inner)
+	return http.StripPrefix(strings.TrimRight(p.BasePath, "/")+mountSuffix, inner)
 }
 
 func (h *handler) rows(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +164,14 @@ func (h *handler) resolve(r *http.Request) (*http.Request, scope, error) {
 	return r.WithContext(ctx), sc, nil
 }
 
+func (h *handler) resolveProject(r *http.Request) (*http.Request, projectScope, error) {
+	ctx, sc, err := h.resolver.resolveProject(r.Context(), r.PathValue("org"), r.PathValue("project"))
+	if err != nil {
+		return r, projectScope{}, err
+	}
+	return r.WithContext(ctx), sc, nil
+}
+
 func (h *handler) allowRead(r *http.Request, sc scope) error {
 	if sc.sheet.Visibility != sheet.VisibilityPublic {
 		return h.authorize(r, sc, authn.ScopeSheetsRead)
@@ -152,6 +187,15 @@ func (h *handler) allowRead(r *http.Request, sc scope) error {
 // the scope, a key not granted this sheet and a slug that does not exist are one indistinguishable answer.
 func (h *handler) authorize(r *http.Request, sc scope, scopeName string) error {
 	if _, err := h.authz.Authorize(r.Context(), authn.CredentialFrom(r), scopeName, sc.orgID, sc.projectID, sc.sheet.ID); err != nil {
+		return &NotFoundError{cause: err}
+	}
+	return nil
+}
+
+// SECURITY: a route naming no sheet authorizes project-wide, and APIKey.Allows refuses a sheet-restricted
+// key there — a key granted specific sheets cannot use the tabs routes at all.
+func (h *handler) authorizeProject(r *http.Request, sc projectScope, scopeName string) error {
+	if _, err := h.authz.AuthorizeProject(r.Context(), authn.CredentialFrom(r), scopeName, sc.orgID, sc.projectID); err != nil {
 		return &NotFoundError{cause: err}
 	}
 	return nil

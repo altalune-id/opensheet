@@ -21,8 +21,9 @@ const valueInputRaw = "RAW"
 
 const insertDataRows = "INSERT_ROWS"
 
+// MaxTabTitleRunes is Google's limit on the length of a tab title.
 // https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/sheets#SheetProperties
-const maxTabTitleRunes = 100
+const MaxTabTitleRunes = 100
 
 // WriterFactory builds a Writer for one credential.
 type WriterFactory func(ctx context.Context, ts oauth2.TokenSource) (*Writer, error)
@@ -88,7 +89,7 @@ func (w *Writer) UpdateRow(ctx context.Context, fileID, tab string, rowIndex int
 // AddTab creates a tab titled title, trimmed of surrounding space.
 func (w *Writer) AddTab(ctx context.Context, fileID, title string) error {
 	title = strings.TrimSpace(title)
-	if title == "" || utf8.RuneCountInString(title) > maxTabTitleRunes {
+	if title == "" || utf8.RuneCountInString(title) > MaxTabTitleRunes {
 		return &InvalidTabTitleError{Title: title}
 	}
 

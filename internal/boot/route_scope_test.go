@@ -72,6 +72,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/sheets/" + id + "/preview", nil},
 		{http.MethodGet, pbase + "/keys", nil},
 		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodGet, dbase + "/spreadsheets/" + id + "/tabs", nil},
 
 		// NOTE: these two are the only tenant-scoped pages not mounted under /orgs/{org}/projects/{project}.
 		// Google requires an exact-match redirect URI that cannot carry per-tenant path segments, so both
@@ -110,6 +111,9 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/keys", url.Values{"name": {"Probe"}, "scopes": {"sheets:read"}}},
 		{http.MethodPost, pbase + "/keys/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, pbase + "/keys/" + id + "/delete", url.Values{}},
+		{http.MethodPost, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
 		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},

@@ -79,9 +79,18 @@ it mounts the other two HTTP surfaces under `http.basePath`.
 Data-plane routes, with `http.basePath` empty:
 
 ```
-GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}          # the tab's rows as a JSON array
-DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache    # drop this sheet's snapshots
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}            # the tab's rows as a JSON array
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}            # append one row: {"values":[...]}
+PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}  # patch one row: {"column":"value"}
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache      # drop this sheet's snapshots
+GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs   # the document's tab titles
+POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs   # create a tab: {"title":"Q2"}
 ```
+
+A write needs `sheets:write` plus `sheets.writable` on the sheet; the tabs routes
+need `spreadsheets:read` / `spreadsheets:write`, and `spreadsheets.writable` to
+create. They name no sheet, so a key restricted to specific sheets cannot use
+them at all. `POST …/sheets/{slug}` honours `Idempotency-Key`.
 
 `api.enabled` gates the RPC surface only — the data plane is always mounted.
 

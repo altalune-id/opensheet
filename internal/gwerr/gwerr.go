@@ -39,7 +39,7 @@ func envelope(err error) *apperror.AppError {
 	if e, ok := errors.AsType[*gworkspace.NotFoundError](err); ok {
 		return apperror.New(
 			apperror.CodeGoogleNotFound,
-			fmt.Sprintf("Google spreadsheet %q not found", e.FileID),
+			"The Google spreadsheet behind this sheet was not found; it may have been deleted or unshared",
 			codes.NotFound,
 			&apperrorv1.ErrorDetail{
 				Code: apperror.CodeGoogleNotFound,
@@ -47,10 +47,11 @@ func envelope(err error) *apperror.AppError {
 			},
 		)
 	}
+	// SECURITY: the message names no file id — the data plane returns messages verbatim, so the id stays in the detail, the log and the span.
 	if e, ok := errors.AsType[*gworkspace.PermissionDeniedError](err); ok {
 		return apperror.New(
 			apperror.CodeGooglePermissionDenied,
-			fmt.Sprintf("Google denied access to spreadsheet %q; share it with this credential", e.FileID),
+			"Google denied access to this spreadsheet; share it with this credential",
 			codes.PermissionDenied,
 			&apperrorv1.ErrorDetail{
 				Code: apperror.CodeGooglePermissionDenied,
@@ -95,6 +96,22 @@ func envelope(err error) *apperror.AppError {
 				Code: apperror.CodeSheetTabNotFound,
 				Meta: map[string]string{"tab": e.Tab},
 			},
+		)
+	}
+	if _, ok := errors.AsType[*gsheet.InvalidTabTitleError](err); ok {
+		return apperror.New(
+			apperror.CodeSheetInvalidTabTitle,
+			fmt.Sprintf("A tab title must be 1 to %d characters", gsheet.MaxTabTitleRunes),
+			codes.InvalidArgument,
+			&apperrorv1.ErrorDetail{Code: apperror.CodeSheetInvalidTabTitle},
+		)
+	}
+	if _, ok := errors.AsType[*gsheet.InvalidRowIndexError](err); ok {
+		return apperror.New(
+			apperror.CodeSheetInvalidRowIndex,
+			"A row number must be a positive integer",
+			codes.InvalidArgument,
+			&apperrorv1.ErrorDetail{Code: apperror.CodeSheetInvalidRowIndex},
 		)
 	}
 	return nil

@@ -91,6 +91,8 @@ const (
 	CodeSheetInvalidRow          = "SHT016"
 	CodeSheetWriteInFlight       = "SHT017"
 	CodeSheetIdempotencyMismatch = "SHT018"
+	CodeSheetInvalidTabTitle     = "SHT019"
+	CodeSheetInvalidRowIndex     = "SHT020"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

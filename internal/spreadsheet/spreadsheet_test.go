@@ -3,6 +3,7 @@ package spreadsheet
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 )
 
@@ -339,5 +341,41 @@ func TestPredicates_UnwrapThroughAChain(t *testing.T) {
 	wrapped := fmt.Errorf("outer: %w", &NotFoundError{ID: "abc"})
 	if !IsNotFoundError(wrapped) {
 		t.Error("IsNotFoundError did not walk the chain")
+	}
+}
+
+// SECURITY: the tabs routes on the data plane are addressed by our UUID, so a refusal must not hand
+// the caller the Google file id. It stays in Error(), which only the log and the span see.
+func TestNotWritableError_ToAppErrorNamesNoGoogleFileID(t *testing.T) {
+	t.Parallel()
+	err := &NotWritableError{ID: "11111111-1111-1111-1111-111111111111", GoogleFileID: "1SecretFileID"}
+
+	ae, ok := apperror.AsAppError(err)
+	if !ok {
+		t.Fatal("the refusal must carry a wire envelope")
+	}
+	if strings.Contains(ae.Message(), "1SecretFileID") {
+		t.Errorf("Message() = %q, want no Google file id", ae.Message())
+	}
+	if ae.Code() != apperror.CodeSpreadsheetNotWritable {
+		t.Errorf("Code() = %q, want %q", ae.Code(), apperror.CodeSpreadsheetNotWritable)
+	}
+	if got := ae.HTTPStatus(); got != http.StatusForbidden {
+		t.Errorf("HTTPStatus() = %d, want 403", got)
+	}
+	detail, ok := ae.Details()[0].(*apperrorv1.ErrorDetail)
+	if !ok {
+		t.Fatalf("Details()[0] = %T, want *apperrorv1.ErrorDetail", ae.Details()[0])
+	}
+	for k, v := range detail.GetMeta() {
+		if strings.Contains(v, "1SecretFileID") {
+			t.Errorf("Meta[%q] = %q, want no Google file id", k, v)
+		}
+	}
+	if got := detail.GetMeta()["spreadsheet_id"]; got != err.ID {
+		t.Errorf("Meta[spreadsheet_id] = %q, want the id the caller supplied", got)
+	}
+	if !strings.Contains(err.Error(), "1SecretFileID") {
+		t.Error("Error() must keep the file id for the log and the span")
 	}
 }

@@ -47,18 +47,20 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.
 
 // NOTE: the data plane is built regardless of api.enabled — that flag gates only the RPC surface.
 func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *slog.Logger, s *Services) http.Handler {
-	return data.NewHandler(
-		cfg.HTTP.BasePath,
-		orgsForData{svc: s.Orgs},
-		projectsForData{svc: s.Projects},
-		sheetsForData{svc: s.Sheets},
-		s.Read,
-		s.Sheets,
-		s.KeyAuthn,
-		capsForSheet{caps: caps},
-		cfg.Cache.DefaultTTL,
-		log,
-	)
+	return data.NewHandler(data.HandlerParams{
+		BasePath:   cfg.HTTP.BasePath,
+		Orgs:       orgsForData{svc: s.Orgs},
+		Projects:   projectsForData{svc: s.Projects},
+		Sheets:     sheetsForData{svc: s.Sheets},
+		Reader:     s.Read,
+		Purger:     s.Sheets,
+		Writer:     s.Write,
+		Tabs:       s.Spreadsheets,
+		Authz:      s.KeyAuthn,
+		Caps:       capsForSheet{caps: caps},
+		DefaultTTL: cfg.Cache.DefaultTTL,
+		Log:        log,
+	})
 }
 
 func buildWebHandler(

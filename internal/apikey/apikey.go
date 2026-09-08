@@ -140,6 +140,12 @@ func (k *APIKey) Allows(scope string, sheetID uuid.UUID) bool {
 	return slices.Contains(k.SheetIDs, sheetID)
 }
 
+// AllowsProject reports whether the key grants scope across its whole project.
+// SECURITY: a key restricted to specific sheets never does — a route that names no sheet cannot be checked against a grant that does.
+func (k *APIKey) AllowsProject(scope string) bool {
+	return len(k.SheetIDs) == 0 && slices.Contains(k.Scopes, scope)
+}
+
 //nolint:gochecknoglobals // SECURITY: fixed digest an unknown prefix is compared against; immutable, and no real secret hashes to it.
 var dummySecretHash = sha256.Sum256([]byte("opensheet: api key prefix miss"))
 

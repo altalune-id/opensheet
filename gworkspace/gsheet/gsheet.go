@@ -131,7 +131,7 @@ func (c *Client) Rows(ctx context.Context, fileID, tab string) ([]Row, []string,
 		return nil, nil, nil
 	}
 
-	names, warnings := normalizeHeaders(tbl.Headers)
+	names, warnings := NormalizeHeaders(tbl.Headers)
 	rows := make([]Row, 0, len(tbl.Rows))
 	for _, cells := range tbl.Rows {
 		row := make(Row, len(names))
@@ -165,7 +165,9 @@ func tabTitles(meta *sheetsapi.Spreadsheet) []string {
 	return out
 }
 
-func normalizeHeaders(raw []string) (names, warnings []string) {
+// NormalizeHeaders keys a header row: it trims each name, names a blank column col_N, dedupes a repeat
+// as name_N, and reports one warning per renamed column.
+func NormalizeHeaders(raw []string) (names, warnings []string) {
 	names = make([]string, len(raw))
 	seen := map[string]int{}
 	for i, h := range raw {

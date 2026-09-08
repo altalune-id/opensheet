@@ -119,3 +119,58 @@ func TestPublicDisabled(t *testing.T) {
 		t.Errorf("code = %q, want %q", ae.Code(), apperror.CodeSheetPublicDisabled)
 	}
 }
+
+func TestWriteErrors_EnvelopesAndPredicates(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		code   string
+		status int
+		pred   func(error) bool
+	}{
+		{
+			name:   "payload too large",
+			err:    &PayloadTooLargeError{Limit: maxWriteBodyBytes},
+			code:   apperror.CodeSheetPayloadTooLarge,
+			status: http.StatusRequestEntityTooLarge,
+			pred:   IsPayloadTooLargeError,
+		},
+		{
+			name:   "invalid body",
+			err:    &InvalidBodyError{Reason: "the body must be a JSON object of column to value"},
+			code:   apperror.CodeValidation,
+			status: http.StatusBadRequest,
+			pred:   IsInvalidBodyError,
+		},
+		{
+			name:   "invalid cell",
+			err:    &InvalidCellError{Column: "rate_idr", Reason: "not a finite number"},
+			code:   apperror.CodeSheetInvalidRow,
+			status: http.StatusBadRequest,
+			pred:   IsInvalidCellError,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.err.Error() == "" {
+				t.Error("Error() must not be empty")
+			}
+			ae, ok := apperror.AsAppError(tc.err)
+			if !ok {
+				t.Fatalf("%T carries no wire envelope", tc.err)
+			}
+			if ae.Code() != tc.code {
+				t.Errorf("code = %q, want %q", ae.Code(), tc.code)
+			}
+			if ae.HTTPStatus() != tc.status {
+				t.Errorf("HTTPStatus = %d, want %d", ae.HTTPStatus(), tc.status)
+			}
+			if !tc.pred(tc.err) {
+				t.Error("the typed predicate does not match its own error")
+			}
+			if tc.pred(errors.New("other")) {
+				t.Error("the typed predicate matched a foreign error")
+			}
+		})
+	}
+}

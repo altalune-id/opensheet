@@ -1,8 +1,11 @@
 package data
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,11 +17,14 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/gwerr"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 )
 
 type fakeOrgs struct {
@@ -65,6 +71,70 @@ func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error
 	return f.rows, f.err
 }
 
+type appendCall struct {
+	sheetID  uuid.UUID
+	cells    []any
+	idemKey  string
+	bodyHash string
+}
+
+type patchCall struct {
+	sheetID uuid.UUID
+	rowID   string
+	patch   map[string]any
+}
+
+type fakeWriter struct {
+	appended  int
+	appendErr error
+	row       gsheet.Row
+	patchErr  error
+	appends   []appendCall
+	patches   []patchCall
+}
+
+func (f *fakeWriter) Append(_ context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error) {
+	f.appends = append(f.appends, appendCall{sheetID: sh.ID, cells: cells, idemKey: idemKey, bodyHash: bodyHash})
+	if f.appendErr != nil {
+		return 0, f.appendErr
+	}
+	return f.appended, nil
+}
+
+func (f *fakeWriter) PatchRow(_ context.Context, sh *sheet.Sheet, id string, patch map[string]any) (gsheet.Row, error) {
+	f.patches = append(f.patches, patchCall{sheetID: sh.ID, rowID: id, patch: patch})
+	if f.patchErr != nil {
+		return nil, f.patchErr
+	}
+	return f.row, nil
+}
+
+type addTabCall struct {
+	spreadsheetID uuid.UUID
+	title         string
+}
+
+type fakeTabber struct {
+	tabs    []string
+	listErr error
+	addErr  error
+	lists   []uuid.UUID
+	adds    []addTabCall
+}
+
+func (f *fakeTabber) ListTabs(_ context.Context, spreadsheetID uuid.UUID) ([]string, error) {
+	f.lists = append(f.lists, spreadsheetID)
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.tabs, nil
+}
+
+func (f *fakeTabber) AddTab(_ context.Context, spreadsheetID uuid.UUID, title string) error {
+	f.adds = append(f.adds, addTabCall{spreadsheetID: spreadsheetID, title: title})
+	return f.addErr
+}
+
 type fakePurger struct {
 	err   error
 	calls []uuid.UUID
@@ -84,12 +154,21 @@ type authorizeCall struct {
 }
 
 type fakeAuthorizer struct {
-	err   error
-	calls []authorizeCall
+	err          error
+	calls        []authorizeCall
+	projectCalls []authorizeCall
 }
 
 func (f *fakeAuthorizer) Authorize(_ context.Context, raw, scope string, orgID, projectID, sheetID uuid.UUID) (session.Principal, error) {
 	f.calls = append(f.calls, authorizeCall{raw: raw, scope: scope, orgID: orgID, projectID: projectID, sheetID: sheetID})
+	if f.err != nil {
+		return session.Principal{}, f.err
+	}
+	return session.Principal{Source: session.SourceAPIKey, ActiveOrgID: orgID, ActiveProjectID: projectID}, nil
+}
+
+func (f *fakeAuthorizer) AuthorizeProject(_ context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
+	f.projectCalls = append(f.projectCalls, authorizeCall{raw: raw, scope: scope, orgID: orgID, projectID: projectID})
 	if f.err != nil {
 		return session.Principal{}, f.err
 	}
@@ -101,14 +180,17 @@ type fakeCaps struct{ public bool }
 func (f fakeCaps) PublicSheetsEnabled() bool { return f.public }
 
 type rig struct {
-	orgs     *fakeOrgs
-	projects *fakeProjects
-	sheets   *fakeSheets
-	reader   *fakeReader
-	purger   *fakePurger
-	authz    *fakeAuthorizer
-	caps     fakeCaps
-	basePath string
+	orgs          *fakeOrgs
+	projects      *fakeProjects
+	sheets        *fakeSheets
+	reader        *fakeReader
+	purger        *fakePurger
+	writer        *fakeWriter
+	tabs          *fakeTabber
+	authz         *fakeAuthorizer
+	caps          fakeCaps
+	basePath      string
+	spreadsheetID uuid.UUID
 }
 
 func newRig() *rig {
@@ -125,20 +207,44 @@ func newRig() *rig {
 			ETag:      "deadbeef",
 			FetchedAt: time.Now().UTC(),
 		}},
-		purger: &fakePurger{},
-		authz:  &fakeAuthorizer{},
-		caps:   fakeCaps{public: true},
+		purger:        &fakePurger{},
+		writer:        &fakeWriter{appended: 1, row: gsheet.Row{"id": "42", "name": "ada"}},
+		tabs:          &fakeTabber{tabs: []string{"Rates", "Payroll"}},
+		authz:         &fakeAuthorizer{},
+		caps:          fakeCaps{public: true},
+		spreadsheetID: uuid.Must(uuid.NewV7()),
 	}
 }
 
 func (g *rig) handler() http.Handler {
-	return NewHandler(g.basePath, g.orgs, g.projects, g.sheets, g.reader, g.purger, g.authz, g.caps,
-		30*time.Second, slog.New(slog.DiscardHandler))
+	return NewHandler(HandlerParams{
+		BasePath:   g.basePath,
+		Orgs:       g.orgs,
+		Projects:   g.projects,
+		Sheets:     g.sheets,
+		Reader:     g.reader,
+		Purger:     g.purger,
+		Writer:     g.writer,
+		Tabs:       g.tabs,
+		Authz:      g.authz,
+		Caps:       g.caps,
+		DefaultTTL: 30 * time.Second,
+		Log:        slog.New(slog.DiscardHandler),
+	})
 }
 
 func (g *rig) do(t *testing.T, method, path string, header http.Header) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequestWithContext(t.Context(), method, path, http.NoBody)
+	return g.send(t, method, path, nil, header)
+}
+
+func (g *rig) send(t *testing.T, method, path string, body []byte, header http.Header) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader = http.NoBody
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req := httptest.NewRequestWithContext(t.Context(), method, path, reader)
 	for k, vs := range header {
 		for _, v := range vs {
 			req.Header.Add(k, v)
@@ -147,6 +253,10 @@ func (g *rig) do(t *testing.T, method, path string, header http.Header) *httptes
 	rec := httptest.NewRecorder()
 	g.handler().ServeHTTP(rec, req)
 	return rec
+}
+
+func (g *rig) tabsPath() string {
+	return "/api/v1/orgs/acme/projects/default/spreadsheets/" + g.spreadsheetID.String() + "/tabs"
 }
 
 const rowsPath = "/api/v1/orgs/acme/projects/default/sheets/prices"
@@ -599,5 +709,596 @@ func TestAgeSeconds(t *testing.T) {
 	}
 	if got := ageSeconds(time.Now().UTC().Add(time.Hour)); got != 0 {
 		t.Errorf("ageSeconds for a future fetch = %d, want 0", got)
+	}
+}
+
+const (
+	rowPath  = rowsPath + "/rows/42"
+	bearer   = "Bearer osk_secret"
+	jsonType = "application/json; charset=utf-8"
+)
+
+func keyHeader() http.Header { return http.Header{"Authorization": {bearer}} }
+
+func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body %s is not a JSON object: %v", rec.Body.String(), err)
+	}
+	return out
+}
+
+func TestHandler_AppendRequiresTheWriteScope(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.authz.calls) != 1 {
+		t.Fatalf("Authorize calls = %d, want 1", len(g.authz.calls))
+	}
+	call := g.authz.calls[0]
+	if call.scope != authn.ScopeSheetsWrite {
+		t.Errorf("scope = %q, want %q", call.scope, authn.ScopeSheetsWrite)
+	}
+	if call.sheetID != g.sheets.ref.ID {
+		t.Errorf("sheetID = %s, want the resolved sheet %s — the grant is per sheet", call.sheetID, g.sheets.ref.ID)
+	}
+}
+
+func TestHandler_AppendWithoutTheScopeIsTheSame404AndNeverWrites(t *testing.T) {
+	g := newRig()
+	g.authz.err = apperror.New(apperror.CodeAPIKeyInsufficientScope, "Insufficient scope", codes.PermissionDenied)
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got, want := rec.Body.String(), `{"error":{"code":"SHT001","message":"Sheet not found"}}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if len(g.writer.appends) != 0 {
+		t.Errorf("Append ran %d times after a refused authorization, want 0", len(g.writer.appends))
+	}
+}
+
+// SECURITY: nothing in the handler filters formulas — valueInputOption=RAW does, inside the writer.
+// So the cells must reach the workflow verbatim, or the control being tested is not the one in force.
+func TestHandler_AppendPassesFormulaTextToTheWriterVerbatim(t *testing.T) {
+	for _, cell := range []string{"=Payroll!A1", "+1+1", "-1-1", `=IMPORTXML("http://x/","//a")`} {
+		t.Run(cell, func(t *testing.T) {
+			g := newRig()
+			body, err := json.Marshal(map[string]any{"values": []any{cell}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := g.send(t, http.MethodPost, rowsPath, body, keyHeader())
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.writer.appends) != 1 {
+				t.Fatalf("Append calls = %d, want 1", len(g.writer.appends))
+			}
+			if got := g.writer.appends[0].cells; len(got) != 1 || got[0] != cell {
+				t.Errorf("cells = %#v, want [%q] unchanged", got, cell)
+			}
+		})
+	}
+}
+
+func TestHandler_AppendReturnsTheAppendedCount(t *testing.T) {
+	g := newRig()
+	g.writer.appended = 1
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a","b"]}`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"appended":1}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got, want := rec.Header().Get("Content-Type"), jsonType; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
+	}
+	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+		t.Errorf("Cache-Control = %q, want %q — a write reply is never cacheable", got, want)
+	}
+}
+
+func TestHandler_AppendAcceptsABareArrayForPilotCompatibility(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`  ["Aston",1250000]`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.writer.appends) != 1 {
+		t.Fatalf("Append calls = %d, want 1", len(g.writer.appends))
+	}
+	cells := g.writer.appends[0].cells
+	if len(cells) != 2 || cells[0] != "Aston" {
+		t.Fatalf("cells = %#v", cells)
+	}
+	if n, ok := cells[1].(float64); !ok || n != 1250000 {
+		t.Errorf("cells[1] = %#v, want the JSON number 1250000 — RAW performs no coercion", cells[1])
+	}
+}
+
+func TestHandler_AppendRejectsABodyItCannotRead(t *testing.T) {
+	cases := map[string]string{
+		"empty":               ``,
+		"not json":            `nope`,
+		"values not an array": `{"values":{"a":1}}`,
+		"nested cell":         `{"values":[["a"]]}`,
+		"numeric hint":        `{"values":["1"],"numeric_columns":["rate"]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+
+			rec := g.send(t, http.MethodPost, rowsPath, []byte(body), keyHeader())
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.writer.appends) != 0 {
+				t.Errorf("Append ran on a body the handler could not read")
+			}
+		})
+	}
+}
+
+func TestHandler_AppendForwardsTheIdempotencyKeyAndABodyHash(t *testing.T) {
+	g := newRig()
+	body := []byte(`{"values":["a"]}`)
+
+	g.send(t, http.MethodPost, rowsPath, body, http.Header{
+		"Authorization":   {bearer},
+		"Idempotency-Key": {"idem-1"},
+	})
+	g.send(t, http.MethodPost, rowsPath, body, http.Header{
+		"Authorization":   {bearer},
+		"Idempotency-Key": {"idem-1"},
+	})
+	g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["b"]}`), http.Header{
+		"Authorization":   {bearer},
+		"Idempotency-Key": {"idem-1"},
+	})
+
+	if len(g.writer.appends) != 3 {
+		t.Fatalf("Append calls = %d, want 3", len(g.writer.appends))
+	}
+	for i, call := range g.writer.appends {
+		if call.idemKey != "idem-1" {
+			t.Errorf("call %d: idemKey = %q, want idem-1", i, call.idemKey)
+		}
+		if call.bodyHash == "" {
+			t.Errorf("call %d: bodyHash is empty, so a replay could never compare bodies", i)
+		}
+	}
+	if g.writer.appends[0].bodyHash != g.writer.appends[1].bodyHash {
+		t.Error("the same body must hash the same, or a legitimate retry reads as a mismatch")
+	}
+	if g.writer.appends[1].bodyHash == g.writer.appends[2].bodyHash {
+		t.Error("a different body must hash differently, or a reused key would replay the wrong row")
+	}
+}
+
+// A retry that re-serializes its body, or switches to the bare-array shape, must replay rather than
+// read as a different body and be refused 422.
+func TestHandler_AppendHashesTheCellsNotTheRawBytes(t *testing.T) {
+	g := newRig()
+	header := http.Header{"Authorization": {bearer}, "Idempotency-Key": {"idem-1"}}
+
+	for _, body := range []string{`{"values":["a",1]}`, "{\n  \"values\": [ \"a\", 1 ]\n}", `["a",1]`} {
+		if rec := g.send(t, http.MethodPost, rowsPath, []byte(body), header); rec.Code != http.StatusOK {
+			t.Fatalf("body %s: status = %d, want 200", body, rec.Code)
+		}
+	}
+
+	if len(g.writer.appends) != 3 {
+		t.Fatalf("Append calls = %d, want 3", len(g.writer.appends))
+	}
+	first := g.writer.appends[0].bodyHash
+	for i, call := range g.writer.appends {
+		if call.bodyHash != first {
+			t.Errorf("call %d hashed %s, want the same %s — the cells are identical", i, call.bodyHash, first)
+		}
+	}
+}
+
+func TestHandler_AppendWithoutTheHeaderSendsNoIdempotencyKey(t *testing.T) {
+	g := newRig()
+
+	g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+	if len(g.writer.appends) != 1 {
+		t.Fatalf("Append calls = %d, want 1", len(g.writer.appends))
+	}
+	if got := g.writer.appends[0].idemKey; got != "" {
+		t.Errorf("idemKey = %q, want empty so the workflow reserves nothing", got)
+	}
+}
+
+// Spelled out because nothing in this repo could emit 422 until the code and its httpStatusOverrides
+// entry landed: a reused key with a different body must be distinguishable by a client.
+func TestHandler_AppendRejectsAReusedIdempotencyKeyWithADifferentBody(t *testing.T) {
+	g := newRig()
+	g.writer.appendErr = &sheet.IdempotencyMismatchError{Key: "idem-1"}
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["b"]}`), http.Header{
+		"Authorization":   {bearer},
+		"Idempotency-Key": {"idem-1"},
+	})
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetIdempotencyMismatch) {
+		t.Errorf("body = %s, want it to name %s so a client can branch on it",
+			got, apperror.CodeSheetIdempotencyMismatch)
+	}
+}
+
+func TestHandler_PatchRowReturnsTheRowAsWritten(t *testing.T) {
+	g := newRig()
+	g.writer.row = gsheet.Row{"id": "42", "name": "ada2"}
+
+	rec := g.send(t, http.MethodPatch, rowPath, []byte(`{"name":"ada2"}`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"id":"42","name":"ada2"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if len(g.writer.patches) != 1 {
+		t.Fatalf("PatchRow calls = %d, want 1", len(g.writer.patches))
+	}
+	call := g.writer.patches[0]
+	if call.rowID != "42" {
+		t.Errorf("row id = %q, want 42 from the path", call.rowID)
+	}
+	if call.sheetID != g.sheets.ref.ID {
+		t.Errorf("sheetID = %s, want the resolved sheet", call.sheetID)
+	}
+	if got, ok := call.patch["name"].(string); !ok || got != "ada2" {
+		t.Errorf("patch = %#v, want name=ada2", call.patch)
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+}
+
+func TestHandler_PatchRowSendsANamedNumericColumnAsANumber(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPatch, rowPath,
+		[]byte(`{"rate_idr":"1300000","numeric_columns":["rate_idr"]}`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	patch := g.writer.patches[0].patch
+	if _, named := patch["numeric_columns"]; named {
+		t.Error("numeric_columns is a hint, not a column — it must be stripped from the patch")
+	}
+	got, ok := patch["rate_idr"].(float64)
+	if !ok {
+		t.Fatalf("patch[rate_idr] = %#v, want a float64", patch["rate_idr"])
+	}
+	if got != 1300000 {
+		t.Errorf("patch[rate_idr] = %v, want 1300000", got)
+	}
+}
+
+// SECURITY: ParseFloat accepts Inf and NaN, which encoding/json then refuses to marshal — that would
+// surface as a 500 from inside the Google client instead of the 400 the caller earned.
+func TestHandler_PatchRowRejectsANonFiniteOrUnparseableNumericColumn(t *testing.T) {
+	for _, value := range []string{"Inf", "+Inf", "-Inf", "NaN", "inf", "nan", "abc", ""} {
+		t.Run(value, func(t *testing.T) {
+			g := newRig()
+			body, err := json.Marshal(map[string]any{"rate": value, "numeric_columns": []string{"rate"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := g.send(t, http.MethodPatch, rowPath, body, keyHeader())
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.writer.patches) != 0 {
+				t.Error("a cell that is not a finite number must not reach the workflow")
+			}
+		})
+	}
+}
+
+func TestHandler_PatchRowRejectsABodyItCannotRead(t *testing.T) {
+	cases := map[string]string{
+		"empty":              ``,
+		"not an object":      `["a"]`,
+		"nested value":       `{"name":{"a":1}}`,
+		"hint not an array":  `{"name":"a","numeric_columns":"name"}`,
+		"hint names nothing": `{"name":"a","numeric_columns":["rate"]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+
+			rec := g.send(t, http.MethodPatch, rowPath, []byte(body), keyHeader())
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.writer.patches) != 0 {
+				t.Error("PatchRow ran on a body the handler could not read")
+			}
+		})
+	}
+}
+
+func TestHandler_ListTabsRequiresTheSpreadsheetsReadScope(t *testing.T) {
+	g := newRig()
+
+	rec := g.do(t, http.MethodGet, g.tabsPath(), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"tabs":["Rates","Payroll"]}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if len(g.authz.projectCalls) != 1 {
+		t.Fatalf("AuthorizeProject calls = %d, want 1", len(g.authz.projectCalls))
+	}
+	call := g.authz.projectCalls[0]
+	if call.scope != authn.ScopeSpreadsheetsRead {
+		t.Errorf("scope = %q, want %q", call.scope, authn.ScopeSpreadsheetsRead)
+	}
+	if call.orgID != g.orgs.ref.ID || call.projectID != g.projects.ref.ID {
+		t.Errorf("AuthorizeProject got (%s,%s), want the resolved (%s,%s)",
+			call.orgID, call.projectID, g.orgs.ref.ID, g.projects.ref.ID)
+	}
+	if len(g.tabs.lists) != 1 || g.tabs.lists[0] != g.spreadsheetID {
+		t.Errorf("ListTabs calls = %v, want [%s] from the path", g.tabs.lists, g.spreadsheetID)
+	}
+}
+
+func TestHandler_ListTabsOfASpreadsheetWithNoneServesAnEmptyArray(t *testing.T) {
+	g := newRig()
+	g.tabs.tabs = nil
+
+	rec := g.do(t, http.MethodGet, g.tabsPath(), keyHeader())
+
+	if got, want := rec.Body.String(), `{"tabs":[]}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+}
+
+// The documented rule from the spec: the tabs routes name no sheet, so they authorize project-wide.
+// A key restricted to specific sheets is refused by APIKey.Allows and cannot use them at all.
+func TestHandler_TabsRoutesAuthorizeWithoutASheet(t *testing.T) {
+	for _, tc := range []struct {
+		method string
+		body   []byte
+	}{
+		{http.MethodGet, nil},
+		{http.MethodPost, []byte(`{"title":"Q2"}`)},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			g := newRig()
+
+			g.send(t, tc.method, g.tabsPath(), tc.body, keyHeader())
+
+			if len(g.authz.calls) != 0 {
+				t.Errorf("Authorize (per sheet) was called %d times, want 0 — uuid.Nil would refuse every restricted key",
+					len(g.authz.calls))
+			}
+			if len(g.authz.projectCalls) != 1 {
+				t.Errorf("AuthorizeProject calls = %d, want 1", len(g.authz.projectCalls))
+			}
+		})
+	}
+}
+
+func TestHandler_TabsRoutesRefusalIsTheSame404(t *testing.T) {
+	g := newRig()
+	g.authz.err = apperror.New(apperror.CodeAPIKeyUnauthorized, "Unauthorized", codes.Unauthenticated)
+
+	rec := g.do(t, http.MethodGet, g.tabsPath(), keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got, want := rec.Body.String(), `{"error":{"code":"SHT001","message":"Sheet not found"}}`; got != want {
+		t.Errorf("body = %s, want the shared masked envelope %s", got, want)
+	}
+	if len(g.tabs.lists) != 0 {
+		t.Error("ListTabs ran after a refused authorization")
+	}
+}
+
+func TestHandler_CreateTabReturns201(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, g.tabsPath(), []byte(`{"title":"  Q2  "}`), keyHeader())
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"created":"Q2"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if len(g.authz.projectCalls) != 1 || g.authz.projectCalls[0].scope != authn.ScopeSpreadsheetsWrite {
+		t.Errorf("AuthorizeProject calls = %+v, want one call with %q",
+			g.authz.projectCalls, authn.ScopeSpreadsheetsWrite)
+	}
+	if len(g.tabs.adds) != 1 || g.tabs.adds[0].title != "Q2" || g.tabs.adds[0].spreadsheetID != g.spreadsheetID {
+		t.Errorf("AddTab calls = %+v, want one call for %s titled Q2", g.tabs.adds, g.spreadsheetID)
+	}
+}
+
+func TestHandler_CreateTabRejectsABodyWithNoTitle(t *testing.T) {
+	for _, body := range []string{``, `{}`, `{"title":"   "}`, `{"title":5}`} {
+		t.Run(body, func(t *testing.T) {
+			g := newRig()
+
+			rec := g.send(t, http.MethodPost, g.tabsPath(), []byte(body), keyHeader())
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.tabs.adds) != 0 {
+				t.Error("AddTab ran without a title")
+			}
+		})
+	}
+}
+
+func TestHandler_TabsRoutesRejectAMalformedSpreadsheetID(t *testing.T) {
+	g := newRig()
+
+	rec := g.do(t, http.MethodGet, "/api/v1/orgs/acme/projects/default/spreadsheets/not-a-uuid/tabs", keyHeader())
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.tabs.lists) != 0 {
+		t.Error("ListTabs ran for an id that is not a UUID")
+	}
+}
+
+// SECURITY: maskNotFound covers resolution only. A resolution failure stays an indistinguishable 404,
+// while a write refused after authorization reports its own status — the caller already proved its grant.
+func TestHandler_MaskingBoundaryHoldsBothWays(t *testing.T) {
+	t.Run("resolution failure masks to 404", func(t *testing.T) {
+		g := newRig()
+		g.sheets.err = apperror.New(apperror.CodeSheetNotFound, "Sheet not found", codes.NotFound)
+
+		rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if got, want := rec.Body.String(), `{"error":{"code":"SHT001","message":"Sheet not found"}}`; got != want {
+			t.Errorf("body = %s, want %s", got, want)
+		}
+		if len(g.writer.appends) != 0 {
+			t.Error("an unresolved path must never reach the workflow")
+		}
+	})
+	t.Run("a non-writable sheet reports its own 403", func(t *testing.T) {
+		g := newRig()
+		g.writer.appendErr = &sheet.NotWritableError{SheetID: g.sheets.ref.ID.String(), Slug: "prices"}
+
+		rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetNotWritable) {
+			t.Errorf("body = %s, want it to name %s", got, apperror.CodeSheetNotWritable)
+		}
+	})
+	t.Run("a non-writable spreadsheet reports its own 403", func(t *testing.T) {
+		g := newRig()
+		g.tabs.addErr = &spreadsheet.NotWritableError{
+			ID: g.spreadsheetID.String(), GoogleFileID: "1SecretFileID",
+		}
+
+		rec := g.send(t, http.MethodPost, g.tabsPath(), []byte(`{"title":"Q2"}`), keyHeader())
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, apperror.CodeSpreadsheetNotWritable) {
+			t.Errorf("body = %s, want it to name %s", body, apperror.CodeSpreadsheetNotWritable)
+		}
+		if strings.Contains(body, "1SecretFileID") {
+			t.Errorf("body = %s, want no Google file id: the caller supplied our UUID", body)
+		}
+	})
+}
+
+// SECURITY: the caller holds sheets:write on one sheet, so it must not learn the Google file id behind it.
+func TestHandler_GooglePermissionRefusalNamesNoGoogleFileID(t *testing.T) {
+	g := newRig()
+	g.writer.appendErr = gwerr.AppError(&gworkspace.PermissionDeniedError{FileID: "1SecretFileID"})
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, apperror.CodeGooglePermissionDenied) {
+		t.Errorf("body = %s, want it to name %s", body, apperror.CodeGooglePermissionDenied)
+	}
+	if strings.Contains(body, "1SecretFileID") {
+		t.Errorf("body = %s, want no Google file id", body)
+	}
+}
+
+func TestHandler_BlankTabTitleFromTheWriterIs400NotAnInternalError(t *testing.T) {
+	g := newRig()
+	g.tabs.addErr = gwerr.AppError(&gsheet.InvalidTabTitleError{Title: "x"})
+
+	rec := g.send(t, http.MethodPost, g.tabsPath(), []byte(`{"title":"x"}`), keyHeader())
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetInvalidTabTitle) {
+		t.Errorf("body = %s, want it to name %s", got, apperror.CodeSheetInvalidTabTitle)
+	}
+}
+
+func TestHandler_BodyOverTheCapIs413(t *testing.T) {
+	g := newRig()
+	oversize := append([]byte(`{"values":["`), bytes.Repeat([]byte("x"), maxWriteBodyBytes)...)
+	oversize = append(oversize, []byte(`"]}`)...)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, rowsPath},
+		{http.MethodPatch, rowPath},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			rec := g.send(t, tc.method, tc.path, oversize, keyHeader())
+
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status = %d, want 413; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetPayloadTooLarge) {
+				t.Errorf("body = %s, want it to name %s", got, apperror.CodeSheetPayloadTooLarge)
+			}
+		})
+	}
+	if len(g.writer.appends) != 0 || len(g.writer.patches) != 0 {
+		t.Error("an oversize body must not reach the workflow")
+	}
+}
+
+func TestHandler_WriteFailureFromAnUntypedErrorIs500(t *testing.T) {
+	g := newRig()
+	g.writer.appendErr = errors.New("google client exploded")
+
+	rec := g.send(t, http.MethodPost, rowsPath, []byte(`{"values":["a"]}`), keyHeader())
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if got := decodeBody(t, rec)["error"]; got == nil {
+		t.Errorf("body = %s, want the shared error envelope", rec.Body.String())
 	}
 }

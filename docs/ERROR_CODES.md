@@ -148,6 +148,8 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT016` | `apperror.CodeSheetInvalidRow`          | Sheet Invalid Row          |
 | `SHT017` | `apperror.CodeSheetWriteInFlight`       | Sheet Write In Flight      |
 | `SHT018` | `apperror.CodeSheetIdempotencyMismatch` | Sheet Idempotency Mismatch |
+| `SHT019` | `apperror.CodeSheetInvalidTabTitle`     | Sheet Invalid Tab Title    |
+| `SHT020` | `apperror.CodeSheetInvalidRowIndex`     | Sheet Invalid Row Index    |
 
 ## KEY — API keys
 

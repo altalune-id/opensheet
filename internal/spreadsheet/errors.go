@@ -196,13 +196,12 @@ func (e *NotWritableError) Error() string {
 }
 
 // ToAppError maps NotWritableError to a PermissionDenied envelope.
+// SECURITY: the envelope names no Google file id — the data plane's tabs routes are addressed by our
+// UUID, so the id is not the caller's to learn. Error() keeps it for the log and the span.
 func (e *NotWritableError) ToAppError() *apperror.AppError {
 	meta := map[string]string{}
 	if e.ID != "" {
 		meta["spreadsheet_id"] = e.ID
-	}
-	if e.GoogleFileID != "" {
-		meta["google_file_id"] = e.GoogleFileID
 	}
 	return apperror.New(
 		apperror.CodeSpreadsheetNotWritable,

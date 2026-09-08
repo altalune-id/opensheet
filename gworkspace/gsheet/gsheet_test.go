@@ -310,7 +310,7 @@ func TestNew_RejectsNilTokenSource(t *testing.T) {
 }
 
 func TestNormalizeHeaders(t *testing.T) {
-	names, warnings := normalizeHeaders([]string{" name ", "", "name", "name", ""})
+	names, warnings := NormalizeHeaders([]string{" name ", "", "name", "name", ""})
 	want := []string{"name", "col_2", "name_2", "name_3", "col_5"}
 	for i := range want {
 		if names[i] != want[i] {

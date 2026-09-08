@@ -35,7 +35,7 @@ func translateRange(err error, fileID, tab string) error {
 type InvalidTabTitleError struct{ Title string }
 
 func (e *InvalidTabTitleError) Error() string {
-	return fmt.Sprintf("gsheet: tab title %q: must be 1 to %d characters", e.Title, maxTabTitleRunes)
+	return fmt.Sprintf("gsheet: tab title %q: must be 1 to %d characters", e.Title, MaxTabTitleRunes)
 }
 
 // IsInvalidTabTitleError reports whether err's chain contains a *InvalidTabTitleError.

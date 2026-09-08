@@ -2,6 +2,7 @@ package data
 
 import (
 	"errors"
+	"strconv"
 
 	"google.golang.org/grpc/codes"
 
@@ -36,6 +37,83 @@ func (e *NotFoundError) ToAppError() *apperror.AppError {
 // IsNotFoundError reports whether err's tree contains a *NotFoundError.
 func IsNotFoundError(err error) bool {
 	_, ok := errors.AsType[*NotFoundError](err)
+	return ok
+}
+
+// PayloadTooLargeError reports a request body over the data plane's cap.
+type PayloadTooLargeError struct{ Limit int64 }
+
+func (e *PayloadTooLargeError) Error() string {
+	return "data: payload too large: over " + strconv.FormatInt(e.Limit, 10) + " bytes"
+}
+
+// ToAppError maps PayloadTooLargeError to the shared oversize-payload envelope, which overrides to 413.
+func (e *PayloadTooLargeError) ToAppError() *apperror.AppError {
+	limit := strconv.FormatInt(e.Limit, 10)
+	return apperror.New(
+		apperror.CodeSheetPayloadTooLarge,
+		"The request body is over the "+limit+" byte limit",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetPayloadTooLarge,
+			Meta: map[string]string{"limit_bytes": limit},
+		},
+	)
+}
+
+// IsPayloadTooLargeError reports whether err's tree contains a *PayloadTooLargeError.
+func IsPayloadTooLargeError(err error) bool {
+	_, ok := errors.AsType[*PayloadTooLargeError](err)
+	return ok
+}
+
+// InvalidBodyError reports a request body this surface cannot accept.
+type InvalidBodyError struct{ Reason string }
+
+func (e *InvalidBodyError) Error() string { return "data: invalid body: " + e.Reason }
+
+// ToAppError maps InvalidBodyError to the canonical validation envelope.
+func (e *InvalidBodyError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeValidation,
+		"Invalid request body: "+e.Reason,
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeValidation},
+	)
+}
+
+// IsInvalidBodyError reports whether err's tree contains a *InvalidBodyError.
+func IsInvalidBodyError(err error) bool {
+	_, ok := errors.AsType[*InvalidBodyError](err)
+	return ok
+}
+
+// InvalidCellError reports a cell the caller asked to be numeric that is not a finite number.
+type InvalidCellError struct {
+	Column string
+	Reason string
+}
+
+func (e *InvalidCellError) Error() string {
+	return "data: invalid cell: column " + strconv.Quote(e.Column) + ": " + e.Reason
+}
+
+// ToAppError maps InvalidCellError to the sheet module's invalid-row envelope.
+func (e *InvalidCellError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetInvalidRow,
+		"Column "+strconv.Quote(e.Column)+" must be a finite number",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidRow,
+			Meta: map[string]string{"column": e.Column},
+		},
+	)
+}
+
+// IsInvalidCellError reports whether err's tree contains a *InvalidCellError.
+func IsInvalidCellError(err error) bool {
+	_, ok := errors.AsType[*InvalidCellError](err)
 	return ok
 }
 

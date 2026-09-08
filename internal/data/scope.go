@@ -36,6 +36,11 @@ type scope struct {
 	sheet     *sheet.Sheet
 }
 
+type projectScope struct {
+	orgID     uuid.UUID
+	projectID uuid.UUID
+}
+
 type resolver struct {
 	orgs     Orgs
 	projects Projects
@@ -44,21 +49,29 @@ type resolver struct {
 
 // SECURITY: scope comes from the path — this surface has no session and no membership to gate on.
 func (rs resolver) resolve(ctx context.Context, orgSlug, projectSlug, sheetSlug string) (context.Context, scope, error) {
-	o, err := rs.orgs.BySlug(ctx, orgSlug)
+	ctx, ps, err := rs.resolveProject(ctx, orgSlug, projectSlug)
+	if err != nil {
+		return ctx, scope{}, err
+	}
+	sh, err := rs.sheets.BySlug(ctx, ps.orgID, ps.projectID, sheetSlug)
 	if err != nil {
 		return ctx, scope{}, maskNotFound(err)
+	}
+	return ctx, scope{orgID: ps.orgID, projectID: ps.projectID, sheet: sh}, nil
+}
+
+// SECURITY: the same path-derived scope and the same masking, minus the sheet — the tabs routes name a spreadsheet id, not a slug.
+func (rs resolver) resolveProject(ctx context.Context, orgSlug, projectSlug string) (context.Context, projectScope, error) {
+	o, err := rs.orgs.BySlug(ctx, orgSlug)
+	if err != nil {
+		return ctx, projectScope{}, maskNotFound(err)
 	}
 	ctx = tenant.Into(ctx, tenant.Context{OrgID: o.ID})
 
 	p, err := rs.projects.BySlug(ctx, o.ID, projectSlug)
 	if err != nil {
-		return ctx, scope{}, maskNotFound(err)
+		return ctx, projectScope{}, maskNotFound(err)
 	}
 	ctx = tenant.WithProject(ctx, p.ID)
-
-	sh, err := rs.sheets.BySlug(ctx, o.ID, p.ID, sheetSlug)
-	if err != nil {
-		return ctx, scope{}, maskNotFound(err)
-	}
-	return ctx, scope{orgID: o.ID, projectID: p.ID, sheet: sh}, nil
+	return ctx, projectScope{orgID: o.ID, projectID: p.ID}, nil
 }

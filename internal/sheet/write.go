@@ -339,13 +339,11 @@ func columnOf(headers []string, name, tab string) (int, error) {
 	return 0, &UnknownColumnError{Column: name, Tab: tab}
 }
 
+// NOTE: the same normalizer the read path keys its rows with, so a PATCH response and a GET response key one row identically.
 func rowOf(headers []string, cells []any) gsheet.Row {
-	out := make(gsheet.Row, len(headers))
-	for i, h := range headers {
-		name := strings.TrimSpace(h)
-		if name == "" {
-			continue
-		}
+	names, _ := gsheet.NormalizeHeaders(headers)
+	out := make(gsheet.Row, len(names))
+	for i, name := range names {
 		out[name] = cellText(cells[i])
 	}
 	return out

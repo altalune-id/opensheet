@@ -50,6 +50,23 @@ func (a *Authenticator) Authorize(ctx context.Context, raw, scope string, orgID,
 	return principalFor(k), nil
 }
 
+// AuthorizeProject resolves raw and requires the key to grant scope project-wide inside orgID and projectID.
+// SECURITY: for routes that name no sheet. A sheet-restricted key is refused outright rather than being
+// checked against a sheet id it was never given.
+func (a *Authenticator) AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
+	k, err := a.resolve(ctx, raw)
+	if err != nil {
+		return session.Principal{}, err
+	}
+	if k.OrgID != orgID || k.ProjectID != projectID {
+		return session.Principal{}, &UnauthorizedError{}
+	}
+	if !k.AllowsProject(scope) {
+		return session.Principal{}, &UnauthorizedError{}
+	}
+	return principalFor(k), nil
+}
+
 // SECURITY: the shape gate runs before the service, so a JWT never reaches a database lookup, and every
 // rejection collapses to the module's own opaque *UnauthorizedError — including an unexpected store failure.
 func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error) {

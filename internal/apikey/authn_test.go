@@ -313,3 +313,75 @@ func TestNewAuthenticator_WithoutARecorderStillAuthenticates(t *testing.T) {
 		t.Fatalf("Authenticate: %v", err)
 	}
 }
+
+// TestAuthorizeProject_RefusesASheetRestrictedKey pins the documented rule for routes that name no
+// sheet: a key granted specific sheets cannot use them at all, whatever scopes it holds.
+func TestAuthorizeProject_RefusesASheetRestrictedKey(t *testing.T) {
+	h := newHarness(t)
+	a := apikey.NewAuthenticator(h.svc, &countingUsage{})
+	granted := uuid.Must(uuid.NewV7())
+	restricted, restrictedPlain := h.mintGranted(t,
+		[]string{authn.ScopeSpreadsheetsRead, authn.ScopeSpreadsheetsWrite}, []uuid.UUID{granted})
+	open, openPlain := h.mintGranted(t, []string{authn.ScopeSpreadsheetsRead}, nil)
+
+	p, err := a.AuthorizeProject(t.Context(), openPlain, authn.ScopeSpreadsheetsRead, open.OrgID, open.ProjectID)
+	if err != nil {
+		t.Fatalf("AuthorizeProject with an unrestricted key: %v", err)
+	}
+	if p.ActiveProjectID != open.ProjectID {
+		t.Errorf("ActiveProjectID = %v, want %v", p.ActiveProjectID, open.ProjectID)
+	}
+
+	_, err = a.AuthorizeProject(t.Context(), restrictedPlain, authn.ScopeSpreadsheetsRead,
+		restricted.OrgID, restricted.ProjectID)
+	if !apikey.IsUnauthorizedError(err) {
+		t.Fatalf("AuthorizeProject with a sheet-restricted key = %v, want *UnauthorizedError", err)
+	}
+
+	_, err = a.AuthorizeProject(t.Context(), openPlain, authn.ScopeSpreadsheetsWrite, open.OrgID, open.ProjectID)
+	if !apikey.IsUnauthorizedError(err) {
+		t.Fatalf("AuthorizeProject with a scope the key lacks = %v, want *UnauthorizedError", err)
+	}
+
+	for name, c := range map[string]struct{ orgID, projectID uuid.UUID }{
+		"another org":     {orgID: uuid.Must(uuid.NewV7()), projectID: open.ProjectID},
+		"another project": {orgID: open.OrgID, projectID: uuid.Must(uuid.NewV7())},
+	} {
+		_, fErr := a.AuthorizeProject(t.Context(), openPlain, authn.ScopeSpreadsheetsRead, c.orgID, c.projectID)
+		if !apikey.IsUnauthorizedError(fErr) {
+			t.Errorf("AuthorizeProject under %s = %v, want *UnauthorizedError", name, fErr)
+		}
+	}
+}
+
+func TestAPIKey_AllowsProject(t *testing.T) {
+	sheetID := uuid.Must(uuid.NewV7())
+	cases := map[string]struct {
+		key   apikey.APIKey
+		scope string
+		want  bool
+	}{
+		"unrestricted key with the scope": {
+			key:   apikey.APIKey{Scopes: []string{authn.ScopeSpreadsheetsRead}},
+			scope: authn.ScopeSpreadsheetsRead,
+			want:  true,
+		},
+		"unrestricted key without the scope": {
+			key:   apikey.APIKey{Scopes: []string{authn.ScopeSheetsRead}},
+			scope: authn.ScopeSpreadsheetsRead,
+			want:  false,
+		},
+		"sheet-restricted key with the scope": {
+			key:   apikey.APIKey{Scopes: []string{authn.ScopeSpreadsheetsRead}, SheetIDs: []uuid.UUID{sheetID}},
+			scope: authn.ScopeSpreadsheetsRead,
+			want:  false,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := c.key.AllowsProject(c.scope); got != c.want {
+				t.Errorf("AllowsProject(%q) = %v, want %v", c.scope, got, c.want)
+			}
+		})
+	}
+}

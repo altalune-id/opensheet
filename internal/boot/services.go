@@ -56,6 +56,7 @@ type Services struct {
 
 	Onboard *user.OnboardWorkflow
 	Read    *sheet.ReadWorkflow
+	Write   *sheet.WriteWorkflow
 	Connect *credential.ConnectWorkflow
 
 	Authn    authn.Chain
@@ -207,6 +208,16 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		log,
 		reporter.Unexpected,
 	)
+	writeWorkflow := sheet.NewWriteWorkflow(
+		snaps,
+		sheetAttempts,
+		spreadsheetsForSheet{svc: spreadsheets},
+		tokensForSheetWrite{svc: credentials},
+		credentialsForSheet{svc: credentials},
+		writers,
+		log,
+		reporter.Unexpected,
+	)
 	// NOTE: resolved rather than read raw, because http.stateSecret is empty by default and an empty
 	// key made every Google connect return CRD011 instead of signing a state.
 	connectSecret, err := resolveStateSecret(cfg, log)
@@ -254,6 +265,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		APIKeys:          apiKeys,
 		Onboard:          onboardWorkflow,
 		Read:             readWorkflow,
+		Write:            writeWorkflow,
 		Connect:          connectWorkflow,
 		Authn:            chain,
 		KeyAuthn:         keyAuthn,
@@ -280,6 +292,7 @@ func assertServicesWiring(s *Services) error {
 		{"sheets", s.Sheets != nil},
 		{"apikeys", s.APIKeys != nil},
 		{"read", s.Read != nil},
+		{"write", s.Write != nil},
 		{"connect", s.Connect != nil},
 		{"keyAuthn", s.KeyAuthn != nil},
 		{"keyUsage", s.KeyUsage != nil},

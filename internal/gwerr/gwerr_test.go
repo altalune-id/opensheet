@@ -2,9 +2,12 @@ package gwerr_test
 
 import (
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
@@ -27,14 +30,14 @@ func TestAppError_MapsEveryProviderError(t *testing.T) {
 			name:    "not found",
 			err:     &gworkspace.NotFoundError{FileID: "F"},
 			code:    apperror.CodeGoogleNotFound,
-			message: `Google spreadsheet "F" not found`,
+			message: "The Google spreadsheet behind this sheet was not found; it may have been deleted or unshared",
 			pred:    gworkspace.IsNotFoundError,
 		},
 		{
 			name:    "permission denied",
 			err:     &gworkspace.PermissionDeniedError{FileID: "F"},
 			code:    apperror.CodeGooglePermissionDenied,
-			message: `Google denied access to spreadsheet "F"; share it with this credential`,
+			message: "Google denied access to this spreadsheet; share it with this credential",
 			pred:    gworkspace.IsPermissionDeniedError,
 		},
 		{
@@ -64,6 +67,20 @@ func TestAppError_MapsEveryProviderError(t *testing.T) {
 			code:    apperror.CodeSheetTabNotFound,
 			message: `Tab "Q1" not found in this spreadsheet`,
 			pred:    gsheet.IsTabNotFoundError,
+		},
+		{
+			name:    "invalid tab title",
+			err:     &gsheet.InvalidTabTitleError{Title: "   "},
+			code:    apperror.CodeSheetInvalidTabTitle,
+			message: "A tab title must be 1 to 100 characters",
+			pred:    gsheet.IsInvalidTabTitleError,
+		},
+		{
+			name:    "invalid row index",
+			err:     &gsheet.InvalidRowIndexError{Row: 0},
+			code:    apperror.CodeSheetInvalidRowIndex,
+			message: "A row number must be a positive integer",
+			pred:    gsheet.IsInvalidRowIndexError,
 		},
 	}
 	for _, tc := range tests {
@@ -116,5 +133,68 @@ func TestAppError_LeavesForeignErrorsAlone(t *testing.T) {
 func TestAppError_NilIsANoOp(t *testing.T) {
 	if err := gwerr.AppError(nil); err != nil {
 		t.Fatalf("AppError(nil) = %v, want nil", err)
+	}
+}
+
+// SECURITY: the data plane returns messages verbatim, so a caller holding only sheets:write must not
+// learn the Google file id backing a sheet from a refusal.
+func TestAppError_PermissionDeniedNamesNoGoogleFileID(t *testing.T) {
+	ae, ok := apperror.AsAppError(gwerr.AppError(&gworkspace.PermissionDeniedError{FileID: "1SecretFileID"}))
+	if !ok {
+		t.Fatal("AsAppError did not recognise the permission error")
+	}
+	if strings.Contains(ae.Message(), "1SecretFileID") {
+		t.Errorf("Message() = %q, want no Google file id", ae.Message())
+	}
+	if ae.Code() != apperror.CodeGooglePermissionDenied {
+		t.Errorf("Code() = %q, want %q", ae.Code(), apperror.CodeGooglePermissionDenied)
+	}
+	if got := ae.HTTPStatus(); got != http.StatusForbidden {
+		t.Errorf("HTTPStatus() = %d, want 403", got)
+	}
+	detail, ok := ae.Details()[0].(*apperrorv1.ErrorDetail)
+	if !ok {
+		t.Fatalf("Details()[0] = %T, want *apperrorv1.ErrorDetail", ae.Details()[0])
+	}
+	if detail.GetMeta()["file_id"] != "1SecretFileID" {
+		t.Errorf("Meta[file_id] = %q, want the id kept for the log and the control plane", detail.GetMeta()["file_id"])
+	}
+}
+
+// SECURITY: the data plane returns code and message only, so an id in the message reaches
+// an API-key holder who supplied our UUID and never knew the Google id.
+func TestAppError_NotFoundNamesNoGoogleFileID(t *testing.T) {
+	ae, ok := apperror.AsAppError(gwerr.AppError(&gworkspace.NotFoundError{FileID: "1SecretFileID"}))
+	if !ok {
+		t.Fatal("AsAppError did not recognise the not-found error")
+	}
+	if strings.Contains(ae.Message(), "1SecretFileID") {
+		t.Errorf("Message() = %q, want no Google file id", ae.Message())
+	}
+	if ae.Code() != apperror.CodeGoogleNotFound {
+		t.Errorf("Code() = %q, want %q", ae.Code(), apperror.CodeGoogleNotFound)
+	}
+	detail, ok := ae.Details()[0].(*apperrorv1.ErrorDetail)
+	if !ok {
+		t.Fatalf("Details()[0] = %T, want *apperrorv1.ErrorDetail", ae.Details()[0])
+	}
+	if detail.GetMeta()["file_id"] != "1SecretFileID" {
+		t.Errorf("Meta[file_id] = %q, want the id kept for the log and the control plane", detail.GetMeta()["file_id"])
+	}
+}
+
+// Without these mappings a blank tab title and a bad row number reach the data plane as a 500.
+func TestAppError_WriterValidationFailuresAre400(t *testing.T) {
+	for _, err := range []error{
+		&gsheet.InvalidTabTitleError{Title: ""},
+		&gsheet.InvalidRowIndexError{Row: -1},
+	} {
+		ae, ok := apperror.AsAppError(gwerr.AppError(err))
+		if !ok {
+			t.Fatalf("AsAppError did not recognise %T", err)
+		}
+		if got := ae.HTTPStatus(); got != http.StatusBadRequest {
+			t.Errorf("%T: HTTPStatus() = %d, want 400", err, got)
+		}
 	}
 }
