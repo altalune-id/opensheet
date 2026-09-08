@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/platform/sealer"
@@ -39,7 +40,6 @@ type tokenResponse struct {
 	refreshToken string
 	email        string
 	noIDToken    bool
-	rawIDToken   string
 }
 
 func idToken(t *testing.T, email string) string {
@@ -72,10 +72,7 @@ func tokenEndpoint(t *testing.T, resp tokenResponse) *httptest.Server {
 		if resp.refreshToken != "" {
 			body["refresh_token"] = resp.refreshToken
 		}
-		if resp.rawIDToken != "" {
-			body["id_token"] = resp.rawIDToken
-		}
-		if !resp.noIDToken && resp.rawIDToken == "" {
+		if !resp.noIDToken {
 			body["id_token"] = idToken(t, resp.email)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -98,6 +95,16 @@ func oauthConfig(tokenURL string) *oauth2.Config {
 			TokenURL: tokenURL,
 		},
 	}
+}
+
+// A cfg that is not a usable OAuth client yields no connector, which is how a
+// deployment with no Google client reaches the workflow.
+func connectorFor(cfg *oauth2.Config) *gworkspace.Connector {
+	c, err := gworkspace.NewConnector(cfg, nil)
+	if err != nil {
+		return nil
+	}
+	return c
 }
 
 type connectFixture struct {
@@ -134,7 +141,7 @@ func newConnect(t *testing.T, resp tokenResponse, opts ...func(*connectFixture, 
 			&apperrorv1.ErrorDetail{Code: apperror.CodeUnexpectedError}).WithCause(err)
 	}
 	f.workflow = credential.NewConnectWorkflow(
-		f.store, f.sealer, cfg, f.secret,
+		f.store, f.sealer, connectorFor(cfg), f.secret,
 		func() time.Time { return f.now },
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		unexpected,
@@ -164,21 +171,21 @@ func scope(t *testing.T) tenant.Context {
 	return tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
 }
 
-func TestScopes(t *testing.T) {
-	got := credential.Scopes()
-	want := []string{"https://www.googleapis.com/auth/drive.file", "email"}
-	if len(got) != len(want) {
-		t.Fatalf("Scopes() = %v, want %v", got, want)
+// emptySealer reports success while producing no ciphertext.
+type emptySealer struct{}
+
+func (emptySealer) Seal([]byte, []byte) ([]byte, error) { return nil, nil }
+
+func (emptySealer) Open([]byte, []byte) ([]byte, error) { return nil, nil }
+
+func seeded(t *testing.T, tc tenant.Context) *credential.Credential {
+	t.Helper()
+	c, err := credential.New(uuid.Must(uuid.NewV7()), tc.OrgID, tc.ProjectID, tc.UserID,
+		testAccountEmail, credential.KindGoogleOAuth, testAccountEmail, []byte("ciphertext"))
+	if err != nil {
+		t.Fatalf("credential.New: %v", err)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("Scopes() = %v, want %v", got, want)
-		}
-	}
-	got[0] = "mutated"
-	if credential.Scopes()[0] != want[0] {
-		t.Fatal("Scopes() hands out a shared slice")
-	}
+	return c
 }
 
 func TestConnectWorkflow_Start(t *testing.T) {
@@ -268,7 +275,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 	t.Run("a nil clock falls back to the wall clock", func(t *testing.T) {
 		store := fakes.NewCredential()
 		w := credential.NewConnectWorkflow(
-			store, testSealer(t), oauthConfig(tokenEndpoint(t, tokenResponse{}).URL),
+			store, testSealer(t), connectorFor(oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)),
 			[]byte("connect-state-secret-0123456789abcdef"), nil,
 			slog.New(slog.NewTextHandler(io.Discard, nil)),
 			func(context.Context, string, error, ...any) *apperror.AppError {
@@ -466,25 +473,6 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		}
 	})
 
-	t.Run("an unreadable id_token still connects without an account", func(t *testing.T) {
-		for name, raw := range map[string]string{
-			"not a jwt":          "opaque-token",
-			"payload not base64": "aGVhZGVy.!!!not-base64!!!.sig",
-			"payload not json":   "aGVhZGVy." + base64.RawURLEncoding.EncodeToString([]byte("nope")) + ".sig",
-		} {
-			t.Run(name, func(t *testing.T) {
-				f := newConnect(t, tokenResponse{rawIDToken: raw})
-				c, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, scope(t)))
-				if err != nil {
-					t.Fatalf("Complete: %v", err)
-				}
-				if c.GoogleAccountEmail != "" {
-					t.Errorf("GoogleAccountEmail = %q, want empty", c.GoogleAccountEmail)
-				}
-			})
-		}
-	})
-
 	t.Run("a list failure routes through unexpected", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
@@ -546,6 +534,25 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		}
 		if sealer.IsOpenFailedError(err) {
 			t.Error("a missing key must not read as a tampered row")
+		}
+	})
+
+	t.Run("a sealer that yields no ciphertext is refused", func(t *testing.T) {
+		for name, seed := range map[string]bool{"a fresh credential": false, "a rotation": true} {
+			t.Run(name, func(t *testing.T) {
+				f := newConnect(t, tokenResponse{}, func(fx *connectFixture, _ *oauth2.Config) {
+					fx.sealer = emptySealer{}
+				})
+				tc := scope(t)
+				if seed {
+					f.store.Seed(seeded(t, tc))
+				}
+
+				_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc))
+				if !credential.IsNotSealedError(err) {
+					t.Fatalf("error = %T %v, want *NotSealedError", err, err)
+				}
+			})
 		}
 	})
 
@@ -657,51 +664,4 @@ func TestConnectWorkflow_CompleteRejectsBadState(t *testing.T) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}
 	})
-}
-
-func TestConnectWorkflow_InjectedScopesArePinnedOnTheAuthorizeURL(t *testing.T) {
-	newWorkflow := func(t *testing.T, opts ...credential.ConnectOption) *credential.ConnectWorkflow {
-		t.Helper()
-		return credential.NewConnectWorkflow(
-			fakes.NewCredential(), testSealer(t), oauthConfig(tokenEndpoint(t, tokenResponse{}).URL),
-			[]byte("connect-state-secret-0123456789abcdef"), nil,
-			slog.New(slog.NewTextHandler(io.Discard, nil)),
-			func(context.Context, string, error, ...any) *apperror.AppError {
-				t.Error("unexpected() must not be called")
-				return nil
-			},
-			opts...,
-		)
-	}
-	scopeParam := func(t *testing.T, w *credential.ConnectWorkflow) string {
-		t.Helper()
-		tc := scope(t)
-		raw, err := w.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
-		if err != nil {
-			t.Fatalf("Start: %v", err)
-		}
-		u, err := url.Parse(raw)
-		if err != nil {
-			t.Fatalf("parse: %v", err)
-		}
-		return u.Query().Get("scope")
-	}
-
-	wider := append(credential.Scopes(), "https://www.googleapis.com/auth/documents.readonly")
-
-	if got := scopeParam(t, newWorkflow(t, credential.WithScopes(wider))); got != strings.Join(wider, " ") {
-		t.Errorf("scope = %q, want the injected set", got)
-	}
-	if got := scopeParam(t, newWorkflow(t)); got != strings.Join(credential.Scopes(), " ") {
-		t.Errorf("scope = %q, want the default set", got)
-	}
-	if got := scopeParam(t, newWorkflow(t, credential.WithScopes(nil))); got != strings.Join(credential.Scopes(), " ") {
-		t.Errorf("scope = %q, want the default set when nothing is injected", got)
-	}
-
-	w := newWorkflow(t, credential.WithScopes(wider))
-	wider[0] = "https://www.googleapis.com/auth/drive"
-	if got := scopeParam(t, w); !strings.HasPrefix(got, "https://www.googleapis.com/auth/drive.file ") {
-		t.Errorf("scope = %q; mutating the caller's slice changed the pinned set", got)
-	}
 }

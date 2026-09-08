@@ -2,89 +2,53 @@ package credential
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
-	"golang.org/x/oauth2"
 
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
-// The Google scopes the connect flow requests.
-// NOTE: drive.file is non-sensitive, so no verification review and no 7-day refresh-token expiry; email is the only way Complete learns the account.
-// https://developers.google.com/workspace/sheets/api/scopes
-const (
-	scopeDriveFile = "https://www.googleapis.com/auth/drive.file"
-	scopeEmail     = "email"
-)
-
-const exchangeTimeout = 20 * time.Second
-
-// Scopes returns the default scope set the connect flow requests.
-func Scopes() []string { return []string{scopeDriveFile, scopeEmail} }
-
 // ConnectWorkflow turns a Google consent into a sealed google_oauth credential.
 type ConnectWorkflow struct {
 	store      Store
 	sealer     sealer.Sealer
-	oauth      *oauth2.Config
+	connector  *gworkspace.Connector
 	secret     []byte
-	scopes     []string
 	now        func() time.Time
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
-}
-
-// ConnectOption tunes ConnectWorkflow construction.
-type ConnectOption func(*ConnectWorkflow)
-
-// WithScopes replaces the Google scope set the connect flow requests; an empty set keeps Scopes().
-func WithScopes(scopes []string) ConnectOption {
-	return func(w *ConnectWorkflow) {
-		if len(scopes) > 0 {
-			w.scopes = slices.Clone(scopes)
-		}
-	}
 }
 
 // NewConnectWorkflow binds the workflow to its dependencies; a nil now defaults to time.Now in UTC.
 func NewConnectWorkflow(
 	store Store,
 	sl sealer.Sealer,
-	oauth *oauth2.Config,
+	connector *gworkspace.Connector,
 	secret []byte,
 	now func() time.Time,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
-	opts ...ConnectOption,
 ) *ConnectWorkflow {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	w := &ConnectWorkflow{
+	return &ConnectWorkflow{
 		store:      store,
 		sealer:     sl,
-		oauth:      oauth,
+		connector:  connector,
 		secret:     secret,
-		scopes:     Scopes(),
 		now:        now,
 		log:        log.With("module", "credential"),
 		unexpected: unexpected,
 	}
-	for _, opt := range opts {
-		opt(w)
-	}
-	return w
 }
 
 // Start returns the Google consent URL, carrying a signed state that binds the grant to one org, project and user.
@@ -122,14 +86,7 @@ func (w *ConnectWorkflow) Start(
 		return "", w.unexpected(ctx, "credential.Connect.Start: encode state", err,
 			"org_id", orgID, "project_id", projectID)
 	}
-
-	// SECURITY: the scope set is pinned here from construction rather than read off the injected config, so a mis-wired client cannot widen it.
-	// NOTE: prompt=consent is what makes access_type=offline return a refresh token on every reconnect, not only the first.
-	return w.oauth.AuthCodeURL(signed,
-		oauth2.AccessTypeOffline,
-		oauth2.SetAuthURLParam("scope", strings.Join(w.scopes, " ")),
-		oauth2.SetAuthURLParam("prompt", "consent"),
-	), nil
+	return w.connector.AuthCodeURL(signed), nil
 }
 
 // Complete verifies the signed state, exchanges the code and stores the refresh token sealed against its credential row.
@@ -156,24 +113,21 @@ func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (
 	// NOTE: a Google callback carries no request scope, so this write scopes itself from the verified state.
 	ctx = tenant.Into(ctx, tenant.Context{OrgID: st.OrgID, ProjectID: st.ProjectID, UserID: st.UserID})
 
-	tok, err := w.exchange(ctx, code)
+	grant, err := w.connector.Exchange(ctx, code)
 	if err != nil {
 		span.RecordError(err)
 		return nil, w.unexpected(ctx, "credential.Connect.Complete: exchange", err,
 			"org_id", st.OrgID, "project_id", st.ProjectID)
 	}
-	refresh := strings.TrimSpace(tok.RefreshToken)
-	if refresh == "" {
+	if grant.RefreshToken == "" {
 		return nil, &NoRefreshTokenError{}
 	}
-
-	email := accountEmail(tok)
-	if email == "" {
+	if grant.AccountEmail == "" {
 		w.log.WarnContext(ctx, "google returned no account email; the credential will list without one",
 			"org_id", st.OrgID, "project_id", st.ProjectID)
 	}
 
-	existing, err := w.existing(ctx, st.OrgID, st.ProjectID, email)
+	existing, err := w.existing(ctx, st.OrgID, st.ProjectID, grant.AccountEmail)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -182,7 +136,7 @@ func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (
 	if existing != nil {
 		id = existing.ID
 	}
-	sealed, err := w.sealer.Seal([]byte(refresh), SealAAD(st.OrgID, st.ProjectID, id))
+	sealed, err := w.sealer.Seal([]byte(grant.RefreshToken), SealAAD(st.OrgID, st.ProjectID, id))
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -190,14 +144,14 @@ func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (
 	span.SetAttributes(attribute.String("credential.id", id.String()))
 
 	if existing != nil {
-		if rotateErr := existing.Rotate(sealed, email); rotateErr != nil {
+		if rotateErr := existing.Rotate(sealed, grant.AccountEmail); rotateErr != nil {
 			span.RecordError(rotateErr)
 			return nil, rotateErr
 		}
 		return w.save(ctx, existing)
 	}
 	fresh, err := New(id, st.OrgID, st.ProjectID, st.UserID,
-		connectName(id, email), KindGoogleOAuth, email, sealed)
+		connectName(id, grant.AccountEmail), KindGoogleOAuth, grant.AccountEmail, sealed)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -218,21 +172,10 @@ func (w *ConnectWorkflow) ReturnTo(rawState string) (string, error) {
 }
 
 func (w *ConnectWorkflow) configured() error {
-	if w.oauth == nil || w.oauth.ClientID == "" || w.oauth.ClientSecret == "" || len(w.secret) == 0 {
+	if w.connector == nil || len(w.secret) == 0 {
 		return &NotConfiguredError{}
 	}
 	return nil
-}
-
-func (w *ConnectWorkflow) exchange(ctx context.Context, code string) (*oauth2.Token, error) {
-	ctx, cancel := context.WithTimeout(ctx, exchangeTimeout)
-	defer cancel()
-
-	tok, err := w.oauth.Exchange(ctx, code)
-	if err != nil {
-		return nil, fmt.Errorf("credential: connect: token exchange: %w", err)
-	}
-	return tok, nil
 }
 
 func (w *ConnectWorkflow) existing(
@@ -276,28 +219,4 @@ func connectName(id uuid.UUID, email string) string {
 	// NOTE: the tail of a UUIDv7 is random; its leading digits are a timestamp that only moves every ~65s.
 	s := id.String()
 	return "Google account " + s[len(s)-8:]
-}
-
-// SECURITY: the id_token arrives inside the token-endpoint response over TLS, so the channel authenticates it;
-// only the email claim is read and it is display-only, never an authorization input.
-func accountEmail(tok *oauth2.Token) string {
-	raw, ok := tok.Extra("id_token").(string)
-	if !ok {
-		return ""
-	}
-	parts := strings.Split(raw, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(claims.Email)
 }

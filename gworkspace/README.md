@@ -17,6 +17,7 @@ different auth story. That is this package's boundary: Workspace services that
 ```
 gworkspace/
 ├── gworkspace.go   # Option, WithBaseURL, WithTimeout, ClientOptions — the shared transport
+├── connect.go      # Connector, Grant, Scopes — the OAuth authorization-code flow
 ├── errors.go       # the five provider error types + Translate + Retry-After parsing
 ├── gsheet/
 │   ├── gsheet.go   # Client, Row, Factory, New, Rows/Tabs/FirstTab/Title, header + range handling
@@ -39,6 +40,16 @@ type Option func(*settings)
 func WithBaseURL(u string) Option
 func WithTimeout(d time.Duration) Option
 func ClientOptions(ts oauth2.TokenSource, scope string, opts ...Option) ([]option.ClientOption, error)
+func Scopes() []string
+type Connector struct{ /* unexported */ }
+func NewConnector(cfg *oauth2.Config, scopes []string, opts ...Option) (*Connector, error)
+func (c *Connector) AuthCodeURL(state string) string
+func (c *Connector) Exchange(ctx context.Context, code string) (*Grant, error)
+type Grant struct {
+	RefreshToken, AccessToken, AccountEmail string
+	Expiry                                  time.Time
+	GrantedScopes                           []string
+}
 func Translate(err error, fileID string) error
 type NotFoundError struct{ FileID string }
 type PermissionDeniedError struct{ FileID string }
@@ -105,6 +116,58 @@ returns zero rows and no error — not a failure.
 Every method takes the Drive `fileID`, so one `Client` serves any spreadsheet
 the credential can read. `DefaultTimeout` (30s) bounds a single call;
 `WithTimeout` narrows it.
+
+## Connecting an account
+
+`Connector` runs the authorization-code half of the OAuth flow: an opaque state
+in, a `Grant` out. It holds no per-request state and takes no logger, so one
+instance serves every request.
+
+```go
+// Built once at boot from the deployment's OAuth client.
+connector, err := gworkspace.NewConnector(oauthCfg, gworkspace.Scopes())
+if err != nil {
+	return err // no client id or secret — this deployment cannot connect an account
+}
+
+// The consuming app owns `state`; Connector carries it verbatim.
+http.Redirect(w, r, connector.AuthCodeURL(state), http.StatusFound)
+
+// ... Google redirects back to the callback with ?code= and ?state=
+grant, err := connector.Exchange(ctx, code)
+if err != nil {
+	return gwerr.AppError(err) // *UnavailableError
+}
+```
+
+`Grant` reports what the token endpoint returned and nothing more:
+
+| Field           | Use                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `RefreshToken`  | the long-lived secret; seal it before it touches storage. Empty when Google issued none |
+| `AccessToken`   | usable immediately, expires at `Expiry`                                                 |
+| `Expiry`        | when `AccessToken` dies                                                                 |
+| `AccountEmail`  | the `id_token` email claim; **empty** when absent or unparseable                        |
+| `GrantedScopes` | the response's `scope` field — what the user actually consented to                      |
+
+Three properties of that struct are contracts, not accidents:
+
+- **`Exchange` never fails over a missing account.** A token response with no
+  `id_token`, or an `id_token` that is not a readable JWT, yields
+  `AccountEmail == ""` and a usable `Grant`. Whether that is acceptable is the
+  consuming app's call — it has the logger and the fallback naming.
+- **`GrantedScopes` exists so a caller can check consent at connect time.** A
+  user who unticks the Drive permission on the consent screen still gets a
+  grant; without inspecting this field the credential fails at its first read
+  instead. `Connector` deliberately does not enforce a scope set it was handed.
+- **The exchange is bounded.** 20s by default; `WithTimeout` narrows it.
+
+An empty `RefreshToken` is not an error here either — `access_type=offline` is
+requested, but only the app knows whether a grant without one is fatal.
+
+Sealing, unsealing and minting a token source from the stored refresh token stay
+with the consuming app; `oauthCfg.TokenSource(ctx, &oauth2.Token{RefreshToken:
+…})` produces the `oauth2.TokenSource` the [Quickstart](#quickstart) starts from.
 
 ## Errors
 
@@ -173,35 +236,48 @@ would break out of the range expression.
 
 ## OAuth notes
 
-The consent flow lives in `internal/credential/connect.go`, not here — but three
-of its properties were expensive to discover and must not be re-derived.
+The three properties below were expensive to discover and must not be
+re-derived. The code enforcing them lives in `gworkspace/connect.go`.
 
 1. **`prompt=consent` is required alongside `access_type=offline`**
-   (`internal/credential/connect.go:127-131`). With `offline` alone, Google
-   returns a refresh token on the _first_ authorization only; every
-   **reconnect** then yields a credential with no refresh token, which fails at
-   `NoRefreshTokenError` rather than at read time.
+   (`gworkspace/connect.go:55-59`). With `offline` alone, Google returns a
+   refresh token on the _first_ authorization only; every **reconnect** then
+   yields a grant with no refresh token, which fails at connect time rather
+   than at read time.
 
 2. **The scope set is pinned on the authorize URL** via
-   `oauth2.SetAuthURLParam("scope", …)` (`internal/credential/connect.go:130`).
+   `oauth2.SetAuthURLParam("scope", …)` (`gworkspace/connect.go:58`).
    `AuthCodeURL` writes `c.Scopes` into the query first and applies its options
    afterwards, so the pinned value wins. A wider scope set on the injected
    `*oauth2.Config` therefore cannot leak into the consent screen. The set
-   itself is a construction parameter — `credential.Scopes()` is the default and
-   `credential.WithScopes` replaces it (`internal/credential/connect.go:34`,
-   `:52`).
+   itself is a construction parameter — `gworkspace.Scopes()` is the default
+   (`gworkspace/connect.go:25`) and `NewConnector`'s second argument replaces
+   it.
 
 3. **The account email comes from the `id_token`** in the token-endpoint
-   response, which the `email` scope triggers
-   (`internal/credential/connect.go:283`). Reading the claim avoids a
-   `userinfo` round trip; the response arrives over TLS, so the channel
-   authenticates it, and the claim is display-only — never an authorization
-   input.
+   response, which the `email` scope triggers (`gworkspace/connect.go:102`).
+   Reading the claim avoids a `userinfo` round trip; the response arrives over
+   TLS, so the channel authenticates it, and the claim is display-only — never
+   an authorization input.
 
-The signed-state codec stays in the consuming app on purpose
-(`internal/credential/state.go`): its payload is that app's tenancy model
-(org, project, user, return-to) and verifying it needs an HMAC key a root
-package has no business holding.
+The **signed-state codec stays in the consuming app** — in opensheet,
+`internal/credential/state.go`. Two reasons, both structural. Its payload is
+that app's tenancy model (org, project, user, return-to), which this package has
+no vocabulary for; and verifying it needs an HMAC key a root package has no
+business holding. `AuthCodeURL(state string)` therefore takes an opaque string
+and `Connector` never learns what is in it.
+
+For the same reason `Connector` carries no "is this deployment configured"
+concept. It is either constructed or it is not: `NewConnector` fails on a nil
+config or one missing a client id or secret, and the app decides what a missing
+connector means to a user (in opensheet, `credential.NotConfiguredError` /
+`CRD011`).
+
+**A new Google _service_ on the same account needs a wider scope set, not a new
+connect flow.** Adding Docs or Slides means passing more scopes to
+`NewConnector` and reconnecting the account — one call, not a second OAuth
+handler. Only a new **provider** (Photos, Dropbox, Microsoft 365) would need its
+own flow, its own token storage, and its own error translation.
 
 ## Adding a service
 
@@ -237,14 +313,10 @@ This recipe is the whole justification for the core/subpackage split.
 5. Map any new local error type to a wire code in `internal/gwerr`, and add its
    code to `internal/apperror` and `docs/ERROR_CODES.md`. Reusing the root's
    five types needs no change there.
-6. Widen the connect scope set by passing `credential.WithScopes(...)` at
-   construction. Keep `credential.Scopes()` as the default.
-
-Caveat: a new Google **service** on the same account does not need a new connect
-flow — it needs a wider scope set on the same credential, which is why step 6 is
-one call and not a second OAuth handler. Only a new **provider** (Photos,
-Dropbox, Microsoft 365) would need its own flow, its own token storage, and its
-own error translation.
+6. Widen the connect scope set by passing the wider slice to
+   `gworkspace.NewConnector(cfg, scopes)`. Keep `gworkspace.Scopes()` as the
+   default, and see [OAuth notes](#oauth-notes) for why that is the whole
+   change.
 
 ## Stability
 
@@ -263,9 +335,10 @@ go list -deps ./gworkspace/... | grep 'altalune.id/opensheet/internal'   # must 
 
 ## Testing
 
-Every test runs against `net/http/httptest` through
-`gworkspace.WithBaseURL(srv.URL)`. No test makes a live Google call, and none
-needs a credential.
+Every test runs against `net/http/httptest` — service clients through
+`gworkspace.WithBaseURL(srv.URL)`, `Connector` through the OAuth config's
+`Endpoint.TokenURL`. No test makes a live Google call, and none needs a
+credential.
 
 ```bash
 go test ./gworkspace/... -cover          # gworkspace 100%, gsheet 98.8%

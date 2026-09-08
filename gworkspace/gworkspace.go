@@ -19,7 +19,7 @@ const (
 	DefaultResponseBodyLimit = 64 << 20
 )
 
-// Option configures the transport a Google Workspace service client is built on.
+// Option configures the transport a Google Workspace service client or Connector is built on.
 type Option func(*settings)
 
 type settings struct {
@@ -33,7 +33,7 @@ func WithBaseURL(u string) Option {
 	return func(s *settings) { s.baseURL = strings.TrimSpace(u) }
 }
 
-// WithTimeout bounds a single Google call. Zero or negative keeps DefaultTimeout.
+// WithTimeout bounds a single Google call. Zero or negative keeps the default.
 func WithTimeout(d time.Duration) Option {
 	return func(s *settings) {
 		if d > 0 {
