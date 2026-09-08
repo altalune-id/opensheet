@@ -314,3 +314,298 @@ func IsCacheUnavailableError(err error) bool {
 	_, ok := errors.AsType[*CacheUnavailableError](err)
 	return ok
 }
+
+// NotWritableError signals a write against a sheet that was never opted in to writes.
+type NotWritableError struct {
+	SheetID string
+	Slug    string
+}
+
+func (e *NotWritableError) Error() string {
+	if e.Slug == "" {
+		return "sheet: not writable: id=" + e.SheetID
+	}
+	return fmt.Sprintf("sheet: not writable: %q", e.Slug)
+}
+
+// ToAppError maps NotWritableError to a PermissionDenied envelope.
+func (e *NotWritableError) ToAppError() *apperror.AppError {
+	meta := map[string]string{}
+	if e.SheetID != "" {
+		meta["sheet_id"] = e.SheetID
+	}
+	if e.Slug != "" {
+		meta["slug"] = e.Slug
+	}
+	return apperror.New(
+		apperror.CodeSheetNotWritable,
+		"This sheet is not writable",
+		codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeSheetNotWritable, Meta: meta},
+	)
+}
+
+// IsNotWritableError reports whether err's tree contains a *NotWritableError.
+func IsNotWritableError(err error) bool {
+	_, ok := errors.AsType[*NotWritableError](err)
+	return ok
+}
+
+// NoIDColumnError signals a tab with no id header, so its rows cannot be addressed.
+type NoIDColumnError struct {
+	Tab string
+}
+
+func (e *NoIDColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: no id column", e.Tab)
+}
+
+// ToAppError maps NoIDColumnError to an Aborted envelope.
+func (e *NoIDColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetNoIDColumn,
+		"This tab has no id column, so its rows cannot be addressed",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetNoIDColumn,
+			Meta: map[string]string{"tab": e.Tab},
+		},
+	)
+}
+
+// IsNoIDColumnError reports whether err's tree contains a *NoIDColumnError.
+func IsNoIDColumnError(err error) bool {
+	_, ok := errors.AsType[*NoIDColumnError](err)
+	return ok
+}
+
+// AmbiguousIDColumnError signals more than one header naming the id column.
+type AmbiguousIDColumnError struct {
+	Tab     string
+	Columns []int
+}
+
+func (e *AmbiguousIDColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: %d headers name the id column", e.Tab, len(e.Columns))
+}
+
+// ToAppError maps AmbiguousIDColumnError to an Aborted envelope.
+func (e *AmbiguousIDColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetAmbiguousIDColumn,
+		"This tab has more than one id column; rename all but one",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetAmbiguousIDColumn,
+			Meta: map[string]string{"tab": e.Tab, "columns": strconv.Itoa(len(e.Columns))},
+		},
+	)
+}
+
+// IsAmbiguousIDColumnError reports whether err's tree contains an *AmbiguousIDColumnError.
+func IsAmbiguousIDColumnError(err error) bool {
+	_, ok := errors.AsType[*AmbiguousIDColumnError](err)
+	return ok
+}
+
+// DuplicateIDError signals more than one row carrying the addressed id.
+type DuplicateIDError struct {
+	ID    string
+	Count int
+}
+
+func (e *DuplicateIDError) Error() string {
+	return fmt.Sprintf("sheet: id %q: matches %d rows", e.ID, e.Count)
+}
+
+// ToAppError maps DuplicateIDError to an Aborted envelope.
+func (e *DuplicateIDError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetDuplicateID,
+		"More than one row carries this id",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetDuplicateID,
+			Meta: map[string]string{"id": e.ID, "rows": strconv.Itoa(e.Count)},
+		},
+	)
+}
+
+// IsDuplicateIDError reports whether err's tree contains a *DuplicateIDError.
+func IsDuplicateIDError(err error) bool {
+	_, ok := errors.AsType[*DuplicateIDError](err)
+	return ok
+}
+
+// RowNotFoundError signals that no row carries the addressed id.
+type RowNotFoundError struct {
+	ID string
+}
+
+func (e *RowNotFoundError) Error() string {
+	return fmt.Sprintf("sheet: row: not found: id=%q", e.ID)
+}
+
+// ToAppError maps RowNotFoundError to the canonical NotFound envelope.
+func (e *RowNotFoundError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetRowNotFound,
+		"Row not found",
+		codes.NotFound,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetRowNotFound,
+			Meta: map[string]string{"id": e.ID},
+		},
+	)
+}
+
+// IsRowNotFoundError reports whether err's tree contains a *RowNotFoundError.
+func IsRowNotFoundError(err error) bool {
+	_, ok := errors.AsType[*RowNotFoundError](err)
+	return ok
+}
+
+// UnknownColumnError signals a named column absent from the tab's header row.
+type UnknownColumnError struct {
+	Column string
+	Tab    string
+}
+
+func (e *UnknownColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: unknown column %q", e.Tab, e.Column)
+}
+
+// ToAppError maps UnknownColumnError to the canonical InvalidArgument envelope.
+func (e *UnknownColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetUnknownColumn,
+		"This tab has no such column",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetUnknownColumn,
+			Meta: map[string]string{"column": e.Column, "tab": e.Tab},
+		},
+	)
+}
+
+// IsUnknownColumnError reports whether err's tree contains an *UnknownColumnError.
+func IsUnknownColumnError(err error) bool {
+	_, ok := errors.AsType[*UnknownColumnError](err)
+	return ok
+}
+
+// ReadOnlyColumnError signals a write to a column the data plane keeps immutable.
+type ReadOnlyColumnError struct {
+	Column string
+}
+
+func (e *ReadOnlyColumnError) Error() string {
+	return fmt.Sprintf("sheet: column %q: read-only", e.Column)
+}
+
+// ToAppError maps ReadOnlyColumnError to the canonical InvalidArgument envelope.
+func (e *ReadOnlyColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetReadOnlyColumn,
+		"This column is read-only",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetReadOnlyColumn,
+			Meta: map[string]string{"column": e.Column},
+		},
+	)
+}
+
+// IsReadOnlyColumnError reports whether err's tree contains a *ReadOnlyColumnError.
+func IsReadOnlyColumnError(err error) bool {
+	_, ok := errors.AsType[*ReadOnlyColumnError](err)
+	return ok
+}
+
+// InvalidRowError signals a row payload that cannot be written as given.
+type InvalidRowError struct {
+	Reason string
+}
+
+func (e *InvalidRowError) Error() string {
+	reason := e.Reason
+	if reason == "" {
+		reason = "invalid"
+	}
+	return "sheet: row: " + reason
+}
+
+// ToAppError maps InvalidRowError to the canonical InvalidArgument envelope.
+func (e *InvalidRowError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetInvalidRow,
+		"Invalid row payload",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidRow,
+			Meta: map[string]string{"reason": e.Reason},
+		},
+	)
+}
+
+// IsInvalidRowError reports whether err's tree contains an *InvalidRowError.
+func IsInvalidRowError(err error) bool {
+	_, ok := errors.AsType[*InvalidRowError](err)
+	return ok
+}
+
+// WriteInFlightError signals an earlier attempt under the same idempotency key that has not reported an outcome.
+type WriteInFlightError struct {
+	Key string
+}
+
+func (e *WriteInFlightError) Error() string {
+	return fmt.Sprintf("sheet: idempotency key %q: an earlier attempt is still in flight", e.Key)
+}
+
+// ToAppError maps WriteInFlightError to an Aborted envelope.
+func (e *WriteInFlightError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetWriteInFlight,
+		"An earlier write under this idempotency key has not reported an outcome yet; retry shortly",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetWriteInFlight,
+			Meta: map[string]string{"idempotency_key": e.Key},
+		},
+	)
+}
+
+// IsWriteInFlightError reports whether err's tree contains a *WriteInFlightError.
+func IsWriteInFlightError(err error) bool {
+	_, ok := errors.AsType[*WriteInFlightError](err)
+	return ok
+}
+
+// IdempotencyMismatchError signals an idempotency key reused under a different request body.
+type IdempotencyMismatchError struct {
+	Key string
+}
+
+func (e *IdempotencyMismatchError) Error() string {
+	return fmt.Sprintf("sheet: idempotency key %q: reused under a different body", e.Key)
+}
+
+// ToAppError maps IdempotencyMismatchError to the envelope the status table renders as 422.
+func (e *IdempotencyMismatchError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetIdempotencyMismatch,
+		"This idempotency key was already used for a different request body",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetIdempotencyMismatch,
+			Meta: map[string]string{"idempotency_key": e.Key},
+		},
+	)
+}
+
+// IsIdempotencyMismatchError reports whether err's tree contains an *IdempotencyMismatchError.
+func IsIdempotencyMismatchError(err error) bool {
+	_, ok := errors.AsType[*IdempotencyMismatchError](err)
+	return ok
+}

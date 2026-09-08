@@ -26,6 +26,7 @@ func TestHTTPStatus_MapsFromGRPCCode(t *testing.T) {
 		{"public disabled", CodeSheetPublicDisabled, codes.FailedPrecondition, http.StatusForbidden},
 		{"reauth needed", CodeCredentialReauthNeeded, codes.FailedPrecondition, http.StatusFailedDependency},
 		{"credential in use", CodeCredentialInUse, codes.FailedPrecondition, http.StatusConflict},
+		{"idempotency mismatch", CodeSheetIdempotencyMismatch, codes.FailedPrecondition, http.StatusUnprocessableEntity},
 		{"encryption unavailable", CodeEncryptionUnavailable, codes.FailedPrecondition, http.StatusBadRequest},
 		{"deadline exceeded", CodeUnexpectedError, codes.DeadlineExceeded, http.StatusGatewayTimeout},
 		{"unimplemented", CodeUnexpectedError, codes.Unimplemented, http.StatusNotImplemented},

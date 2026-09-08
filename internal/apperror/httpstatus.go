@@ -8,10 +8,11 @@ import (
 
 //nolint:gochecknoglobals // immutable override table.
 var httpStatusOverrides = map[string]int{
-	CodeSheetPublicDisabled:    http.StatusForbidden,
-	CodeSheetPayloadTooLarge:   http.StatusRequestEntityTooLarge,
-	CodeCredentialReauthNeeded: http.StatusFailedDependency,
-	CodeCredentialInUse:        http.StatusConflict,
+	CodeSheetPublicDisabled:      http.StatusForbidden,
+	CodeSheetPayloadTooLarge:     http.StatusRequestEntityTooLarge,
+	CodeCredentialReauthNeeded:   http.StatusFailedDependency,
+	CodeCredentialInUse:          http.StatusConflict,
+	CodeSheetIdempotencyMismatch: http.StatusUnprocessableEntity,
 }
 
 // HTTPStatus maps the error to an HTTP status, preferring a per-code override over its gRPC code.

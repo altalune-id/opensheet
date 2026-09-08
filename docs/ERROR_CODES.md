@@ -127,16 +127,26 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 
 ## SHT — Sheets
 
-| Code     | Constant                              | Meaning                  |
-| -------- | ------------------------------------- | ------------------------ |
-| `SHT001` | `apperror.CodeSheetNotFound`          | Sheet Not Found          |
-| `SHT002` | `apperror.CodeSheetAlreadyExists`     | Sheet Slug Taken         |
-| `SHT003` | `apperror.CodeSheetInvalidSlug`       | Sheet Invalid Slug       |
-| `SHT004` | `apperror.CodeSheetInvalidVisibility` | Sheet Invalid Visibility |
-| `SHT005` | `apperror.CodeSheetInvalidTTL`        | Sheet Invalid Cache TTL  |
-| `SHT006` | `apperror.CodeSheetPublicDisabled`    | Public Sheets Disabled   |
-| `SHT007` | `apperror.CodeSheetPayloadTooLarge`   | Sheet Payload Too Large  |
-| `SHT008` | `apperror.CodeSheetTabNotFound`       | Sheet Tab Not Found      |
+| Code     | Constant                                | Meaning                    |
+| -------- | --------------------------------------- | -------------------------- |
+| `SHT001` | `apperror.CodeSheetNotFound`            | Sheet Not Found            |
+| `SHT002` | `apperror.CodeSheetAlreadyExists`       | Sheet Slug Taken           |
+| `SHT003` | `apperror.CodeSheetInvalidSlug`         | Sheet Invalid Slug         |
+| `SHT004` | `apperror.CodeSheetInvalidVisibility`   | Sheet Invalid Visibility   |
+| `SHT005` | `apperror.CodeSheetInvalidTTL`          | Sheet Invalid Cache TTL    |
+| `SHT006` | `apperror.CodeSheetPublicDisabled`      | Public Sheets Disabled     |
+| `SHT007` | `apperror.CodeSheetPayloadTooLarge`     | Sheet Payload Too Large    |
+| `SHT008` | `apperror.CodeSheetTabNotFound`         | Sheet Tab Not Found        |
+| `SHT009` | `apperror.CodeSheetNotWritable`         | Sheet Not Writable         |
+| `SHT010` | `apperror.CodeSheetNoIDColumn`          | Sheet Has No ID Column     |
+| `SHT011` | `apperror.CodeSheetAmbiguousIDColumn`   | Sheet ID Column Ambiguous  |
+| `SHT012` | `apperror.CodeSheetDuplicateID`         | Sheet Duplicate ID         |
+| `SHT013` | `apperror.CodeSheetRowNotFound`         | Sheet Row Not Found        |
+| `SHT014` | `apperror.CodeSheetUnknownColumn`       | Sheet Unknown Column       |
+| `SHT015` | `apperror.CodeSheetReadOnlyColumn`      | Sheet Read-Only Column     |
+| `SHT016` | `apperror.CodeSheetInvalidRow`          | Sheet Invalid Row          |
+| `SHT017` | `apperror.CodeSheetWriteInFlight`       | Sheet Write In Flight      |
+| `SHT018` | `apperror.CodeSheetIdempotencyMismatch` | Sheet Idempotency Mismatch |
 
 ## KEY — API keys
 
