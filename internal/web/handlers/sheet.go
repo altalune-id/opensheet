@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"maps"
 	"net/http"
 	"slices"
@@ -193,7 +194,150 @@ func (h *SheetHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{id}/preview", h.GetPreview)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{id}/purge", h.PostPurge)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{id}/delete", h.PostDelete)
+	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/publish", h.GetBulkPanel)
+	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/publish", h.PostBulkPublish)
 }
+
+// GetBulkPanel renders the tab-picker panel for one document, which costs one Google round-trip.
+func (h *SheetHandler) GetBulkPanel(w http.ResponseWriter, r *http.Request) {
+	sc, sp, ok := h.requireRegisteredSpreadsheet(w, r)
+	if !ok {
+		return
+	}
+	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.fragment(sc), h.bulkPanel(sc, sp)))
+}
+
+// PostBulkPublish publishes every ticked tab of one document and re-renders the panel with per-row outcomes.
+func (h *SheetHandler) PostBulkPublish(w http.ResponseWriter, r *http.Request) {
+	sc, sp, ok := h.requireRegisteredSpreadsheet(w, r)
+	if !ok {
+		return
+	}
+	if err := sc.req.ParseForm(); err != nil {
+		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad request", "Could not parse form body.")
+		return
+	}
+	view := h.bulkPanel(sc, sp)
+	h.publishTicked(sc, sp, &view)
+	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.fragment(sc), view))
+}
+
+func (h *SheetHandler) requireRegisteredSpreadsheet(w http.ResponseWriter, r *http.Request) (projectScope, *spreadsheet.Spreadsheet, bool) {
+	sc, ok := h.requireProject(w, r)
+	if !ok {
+		return projectScope{}, nil, false
+	}
+	id, ok := h.pathID(w, sc.req, "spreadsheet")
+	if !ok {
+		return projectScope{}, nil, false
+	}
+	sp, err := h.Spreadsheets.ByID(sc.req.Context(), id)
+	if err != nil {
+		if spreadsheet.IsNotFoundError(err) {
+			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That spreadsheet is not registered in this project.")
+			return projectScope{}, nil, false
+		}
+		h.LogErr("web sheet: bulk byID", err)
+		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that spreadsheet.", err)
+		return projectScope{}, nil, false
+	}
+	return sc, sp, true
+}
+
+func (h *SheetHandler) bulkPanel(sc projectScope, sp *spreadsheet.Spreadsheet) templates.BulkPublishView {
+	view := templates.BulkPublishView{
+		ProjectSlug:   sc.project.Slug,
+		SpreadsheetID: sp.ID.String(),
+		CacheTTL:      strconv.FormatInt(int64(sheet.DefaultCacheTTL/time.Second), 10),
+	}
+	tabs, err := h.Spreadsheets.ListTabs(sc.req.Context(), sp.ID)
+	if err != nil {
+		h.LogErr("web sheet: bulk list tabs", err)
+		view.Unavailable = tabsMessage(err)
+		return view
+	}
+	published := h.publishedTabs(sc, sp.ID)
+	view.Rows = make([]templates.BulkTabRow, 0, len(tabs))
+	for i, tab := range tabs {
+		row := templates.BulkTabRow{
+			Tab:       tab,
+			TabValue:  strconv.Itoa(i),
+			SlugField: bulkSlugField(i),
+			Slug:      slugifyTab(tab),
+		}
+		if id, ok := published[tab]; ok {
+			row.Published, row.SheetID = true, id
+		}
+		view.Rows = append(view.Rows, row)
+	}
+	return view
+}
+
+// NOTE: every ticked row is published on its own — a row that fails leaves the earlier successes in place, deliberately.
+func (h *SheetHandler) publishTicked(sc projectScope, sp *spreadsheet.Spreadsheet, view *templates.BulkPublishView) {
+	form := sc.req.PostForm
+	view.Public = form.Get("visibility") == string(sheet.VisibilityPublic)
+	if msg := h.publicRefusal(view.Public, form.Get("public_ack")); msg != "" {
+		view.Notice = msg
+		return
+	}
+	ttl, msg := parseTTL(strings.TrimSpace(form.Get("cache_ttl")))
+	if msg != "" {
+		view.Notice = msg
+		return
+	}
+	vis := visibilityOf(view.Public)
+	ticked := form["tab"]
+	attempted := 0
+	for i := range view.Rows {
+		row := &view.Rows[i]
+		if row.Published || !slices.Contains(ticked, row.TabValue) {
+			continue
+		}
+		attempted++
+		row.Slug = strings.TrimSpace(form.Get(row.SlugField))
+		h.publishRow(sc, sp, row, vis, ttl)
+	}
+	if tab := strings.TrimSpace(form.Get("tab_name")); tab != "" {
+		attempted++
+		view.Manual.Tab = tab
+		view.Manual.Slug = cmp.Or(strings.TrimSpace(form.Get("slug")), slugifyTab(tab))
+		h.publishRow(sc, sp, &view.Manual, vis, ttl)
+	}
+	view.NoneSelected = attempted == 0
+}
+
+func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, row *templates.BulkTabRow, vis sheet.Visibility, ttl time.Duration) {
+	if row.Slug == "" {
+		row.SlugEmpty = true
+		return
+	}
+	sh, err := h.Sheets.Create(sc.req.Context(), sp.ID, row.Tab, row.Slug, vis, ttl)
+	if err != nil {
+		h.LogErr("web sheet: bulk create", err)
+		row.Failure = publishMessage(err)
+		return
+	}
+	row.Published, row.Created, row.SheetID = true, true, sh.ID.String()
+}
+
+func (h *SheetHandler) publishedTabs(sc projectScope, sprdID uuid.UUID) map[string]string {
+	items, err := h.Sheets.List(sc.req.Context())
+	if err != nil {
+		h.LogErr("web sheet: bulk list sheets", err)
+		return nil
+	}
+	out := make(map[string]string, len(items))
+	for _, sh := range items {
+		if sh.SpreadsheetID == sprdID && sh.Tab != "" {
+			out[sh.Tab] = sh.ID.String()
+		}
+	}
+	return out
+}
+
+// NOTE: the index pairs a checkbox with its slug input; repeated unindexed keys would shift a neighbour's slug onto a row an operator never ticked.
+func bulkSlugField(i int) string { return "slug." + strconv.Itoa(i) }
 
 func (h *SheetHandler) requireSheet(w http.ResponseWriter, r *http.Request) (projectScope, *sheet.Sheet, bool) {
 	sc, ok := h.requireProject(w, r)

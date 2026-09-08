@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -231,6 +232,7 @@ type fakeSheetsAPI struct {
 	rowsBody   string
 	rowsStatus int
 	metaStatus int
+	tabs       []string
 	noRefresh  bool
 
 	url      string
@@ -243,6 +245,7 @@ func newFakeSheetsAPI(t *testing.T) *fakeSheetsAPI {
 		rowsBody:   `{"values":[["name","qty"],["apple","3"]]}`,
 		rowsStatus: http.StatusOK,
 		metaStatus: http.StatusOK,
+		tabs:       []string{"First", "Second"},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v4/spreadsheets/{file}/values/", func(w http.ResponseWriter, _ *http.Request) {
@@ -255,11 +258,18 @@ func newFakeSheetsAPI(t *testing.T) *fakeSheetsAPI {
 	})
 	mux.HandleFunc("/v4/spreadsheets/{file}", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
-		status := f.metaStatus
+		status, tabs := f.metaStatus, slices.Clone(f.tabs)
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, `{"properties":{"title":"Doc"},"sheets":[{"properties":{"title":"First"}},{"properties":{"title":"Second"}}]}`)
+		grids := make([]map[string]any, 0, len(tabs))
+		for _, tab := range tabs {
+			grids = append(grids, map[string]any{"properties": map[string]any{"title": tab}})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"properties": map[string]any{"title": "Doc"},
+			"sheets":     grids,
+		})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
@@ -289,6 +299,12 @@ func (f *fakeSheetsAPI) setRows(body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rowsBody = body
+}
+
+func (f *fakeSheetsAPI) setTabs(tabs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tabs = tabs
 }
 
 func (f *fakeSheetsAPI) breakGoogle() {
@@ -972,4 +988,142 @@ func (f *sheetsFixture) pickerPath(t *testing.T, credID uuid.UUID) string {
 	t.Helper()
 	state := handlers.PickerStateFor([]byte(f.Cfg.HTTP.StateSecret), f.Org.Slug, f.Project.Slug, credID)
 	return "/credentials/google/picker?state=" + url.QueryEscape(state)
+}
+
+func TestSheetHandler_BulkPublishCreatesEveryTickedTab(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+
+	body := "tab=0&slug.0=rates&tab=1&slug.1=payroll&visibility=key&cache_ttl=300"
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), body)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	slugs := make([]string, 0, len(got))
+	tabs := make([]string, 0, len(got))
+	for _, sh := range got {
+		slugs = append(slugs, sh.Slug)
+		tabs = append(tabs, sh.Tab)
+	}
+	assert.ElementsMatch(t, []string{"rates", "payroll"}, slugs)
+	assert.ElementsMatch(t, []string{"First", "Second"}, tabs,
+		"each row must take its tab name from the listing, not from the posted form")
+}
+
+func TestSheetHandler_BulkPublishKeepsSuccessesWhenOneSlugCollides(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	f.Google.setTabs("First", "Second", "Third")
+	f.seedSheet(t, sp.ID, "payroll", sheet.VisibilityKey)
+
+	body := "tab=0&slug.0=rates&tab=1&slug.1=payroll&tab=2&slug.2=notes&visibility=key&cache_ttl=300"
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), body)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	got, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	assert.Len(t, got, 3, "the two good rows must survive the collision, not be rolled back")
+	assert.Contains(t, rec.Body.String(), "payroll", "the failing row must be named in the response")
+}
+
+func TestSheetHandler_BulkPublishWithNothingTickedPublishesNothing(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "visibility=key&cache_ttl=300")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `data-notice="bulk-none-selected"`)
+
+	got, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestSheetHandler_BulkPublishReportsTwoTabsSlugifyingAlike(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	f.Google.setTabs("Rates", "rates")
+
+	body := "tab=0&slug.0=rates&tab=1&slug.1=rates&visibility=key&cache_ttl=300"
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), body)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	got, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	assert.Len(t, got, 1, "one created, one reported")
+	assert.Contains(t, rec.Body.String(), `data-outcome="failed"`)
+}
+
+func TestSheetHandler_BulkPublishSkipsATabThatIsAlreadyPublished(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	_, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0)
+	require.NoError(t, err)
+
+	body := "tab=0&slug.0=first-again&tab=1&slug.1=second&visibility=key&cache_ttl=300"
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), body)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	got, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	slugs := make([]string, 0, len(got))
+	for _, sh := range got {
+		slugs = append(slugs, sh.Slug)
+	}
+	assert.ElementsMatch(t, []string{"first", "second"}, slugs,
+		"a disabled row must not be republishable by hand-posting its index")
+}
+
+func TestSheetHandler_BulkPanelDisablesAnAlreadyPublishedTab(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	sh, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0)
+	require.NoError(t, err)
+
+	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "disabled", "an already-published tab must not be tickable")
+	assert.Contains(t, body, "/sheets/"+sh.ID.String(), "the disabled row must link to its sheet")
+	assert.Contains(t, body, `value="second"`, "an unpublished tab must arrive with its slug pre-filled")
+}
+
+func TestSheetHandler_BulkPanelDegradesWhenTabsCannotBeListed(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	f.Google.breakGoogle()
+
+	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")
+	require.Equal(t, http.StatusOK, rec.Code, "a Google failure must not fail the page")
+	body := rec.Body.String()
+	assert.Contains(t, body, "bulk-tabs-unavailable")
+	assert.Contains(t, body, "/publish", "the single publish form must still be usable")
+}
+
+func TestSheetHandler_BulkPublishFragmentLinksStayProjectScoped(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"),
+		"tab=0&slug.0=rates&visibility=key&cache_ttl=300")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.NotContains(t, rec.Body.String(), `"/orgs"`,
+		"a fragment rendered without ActiveOrg collapses ProjectPath to /orgs")
 }

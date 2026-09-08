@@ -41,6 +41,32 @@ type SpreadsheetView struct {
 	ErrorCode    string
 }
 
+// BulkTabRow is one publishable tab of a document in the bulk publish panel.
+type BulkTabRow struct {
+	Tab       string
+	TabValue  string
+	SlugField string
+	Slug      string
+	SheetID   string
+	Published bool
+	Created   bool
+	SlugEmpty bool
+	Failure   string
+}
+
+// BulkPublishView is the tab-picker panel rendered on a spreadsheet's detail page.
+type BulkPublishView struct {
+	ProjectSlug   string
+	SpreadsheetID string
+	CacheTTL      string
+	Public        bool
+	Rows          []BulkTabRow
+	Manual        BulkTabRow
+	Unavailable   string
+	NoneSelected  bool
+	Notice        string
+}
+
 templ SpreadsheetSection(d web.LayoutData, v SpreadsheetsView) {
 	<section id="spreadsheets-section">
 		if v.Error != "" {
@@ -177,6 +203,15 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 				{ d.Tr("common.loading") }
 			</div>
 		</div>
+		<div
+			id="spreadsheet-bulk-publish"
+			hx-get={ d.ProjectPath(v.ProjectSlug, "/spreadsheets/" + v.ID + "/publish") }
+			hx-trigger="load"
+			hx-swap="outerHTML"
+			class="mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm"
+		>
+			{ d.Tr("common.loading") }
+		</div>
 		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets/" + v.ID + "/delete")) } class="mt-6">
 			<button type="submit" class={ dangerButton }>
 				@icons.Icon("trash-2", "h-4 w-4")
@@ -204,3 +239,95 @@ templ SpreadsheetTabs(d web.LayoutData, tabs []string, failure string) {
 		</ul>
 	}
 }
+
+// SpreadsheetBulkPublish is the HTMX panel that publishes several of a document's tabs in one action.
+templ SpreadsheetBulkPublish(d web.LayoutData, v BulkPublishView) {
+	<section id="spreadsheet-bulk-publish" class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+		<h2 class="text-sm font-semibold text-foreground">{ d.Tr("spreadsheets.bulk_heading") }</h2>
+		<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("spreadsheets.bulk_subtitle") }</p>
+		if v.Notice != "" {
+			<p data-notice="bulk" class="mt-3 text-xs text-red-600 dark:text-red-400">{ v.Notice }</p>
+		}
+		if v.NoneSelected {
+			<p data-notice="bulk-none-selected" class="mt-3 text-xs text-red-600 dark:text-red-400">{ d.Tr("spreadsheets.bulk_none_selected") }</p>
+		}
+		<form
+			method="post"
+			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets/" + v.SpreadsheetID + "/publish")) }
+			hx-post={ d.ProjectPath(v.ProjectSlug, "/spreadsheets/" + v.SpreadsheetID + "/publish") }
+			hx-target="#spreadsheet-bulk-publish"
+			hx-swap="outerHTML"
+			class="mt-4"
+		>
+			if v.Unavailable != "" {
+				<p data-notice="bulk-tabs-unavailable" class="text-xs text-amber-700 dark:text-amber-400">{ d.Tr("spreadsheets.bulk_tabs_unavailable") }</p>
+				<p class="mt-1 text-xs text-muted-foreground">{ v.Unavailable }</p>
+				<div class="mt-3 grid gap-3 sm:grid-cols-2">
+					<div>
+						<label for="bulk-manual-tab" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.tab") }</label>
+						<input id="bulk-manual-tab" name="tab_name" type="text" value={ v.Manual.Tab } placeholder={ d.Tr("sheets.tab_placeholder") } class={ bulkInput }/>
+					</div>
+					<div>
+						<label for="bulk-manual-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
+						<input id="bulk-manual-slug" name="slug" type="text" value={ v.Manual.Slug } placeholder={ d.Tr("sheets.slug_placeholder") } class={ bulkInput }/>
+						if v.Manual.SlugEmpty {
+							<p data-outcome="failed" class={ bulkFailure }>{ d.Tr("spreadsheets.bulk_slug_empty") }</p>
+						}
+						if v.Manual.Failure != "" {
+							<p data-outcome="failed" class={ bulkFailure }>{ v.Manual.Failure }</p>
+						}
+						if v.Manual.Created {
+							<p data-outcome="published" class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("spreadsheets.bulk_published") }</p>
+						}
+					</div>
+				</div>
+			} else if len(v.Rows) == 0 {
+				<p class="text-xs text-muted-foreground">{ d.Tr("spreadsheets.tabs_empty") }</p>
+			} else {
+				<ul class="divide-y divide-border/50 overflow-hidden rounded-md border border-border">
+					for _, row := range v.Rows {
+						<li class="flex flex-wrap items-center gap-3 px-3 py-2">
+							<input type="checkbox" name="tab" value={ row.TabValue } disabled?={ row.Published } class="size-4"/>
+							<span class="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{ row.Tab }</span>
+							if row.Published {
+								<span class="text-xs text-muted-foreground">
+									if row.Created {
+										{ d.Tr("spreadsheets.bulk_published") }
+									} else {
+										{ d.Tr("spreadsheets.bulk_already") }
+									}
+								</span>
+								if row.SheetID != "" {
+									<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + row.SheetID)) } class="text-xs text-muted-foreground underline hover:text-foreground">{ d.Tr("common.open") }</a>
+								}
+							} else {
+								<input type="text" name={ row.SlugField } value={ row.Slug } placeholder={ d.Tr("sheets.slug_placeholder") } class="w-48 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+								if row.SlugEmpty {
+									<span data-outcome="failed" class="text-xs text-red-600 dark:text-red-400">{ d.Tr("spreadsheets.bulk_slug_empty") }</span>
+								}
+								if row.Failure != "" {
+									<span data-outcome="failed" class="text-xs text-red-600 dark:text-red-400">{ row.Failure }</span>
+								}
+							}
+						</li>
+					}
+				</ul>
+			}
+			@visibilityFields(d, v.Public)
+			<div class="mt-4 sm:max-w-xs">
+				<label for="bulk-ttl" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.cache_ttl") }</label>
+				<input id="bulk-ttl" name="cache_ttl" type="number" min="0" max="86400" step="1" value={ v.CacheTTL } class={ bulkInput }/>
+				<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.cache_ttl_hint") }</p>
+			</div>
+			<button type="submit" class="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("plus", "h-4 w-4")
+				<span>{ d.Tr("spreadsheets.bulk_submit") }</span>
+			</button>
+		</form>
+	</section>
+}
+
+const (
+	bulkInput   = "mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"
+	bulkFailure = "mt-1.5 text-xs text-red-600 dark:text-red-400"
+)
