@@ -178,7 +178,7 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 			</div>
 		</div>
 		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets/" + v.ID + "/delete")) } class="mt-6">
-			<button type="submit" class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-red-600">
+			<button type="submit" class={ dangerButton }>
 				@icons.Icon("trash-2", "h-4 w-4")
 				<span>{ d.Tr("spreadsheets.delete") }</span>
 			</button>

@@ -42,7 +42,13 @@ templ KeySection(d web.LayoutData, v KeysView) {
 		if v.Minted != "" {
 			<div data-minted-key class="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/10">
 				<p class="text-sm font-medium text-emerald-900 dark:text-emerald-200">{ d.Tr("keys.minted_heading") }</p>
-				<p class="mt-2 break-all rounded-md bg-background px-3 py-2 font-mono text-xs text-foreground">{ v.Minted }</p>
+				<div class="mt-2 flex items-start gap-2">
+					<p class="min-w-0 flex-1 break-all rounded-md bg-background px-3 py-2 font-mono text-xs text-foreground">{ v.Minted }</p>
+					<button type="button" data-copy={ v.Minted } class={ copyButton }>
+						@icons.Icon("clipboard", "h-3.5 w-3.5")
+						<span data-copy-label>{ d.Tr("common.copy") }</span>
+					</button>
+				</div>
 				<p class="mt-2 text-xs text-emerald-900/80 dark:text-emerald-200/80">{ d.Tr("keys.minted_warning") }</p>
 			</div>
 		}
@@ -128,7 +134,7 @@ templ KeySection(d web.LayoutData, v KeysView) {
 								hx-swap="outerHTML"
 								class="inline"
 							>
-								<button type="submit" class="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">{ d.Tr("keys.revoke") }</button>
+								<button type="submit" class={ dangerPillButton }>{ d.Tr("keys.revoke") }</button>
 							</form>
 						}
 						<form
@@ -140,7 +146,7 @@ templ KeySection(d web.LayoutData, v KeysView) {
 							hx-confirm={ d.Tr("keys.delete_confirm") }
 							class="inline"
 						>
-							<button type="submit" class="rounded p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40" aria-label={ d.Tr("common.delete") }>
+							<button type="submit" class={ dangerIconButton } aria-label={ d.Tr("common.delete") }>
 								@icons.Icon("trash-2", "h-4 w-4")
 							</button>
 						</form>

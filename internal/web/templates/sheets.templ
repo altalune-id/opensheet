@@ -190,8 +190,12 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 			</div>
 		}
 		<div class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
-			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.url_heading") }</h2>
-			<p class="mt-2 break-all rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">{ v.DataURL }</p>
+			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.endpoints_heading") }</h2>
+			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("sheets.endpoints_subtitle") }</p>
+			<ul data-endpoints class="mt-3 divide-y divide-border/50 overflow-hidden rounded-md border border-border">
+				@endpointRow(d, v, "GET", v.DataURL, d.Tr("sheets.endpoint_rows"))
+				@endpointRow(d, v, "DELETE", v.DataURL+"/cache", d.Tr("sheets.endpoint_purge"))
+			</ul>
 			if v.Public {
 				<p data-public-warning class="mt-2 text-xs text-red-700 dark:text-red-300">{ d.Tr("sheets.public_warning") }</p>
 			} else {
@@ -246,7 +250,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 			</div>
 		</div>
 		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/delete")) } class="mt-6">
-			<button type="submit" class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-red-600">
+			<button type="submit" class={ dangerButton }>
 				@icons.Icon("trash-2", "h-4 w-4")
 				<span>{ d.Tr("sheets.delete") }</span>
 			</button>
@@ -320,4 +324,38 @@ templ SheetPurged(d web.LayoutData, failure string) {
 	} else {
 		<span data-purged>{ d.Tr("sheets.purged") }</span>
 	}
+}
+
+templ endpointRow(d web.LayoutData, v SheetView, method, path, hint string) {
+	<li class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+		<span class={ "shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold", methodBadgeClass(method) }>{ method }</span>
+		<code class="min-w-0 flex-1 break-all font-mono text-xs text-foreground">{ path }</code>
+		<button
+			type="button"
+			data-copy-curl
+			data-method={ method }
+			data-path={ path }
+			data-public={ publicFlag(v.Public, method) }
+			class={ copyButton }
+		>
+			@icons.Icon("clipboard", "h-3.5 w-3.5")
+			<span data-copy-label>{ d.Tr("sheets.copy_curl") }</span>
+		</button>
+		<p class="w-full text-xs text-muted-foreground">{ hint }</p>
+	</li>
+}
+
+func methodBadgeClass(method string) string {
+	if method == "DELETE" {
+		return "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+	}
+	return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+}
+
+// publicFlag reports whether the curl may omit the bearer header: only a public sheet's read is keyless.
+func publicFlag(public bool, method string) string {
+	if public && method == "GET" {
+		return "1"
+	}
+	return "0"
 }
