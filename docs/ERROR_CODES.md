@@ -113,6 +113,7 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `CRD007` | `apperror.CodeEncryptionUnavailable`   | Encryption Unavailable           |
 | `CRD008` | `apperror.CodeCredentialStateInvalid`  | Connect State Invalid Or Expired |
 | `CRD009` | `apperror.CodeEncryptionOpenFailed`    | Encryption Open Failed           |
+| `CRD010` | `apperror.CodeCredentialNotSealed`     | Credential Not Sealed            |
 
 ## SPR — Spreadsheets
 

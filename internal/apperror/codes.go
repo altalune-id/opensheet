@@ -64,6 +64,7 @@ const (
 	CodeEncryptionUnavailable   = "CRD007"
 	CodeCredentialStateInvalid  = "CRD008"
 	CodeEncryptionOpenFailed    = "CRD009"
+	CodeCredentialNotSealed     = "CRD010"
 
 	CodeSpreadsheetNotFound      = "SPR001"
 	CodeSpreadsheetAlreadyExists = "SPR002"
