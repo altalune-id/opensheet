@@ -36,6 +36,8 @@ node_modules/
 # SDD workspace (scratch, not shipped)
 /.superpowers/
 /docs/superpowers/
+/docs/specs/
+/docs/plans/
 
 # App data
 .opensheet-data
