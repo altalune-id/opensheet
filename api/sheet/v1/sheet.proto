@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package sheet.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "altalune.id/opensheet/gen/go/sheet/v1;sheetv1";
+
+service SheetService {
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc PurgeCache(PurgeCacheRequest) returns (PurgeCacheResponse);
+}
+
+message Sheet {
+  string id = 1;
+  string project_id = 2;
+  string spreadsheet_id = 3;
+  string tab = 4;
+  string slug = 5;
+  string visibility = 6;
+  google.protobuf.Duration cache_ttl = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message ListRequest {
+  string project_id = 1;
+}
+
+message ListResponse {
+  repeated Sheet sheets = 1;
+}
+
+message CreateRequest {
+  string project_id = 1;
+  string spreadsheet_id = 2;
+  string tab = 3;
+  string slug = 4;
+  string visibility = 5;
+  google.protobuf.Duration cache_ttl = 6;
+}
+
+message CreateResponse {
+  Sheet sheet = 1;
+}
+
+message GetRequest {
+  string project_id = 1;
+  string sheet_id = 2;
+}
+
+message GetResponse {
+  Sheet sheet = 1;
+}
+
+message UpdateRequest {
+  string project_id = 1;
+  string sheet_id = 2;
+  optional string tab = 3;
+  optional string visibility = 4;
+  google.protobuf.Duration cache_ttl = 5;
+}
+
+message UpdateResponse {
+  Sheet sheet = 1;
+}
+
+message DeleteRequest {
+  string project_id = 1;
+  string sheet_id = 2;
+}
+
+message DeleteResponse {}
+
+message PurgeCacheRequest {
+  string project_id = 1;
+  string sheet_id = 2;
+}
+
+message PurgeCacheResponse {}

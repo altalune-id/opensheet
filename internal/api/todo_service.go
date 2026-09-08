@@ -27,7 +27,7 @@ func NewTodoService(todos *todo.Service, todoStore todo.Store, projects *project
 
 // Create persists a new todo bound to the request's project.
 func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.CreateRequest]) (*connect.Response[todov1.CreateResponse], error) {
-	tctx, err := s.scopeToProject(ctx, req.Msg.GetProjectId())
+	tctx, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.Cr
 
 // List returns todos in the request's project.
 func (s *TodoService) List(ctx context.Context, req *connect.Request[todov1.ListRequest]) (*connect.Response[todov1.ListResponse], error) {
-	tctx, err := s.scopeToProject(ctx, req.Msg.GetProjectId())
+	tctx, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -78,30 +78,6 @@ func (s *TodoService) Delete(ctx context.Context, req *connect.Request[todov1.De
 		return nil, err
 	}
 	return connect.NewResponse(&todov1.DeleteResponse{}), nil
-}
-
-func (s *TodoService) scopeToProject(ctx context.Context, projectIDRaw string) (context.Context, error) {
-	p, err := principal(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pid, err := parseUUID("project_id", projectIDRaw)
-	if err != nil {
-		return nil, err
-	}
-	scoped := tenant.Into(ctx, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
-	proj, err := s.projects.ByID(scoped, pid)
-	if err != nil {
-		return nil, err
-	}
-	if proj.OrgID != p.ActiveOrgID {
-		return nil, forbiddenErr("project belongs to another org", "project_id", pid.String())
-	}
-	return tenant.Into(ctx, tenant.Context{
-		OrgID:     proj.OrgID,
-		ProjectID: proj.ID,
-		UserID:    p.UserID,
-	}), nil
 }
 
 func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (context.Context, uuid.UUID, error) {

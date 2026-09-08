@@ -6,7 +6,11 @@ import (
 
 	"connectrpc.com/connect"
 
+	apikeyv1connect "altalune.id/opensheet/gen/go/apikey/v1/apikeyv1connect"
 	authv1connect "altalune.id/opensheet/gen/go/auth/v1/authv1connect"
+	credentialv1connect "altalune.id/opensheet/gen/go/credential/v1/credentialv1connect"
+	sheetv1connect "altalune.id/opensheet/gen/go/sheet/v1/sheetv1connect"
+	spreadsheetv1connect "altalune.id/opensheet/gen/go/spreadsheet/v1/spreadsheetv1connect"
 	todov1connect "altalune.id/opensheet/gen/go/todo/v1/todov1connect"
 	"altalune.id/opensheet/internal/api/interceptor"
 	"altalune.id/opensheet/internal/apikey"
@@ -42,17 +46,19 @@ type Server struct {
 	Sheets       *sheet.Service
 	APIKeys      *apikey.Service
 
-	AuthSvc *AuthService
-	TodoSvc *TodoService
+	AuthSvc        *AuthService
+	TodoSvc        *TodoService
+	CredentialSvc  *CredentialService
+	SpreadsheetSvc *SpreadsheetService
+	SheetSvc       *SheetService
+	APIKeySvc      *APIKeyService
 
 	OpenAPIEnabled   bool
 	OpenAPIBasicAuth *BasicAuth
 }
 
-// New builds a Server from every domain service.
-// Deps bundles everything a Server needs. A struct rather than positional
-// parameters: the fields are mostly same-typed pointers, so a transposed pair
-// would compile silently.
+// Deps bundles everything a Server needs.
+// NOTE: a struct rather than positional parameters - the fields are mostly same-typed pointers, so a transposed pair would compile silently.
 type Deps struct {
 	Cfg    *config.Config
 	Kernel *platform.Kernel
@@ -69,27 +75,33 @@ type Deps struct {
 	Sheets       *sheet.Service
 	APIKeys      *apikey.Service
 
+	CredentialConnect *credential.ConnectWorkflow
+
 	TodoStore todo.Store
 }
 
 // New builds a Server from d.
 func New(d Deps) *Server {
 	s := &Server{
-		Cfg:          d.Cfg,
-		Kernel:       d.Kernel,
-		Authn:        d.Authn,
-		Auths:        d.Auths,
-		Users:        d.Users,
-		Orgs:         d.Orgs,
-		Projects:     d.Projects,
-		Todos:        d.Todos,
-		Invites:      d.Invites,
-		Credentials:  d.Credentials,
-		Spreadsheets: d.Spreadsheets,
-		Sheets:       d.Sheets,
-		APIKeys:      d.APIKeys,
-		AuthSvc:      NewAuthService(d.Orgs),
-		TodoSvc:      NewTodoService(d.Todos, d.TodoStore, d.Projects),
+		Cfg:            d.Cfg,
+		Kernel:         d.Kernel,
+		Authn:          d.Authn,
+		Auths:          d.Auths,
+		Users:          d.Users,
+		Orgs:           d.Orgs,
+		Projects:       d.Projects,
+		Todos:          d.Todos,
+		Invites:        d.Invites,
+		Credentials:    d.Credentials,
+		Spreadsheets:   d.Spreadsheets,
+		Sheets:         d.Sheets,
+		APIKeys:        d.APIKeys,
+		AuthSvc:        NewAuthService(d.Orgs),
+		TodoSvc:        NewTodoService(d.Todos, d.TodoStore, d.Projects),
+		CredentialSvc:  NewCredentialService(d.Credentials, d.CredentialConnect, d.Projects),
+		SpreadsheetSvc: NewSpreadsheetService(d.Spreadsheets, d.Projects),
+		SheetSvc:       NewSheetService(d.Sheets, d.Projects),
+		APIKeySvc:      NewAPIKeyService(d.APIKeys, d.Projects),
 	}
 	if d.Cfg != nil {
 		s.OpenAPIEnabled = d.Cfg.API.OpenAPI.Enabled
@@ -104,8 +116,12 @@ func New(d Deps) *Server {
 }
 
 var (
-	_ authv1connect.AuthServiceHandler = (*AuthService)(nil)
-	_ todov1connect.TodoServiceHandler = (*TodoService)(nil)
+	_ authv1connect.AuthServiceHandler               = (*AuthService)(nil)
+	_ todov1connect.TodoServiceHandler               = (*TodoService)(nil)
+	_ credentialv1connect.CredentialServiceHandler   = (*CredentialService)(nil)
+	_ spreadsheetv1connect.SpreadsheetServiceHandler = (*SpreadsheetService)(nil)
+	_ sheetv1connect.SheetServiceHandler             = (*SheetService)(nil)
+	_ apikeyv1connect.APIKeyServiceHandler           = (*APIKeyService)(nil)
 )
 
 // Handler mounts the Connect handlers plus OpenAPI endpoints under basePath+"/api".
@@ -117,6 +133,14 @@ func (s *Server) Handler(basePath string) http.Handler {
 	inner.Handle(todoPath, todoHandler)
 	authPath, authHandler := authv1connect.NewAuthServiceHandler(s.AuthSvc, opts...)
 	inner.Handle(authPath, authHandler)
+	credentialPath, credentialHandler := credentialv1connect.NewCredentialServiceHandler(s.CredentialSvc, opts...)
+	inner.Handle(credentialPath, credentialHandler)
+	spreadsheetPath, spreadsheetHandler := spreadsheetv1connect.NewSpreadsheetServiceHandler(s.SpreadsheetSvc, opts...)
+	inner.Handle(spreadsheetPath, spreadsheetHandler)
+	sheetPath, sheetHandler := sheetv1connect.NewSheetServiceHandler(s.SheetSvc, opts...)
+	inner.Handle(sheetPath, sheetHandler)
+	apiKeyPath, apiKeyHandler := apikeyv1connect.NewAPIKeyServiceHandler(s.APIKeySvc, opts...)
+	inner.Handle(apiKeyPath, apiKeyHandler)
 
 	if s.OpenAPIEnabled {
 		yamlBody, jsonBody := openAPI()
