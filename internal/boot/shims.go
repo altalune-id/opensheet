@@ -2,13 +2,18 @@ package boot
 
 import (
 	"context"
+	"slices"
 
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/user"
 )
 
@@ -190,4 +195,55 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 		})
 	}
 	return out
+}
+
+type capsForSheet struct{ caps capabilities.Capabilities }
+
+func (c capsForSheet) PublicSheetsEnabled() bool { return c.caps.PublicSheets }
+
+type spreadsheetsForSheet struct{ svc *spreadsheet.Service }
+
+func (s spreadsheetsForSheet) SourceFor(ctx context.Context, spreadsheetID uuid.UUID) (sheet.Source, error) {
+	sp, err := s.svc.ByID(ctx, spreadsheetID)
+	if err != nil {
+		return sheet.Source{}, err
+	}
+	return sheet.Source{GoogleFileID: sp.GoogleFileID, CredentialID: sp.CredentialID}, nil
+}
+
+type credentialsForSheet struct{ svc *credential.Service }
+
+func (c credentialsForSheet) MarkReauthNeeded(ctx context.Context, credentialID uuid.UUID) error {
+	_, err := c.svc.MarkReauthNeeded(ctx, credentialID)
+	return err
+}
+
+type sheetStoreForAPIKey struct{ store sheet.Store }
+
+func (s sheetStoreForAPIKey) IDsInProject(ctx context.Context, orgID, projectID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
+	sheets, err := s.store.List(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, sh := range sheets {
+		if slices.Contains(ids, sh.ID) {
+			out = append(out, sh.ID)
+		}
+	}
+	return out, nil
+}
+
+func membershipsFor(orgs *org.Service) auth.MembershipsFn {
+	return func(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+		list, err := orgs.List(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]uuid.UUID, 0, len(list))
+		for _, o := range list {
+			ids = append(ids, o.ID)
+		}
+		return ids, nil
+	}
 }

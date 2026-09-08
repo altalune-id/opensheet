@@ -14,6 +14,7 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
@@ -38,6 +39,7 @@ type Kernel struct {
 	Notify   []apperror.ReportSink
 	Nano     NanoIDFunc
 	Caps     capabilities.Capabilities
+	Sealer   sealer.Sealer
 
 	closers []io.Closer
 }

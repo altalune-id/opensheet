@@ -48,7 +48,7 @@ func From(c *config.Config) Capabilities {
 	caps.Signup = caps.PublicSignup
 	caps.OrgCreation = caps.Mode == config.ModeCloud
 	caps.InvitesEnabled = caps.Mode == config.ModeCloud || caps.ExternalIdentity
-	caps.GoogleConnect = c.Google.OAuth.ClientID != ""
+	caps.GoogleConnect = c.Google.OAuth.ClientID != "" && c.Google.OAuth.ClientSecret != ""
 	caps.GooglePicker = c.Google.Picker.APIKey != ""
 	caps.PublicSheets = c.Sheets.PublicEnabled
 	caps.Encryption = c.Security.EncryptionKey != ""

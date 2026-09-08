@@ -29,7 +29,13 @@ import (
 )
 
 func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.Server, http.Handler) {
-	srv := api.New(cfg, k, s.Auth, s.Users, s.Orgs, s.Projects, s.Todos, s.Invites, s.TodoStore)
+	srv := api.New(api.Deps{
+		Cfg: cfg, Kernel: k, Authn: s.Authn,
+		Auths: s.Auth, Users: s.Users, Orgs: s.Orgs, Projects: s.Projects,
+		Todos: s.Todos, Invites: s.Invites, Credentials: s.Credentials,
+		Spreadsheets: s.Spreadsheets, Sheets: s.Sheets, APIKeys: s.APIKeys,
+		TodoStore: s.TodoStore,
+	})
 	if !cfg.API.Enabled {
 		return srv, nil
 	}

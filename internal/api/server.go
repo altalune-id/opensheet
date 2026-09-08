@@ -9,14 +9,18 @@ import (
 	authv1connect "altalune.id/opensheet/gen/go/auth/v1/authv1connect"
 	todov1connect "altalune.id/opensheet/gen/go/todo/v1/todov1connect"
 	"altalune.id/opensheet/internal/api/interceptor"
+	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/config"
-	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/user"
 )
@@ -25,13 +29,18 @@ import (
 type Server struct {
 	Cfg    *config.Config
 	Kernel *platform.Kernel
+	Authn  authn.Chain
 
-	Auths    *auth.Service
-	Users    *user.Service
-	Orgs     *org.Service
-	Projects *project.Service
-	Todos    *todo.Service
-	Invites  *invite.Service
+	Auths        *auth.Service
+	Users        *user.Service
+	Orgs         *org.Service
+	Projects     *project.Service
+	Todos        *todo.Service
+	Invites      *invite.Service
+	Credentials  *credential.Service
+	Spreadsheets *spreadsheet.Service
+	Sheets       *sheet.Service
+	APIKeys      *apikey.Service
 
 	AuthSvc *AuthService
 	TodoSvc *TodoService
@@ -41,35 +50,53 @@ type Server struct {
 }
 
 // New builds a Server from every domain service.
-func New(
-	cfg *config.Config,
-	kernel *platform.Kernel,
-	auths *auth.Service,
-	users *user.Service,
-	orgs *org.Service,
-	projects *project.Service,
-	todos *todo.Service,
-	invites *invite.Service,
-	todoStore todo.Store,
-) *Server {
+// Deps bundles everything a Server needs. A struct rather than positional
+// parameters: the fields are mostly same-typed pointers, so a transposed pair
+// would compile silently.
+type Deps struct {
+	Cfg    *config.Config
+	Kernel *platform.Kernel
+	Authn  authn.Chain
+
+	Auths        *auth.Service
+	Users        *user.Service
+	Orgs         *org.Service
+	Projects     *project.Service
+	Todos        *todo.Service
+	Invites      *invite.Service
+	Credentials  *credential.Service
+	Spreadsheets *spreadsheet.Service
+	Sheets       *sheet.Service
+	APIKeys      *apikey.Service
+
+	TodoStore todo.Store
+}
+
+// New builds a Server from d.
+func New(d Deps) *Server {
 	s := &Server{
-		Cfg:      cfg,
-		Kernel:   kernel,
-		Auths:    auths,
-		Users:    users,
-		Orgs:     orgs,
-		Projects: projects,
-		Todos:    todos,
-		Invites:  invites,
-		AuthSvc:  NewAuthService(orgs),
-		TodoSvc:  NewTodoService(todos, todoStore, projects),
+		Cfg:          d.Cfg,
+		Kernel:       d.Kernel,
+		Authn:        d.Authn,
+		Auths:        d.Auths,
+		Users:        d.Users,
+		Orgs:         d.Orgs,
+		Projects:     d.Projects,
+		Todos:        d.Todos,
+		Invites:      d.Invites,
+		Credentials:  d.Credentials,
+		Spreadsheets: d.Spreadsheets,
+		Sheets:       d.Sheets,
+		APIKeys:      d.APIKeys,
+		AuthSvc:      NewAuthService(d.Orgs),
+		TodoSvc:      NewTodoService(d.Todos, d.TodoStore, d.Projects),
 	}
-	if cfg != nil {
-		s.OpenAPIEnabled = cfg.API.OpenAPI.Enabled
-		if cfg.API.OpenAPI.RequireBasicAuth {
+	if d.Cfg != nil {
+		s.OpenAPIEnabled = d.Cfg.API.OpenAPI.Enabled
+		if d.Cfg.API.OpenAPI.RequireBasicAuth {
 			s.OpenAPIBasicAuth = &BasicAuth{
-				User:     cfg.API.OpenAPI.BasicAuthUser,
-				Password: cfg.API.OpenAPI.BasicAuthPassword,
+				User:     d.Cfg.API.OpenAPI.BasicAuthUser,
+				Password: d.Cfg.API.OpenAPI.BasicAuthPassword,
 			}
 		}
 	}
@@ -116,7 +143,7 @@ func (s *Server) handlerOptions() []connect.HandlerOption {
 	}
 	ics = append(ics,
 		interceptor.Wrap(s.unexpected()),
-		interceptor.Auth(s.verifier()),
+		authn.Interceptor(s.Authn),
 		interceptor.Tenant(),
 	)
 	return []connect.HandlerOption{connect.WithInterceptors(ics...)}
@@ -127,11 +154,4 @@ func (s *Server) unexpected() apperror.UnexpectedFunc {
 		return nil
 	}
 	return s.Kernel.Reporter.Unexpected
-}
-
-func (s *Server) verifier() tokens.Verifier {
-	if s.Kernel == nil {
-		return nil
-	}
-	return s.Kernel.Verifier
 }

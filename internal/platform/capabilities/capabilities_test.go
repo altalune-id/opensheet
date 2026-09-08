@@ -86,6 +86,7 @@ func TestFrom_APIEnabled(t *testing.T) {
 func TestFrom_OpensheetCapabilities(t *testing.T) {
 	c := &config.Config{Mode: config.ModeSelfhosted}
 	c.Google.OAuth.ClientID = "cid"
+	c.Google.OAuth.ClientSecret = "csecret"
 	c.Google.Picker.APIKey = "pk"
 	c.Sheets.PublicEnabled = true
 	c.Security.EncryptionKey = "deadbeef"
@@ -98,5 +99,30 @@ func TestFrom_OpensheetCapabilities(t *testing.T) {
 	empty := From(&config.Config{Mode: config.ModeSelfhosted})
 	if empty.GoogleConnect || empty.GooglePicker || empty.PublicSheets || empty.Encryption {
 		t.Fatalf("caps = %#v, want all four false", empty)
+	}
+}
+
+// gworkspace.NewConnector requires both id and secret, so a half-configured client
+// must not advertise the connect flow — the UI would offer a button that always errors.
+func TestFrom_GoogleConnectNeedsBothIDAndSecret(t *testing.T) {
+	tests := []struct {
+		name       string
+		id, secret string
+		want       bool
+	}{
+		{"both set", "cid", "csecret", true},
+		{"id only", "cid", "", false},
+		{"secret only", "", "csecret", false},
+		{"neither", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &config.Config{Mode: config.ModeSelfhosted}
+			c.Google.OAuth.ClientID = tc.id
+			c.Google.OAuth.ClientSecret = tc.secret
+			if got := From(c).GoogleConnect; got != tc.want {
+				t.Fatalf("GoogleConnect = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

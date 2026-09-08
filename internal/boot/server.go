@@ -14,8 +14,10 @@ import (
 
 	"altalune.id/opensheet/authl"
 	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
@@ -28,6 +30,8 @@ import (
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/logger"
@@ -46,15 +50,21 @@ type Server struct {
 	Caps     capabilities.Capabilities
 	Platform *platform.Kernel
 
-	Auth     *auth.Service
-	Users    *user.Service
-	Orgs     *org.Service
-	Projects *project.Service
-	Todos    *todo.Service
-	Invites  *invite.Service
-	Onboards *onboard.Service
+	Auth         *auth.Service
+	Users        *user.Service
+	Orgs         *org.Service
+	Projects     *project.Service
+	Todos        *todo.Service
+	Invites      *invite.Service
+	Onboards     *onboard.Service
+	Credentials  *credential.Service
+	Spreadsheets *spreadsheet.Service
+	Sheets       *sheet.Service
+	APIKeys      *apikey.Service
 
 	Onboard *user.OnboardWorkflow
+	Read    *sheet.ReadWorkflow
+	Connect *credential.ConnectWorkflow
 
 	Onboarded bool
 
@@ -119,6 +129,13 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: authl: %w", err)
 	}
 
+	sealed, err := buildSealer(cfg, log)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
+
 	sessions := session.NewMemoryStore()
 	caps := capabilities.From(cfg)
 
@@ -136,6 +153,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Notify:   sinks,
 		Nano:     nanoid.New,
 		Caps:     caps,
+		Sealer:   sealed,
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {
@@ -175,6 +193,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	sup := worker.New(log)
 	sup.Register(health)
+	sup.Register(svcs.KeyUsage)
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
@@ -253,9 +272,15 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Todos:        svcs.Todos,
 		Invites:      svcs.Invites,
 		Onboards:     svcs.Onboards,
+		Credentials:  svcs.Credentials,
+		Spreadsheets: svcs.Spreadsheets,
+		Sheets:       svcs.Sheets,
+		APIKeys:      svcs.APIKeys,
 		Onboarded:    onboarded,
 		SetupToken:   setup,
 		Onboard:      svcs.Onboard,
+		Read:         svcs.Read,
+		Connect:      svcs.Connect,
 		Web:          webHandler,
 		API:          apiSrv,
 		Scheduler:    runner,

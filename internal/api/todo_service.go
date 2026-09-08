@@ -5,13 +5,9 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	todov1 "altalune.id/opensheet/gen/go/todo/v1"
-	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
@@ -129,47 +125,6 @@ func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (contex
 		ProjectID: t.ProjectID,
 		UserID:    p.UserID,
 	}), tid, nil
-}
-
-func principal(ctx context.Context) (session.Principal, error) {
-	p := session.PrincipalFrom(ctx)
-	if p.UserID == uuid.Nil {
-		return session.Principal{}, apperror.New(
-			apperror.CodeUnauthenticated,
-			"No principal in context",
-			codes.Unauthenticated,
-			&apperrorv1.ErrorDetail{Code: apperror.CodeUnauthenticated},
-		)
-	}
-	return p, nil
-}
-
-func parseUUID(field, raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, apperror.New(
-			apperror.CodeValidation,
-			field+" must be a uuid",
-			codes.InvalidArgument,
-			&apperrorv1.ErrorDetail{
-				Code: apperror.CodeValidation,
-				Meta: map[string]string{"field": field},
-			},
-		).WithCause(err)
-	}
-	return id, nil
-}
-
-func forbiddenErr(msg, field, value string) error {
-	return apperror.New(
-		apperror.CodeForbidden,
-		msg,
-		codes.PermissionDenied,
-		&apperrorv1.ErrorDetail{
-			Code: apperror.CodeForbidden,
-			Meta: map[string]string{field: value},
-		},
-	)
 }
 
 func toProto(t *todo.Todo) *todov1.Todo {

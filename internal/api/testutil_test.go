@@ -16,24 +16,24 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/session"
-	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/todo"
 )
 
-type stubVerifier struct {
+type stubAuthenticator struct {
 	principal session.Principal
 	err       error
 }
 
-func (s stubVerifier) Verify(_ context.Context, _ string) (session.Principal, error) {
+func (s stubAuthenticator) Authenticate(_ context.Context, _ string) (session.Principal, error) {
 	return s.principal, s.err
 }
 
-var _ tokens.Verifier = stubVerifier{}
+var _ authn.Authenticator = stubAuthenticator{}
 
 type harness struct {
 	t      *testing.T
@@ -48,7 +48,7 @@ func newHarness(t *testing.T, p session.Principal) *harness {
 	return newHarnessOpts(t, p, nil)
 }
 
-func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
+func newHarnessOpts(t *testing.T, p session.Principal, aerr error) *harness {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reporter := apperror.NewReporter(log, false)
@@ -61,19 +61,17 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
 	todoSvc := todo.NewService(tds, log, reporter.Unexpected)
 
-	kernel := &platform.Kernel{
-		Log:      log,
-		Reporter: reporter,
-		Verifier: stubVerifier{principal: p, err: verr},
-	}
+	kernel := &platform.Kernel{Log: log, Reporter: reporter}
 
-	srv := api.New(
-		nil, // cfg — OpenAPI off by default in these tests
-		kernel,
-		nil, nil,
-		orgSvc, projectSvc, todoSvc, nil,
-		tds,
-	)
+	// NOTE: Cfg is left nil so OpenAPI stays off in these tests.
+	srv := api.New(api.Deps{
+		Kernel:    kernel,
+		Authn:     authn.Chain{stubAuthenticator{principal: p, err: aerr}},
+		Orgs:      orgSvc,
+		Projects:  projectSvc,
+		Todos:     todoSvc,
+		TodoStore: tds,
+	})
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
 	return &harness{t: t, server: ts, orgs: orgs, projs: projs, todos: tds}

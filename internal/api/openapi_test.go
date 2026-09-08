@@ -14,7 +14,6 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/capabilities"
-	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/todo"
@@ -28,20 +27,14 @@ func openAPIServer(t *testing.T, enabled bool, auth *api.BasicAuth) *httptest.Se
 	projs := fakes.NewProject()
 	tds := fakes.NewTodo()
 
-	kernel := &platform.Kernel{
-		Log:      log,
-		Reporter: reporter,
-		Verifier: stubVerifier{principal: session.Principal{}},
-	}
-	srv := api.New(
-		nil, kernel,
-		nil, nil,
-		org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected),
-		project.NewService(projs, log, reporter.Unexpected),
-		todo.NewService(tds, log, reporter.Unexpected),
-		nil,
-		tds,
-	)
+	kernel := &platform.Kernel{Log: log, Reporter: reporter}
+	srv := api.New(api.Deps{
+		Kernel:    kernel,
+		Orgs:      org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected),
+		Projects:  project.NewService(projs, log, reporter.Unexpected),
+		Todos:     todo.NewService(tds, log, reporter.Unexpected),
+		TodoStore: tds,
+	})
 	srv.OpenAPIEnabled = enabled
 	srv.OpenAPIBasicAuth = auth
 
