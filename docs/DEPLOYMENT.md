@@ -172,6 +172,10 @@ choice is per job, not per deployment:
 Scale replicas freely. Do not try to designate a "scheduler replica" for
 correctness; leader election is per tick, in Postgres.
 
+**NOTE:** a Postgres deployment running with `scheduler.enabled=false` never runs
+`session-sweep`, so it needs its own periodic
+`DELETE FROM <prefix>sessions WHERE expires_at < now()`.
+
 **Leader election** uses `pg_try_advisory_lock` on the writer handle. No
 migration and no lock table — nothing to provision. Under
 `driver: sqlite` the locker is a no-op, since there is one writing process.
