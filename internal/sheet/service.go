@@ -29,6 +29,7 @@ type Service struct {
 	unexpected apperror.UnexpectedFunc
 	caps       Capabilities
 	snaps      SnapshotStore
+	attempts   IdempotencyStore
 }
 
 // NewService binds the service to its dependencies.
@@ -38,6 +39,7 @@ func NewService(
 	unexpected apperror.UnexpectedFunc,
 	caps Capabilities,
 	snaps SnapshotStore,
+	attempts IdempotencyStore,
 ) *Service {
 	return &Service{
 		store:      store,
@@ -45,6 +47,7 @@ func NewService(
 		unexpected: unexpected,
 		caps:       caps,
 		snaps:      snaps,
+		attempts:   attempts,
 	}
 }
 
@@ -265,6 +268,26 @@ func (s *Service) PurgeCache(ctx context.Context, id uuid.UUID) error {
 		return s.unexpected(ctx, "sheet.PurgeCache: purge", err, "sheet_id", id)
 	}
 	return nil
+}
+
+// SweepWriteAttempts deletes the caller tenant's expired write attempts and reports how many went.
+func (s *Service) SweepWriteAttempts(ctx context.Context) (int, error) {
+	ctx, span := tracer.Start(ctx, "sheet.SweepWriteAttempts")
+	defer span.End()
+
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return 0, err
+	}
+	span.SetAttributes(attribute.String("org_id", tc.OrgID.String()))
+
+	n, err := s.attempts.DeleteExpired(ctx)
+	if err != nil {
+		span.RecordError(err)
+		return 0, s.unexpected(ctx, "sheet.SweepWriteAttempts: delete expired", err, "org_id", tc.OrgID)
+	}
+	span.SetAttributes(attribute.Int("sheet.write_attempts_swept", n))
+	return n, nil
 }
 
 func (s *Service) gatePublic(vis Visibility, slug string) error {

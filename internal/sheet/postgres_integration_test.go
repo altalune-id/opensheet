@@ -41,6 +41,7 @@ func (o orgTree) ctx(t *testing.T) context.Context {
 type pgFixture struct {
 	store     sheet.Store
 	snapshots sheet.SnapshotStore
+	attempts  sheet.IdempotencyStore
 	appDB     *sql.DB
 	ownerDB   *sql.DB
 	prefix    string
@@ -85,7 +86,7 @@ func newPgFixture(t *testing.T) *pgFixture {
 	pgCreateRole(t, admin, appRole, "LOGIN PASSWORD 'pw' NOBYPASSRLS")
 	_, err = admin.ExecContext(t.Context(), fmt.Sprintf(`GRANT USAGE ON SCHEMA public TO %q`, appRole))
 	require.NoError(t, err)
-	for _, table := range []string{prefix + "sheets", prefix + "sheet_snapshots"} {
+	for _, table := range []string{prefix + "sheets", prefix + "sheet_snapshots", prefix + "sheet_write_attempts"} {
 		_, err = migDB.ExecContext(t.Context(),
 			fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON public.%s TO %q`, table, appRole))
 		require.NoError(t, err)
@@ -112,6 +113,14 @@ func newPgFixture(t *testing.T) *pgFixture {
 		dbCfg, pc, slog.New(slog.DiscardHandler),
 	)
 	require.NoError(t, err)
+
+	// NOTE: its own pool, because appDB caps at one connection and the concurrent-Reserve test needs real overlap rather than pool-level serialization.
+	attemptsDB, err := db.Open(t.Context(), db.DBConfig{
+		Driver: db.DriverPostgres, DSN: pgtest.DSNWithUser(t, h.DSN, appRole, "pw"), MaxOpenConns: 4,
+	}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = attemptsDB.Close() })
+	f.attempts = sheet.NewIdempotencyStore(dbCfg, tenant.NewPgConn(attemptsDB))
 	return f
 }
 

@@ -115,7 +115,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, aerr error) *harness {
 	todoSvc := todo.NewService(tds, log, reporter.Unexpected)
 	credSvc := credential.NewService(creds, log, reporter.Unexpected, sl)
 	sprdSvc := spreadsheet.NewService(sprds, log, reporter.Unexpected, stubTokenSources{}, googleFactory(t))
-	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps)
+	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps, sheet.NewMemoryIdempotencyStore())
 	keySheets := fakes.NewAPIKeySheets()
 	keySvc := apikey.NewService(keys, log, reporter.Unexpected, keySheets)
 
