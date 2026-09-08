@@ -37,7 +37,15 @@ type Client struct {
 
 // New builds a Client whose every request carries a token from ts.
 func New(ctx context.Context, ts oauth2.TokenSource, opts ...gworkspace.Option) (*Client, error) {
-	apiOpts, err := gworkspace.ClientOptions(ts, ScopeReadOnly, opts...)
+	svc, err := newService(ctx, ts, ScopeReadOnly, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{svc: svc}, nil
+}
+
+func newService(ctx context.Context, ts oauth2.TokenSource, scope string, opts ...gworkspace.Option) (*sheetsapi.Service, error) {
+	apiOpts, err := gworkspace.ClientOptions(ts, scope, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +53,7 @@ func New(ctx context.Context, ts oauth2.TokenSource, opts ...gworkspace.Option) 
 	if err != nil {
 		return nil, fmt.Errorf("gsheet: build service: %w", err)
 	}
-	return &Client{svc: svc}, nil
+	return svc, nil
 }
 
 // Tabs lists a spreadsheet's tab titles in sheet order.
