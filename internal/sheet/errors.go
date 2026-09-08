@@ -222,6 +222,38 @@ func IsPublicDisabledError(err error) bool {
 	return ok
 }
 
+// PayloadTooLargeError signals a serialized grid larger than the configured read limit.
+type PayloadTooLargeError struct {
+	Bytes    int64
+	MaxBytes int64
+}
+
+func (e *PayloadTooLargeError) Error() string {
+	return fmt.Sprintf("sheet: payload: %d bytes over the %d byte limit", e.Bytes, e.MaxBytes)
+}
+
+// ToAppError maps PayloadTooLargeError to the canonical payload-too-large envelope.
+func (e *PayloadTooLargeError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetPayloadTooLarge,
+		"Sheet payload is too large to serve",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetPayloadTooLarge,
+			Meta: map[string]string{
+				"bytes":     strconv.FormatInt(e.Bytes, 10),
+				"max_bytes": strconv.FormatInt(e.MaxBytes, 10),
+			},
+		},
+	)
+}
+
+// IsPayloadTooLargeError reports whether err's tree contains a *PayloadTooLargeError.
+func IsPayloadTooLargeError(err error) bool {
+	_, ok := errors.AsType[*PayloadTooLargeError](err)
+	return ok
+}
+
 // SnapshotTooLargeError signals a payload larger than the whole snapshot cache budget.
 type SnapshotTooLargeError struct {
 	Bytes    int64

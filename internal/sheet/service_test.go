@@ -24,6 +24,11 @@ func (c fakeCaps) PublicSheetsEnabled() bool { return c.public }
 
 func newSvc(t *testing.T, store sheet.Store, publicEnabled bool) (*sheet.Service, *int) {
 	t.Helper()
+	return newSvcSnaps(t, store, fakes.NewSheetSnapshots(), publicEnabled)
+}
+
+func newSvcSnaps(t *testing.T, store sheet.Store, snaps sheet.SnapshotStore, publicEnabled bool) (*sheet.Service, *int) {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
@@ -31,7 +36,7 @@ func newSvc(t *testing.T, store sheet.Store, publicEnabled bool) (*sheet.Service
 		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
-	return sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}), &calls
+	return sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}, snaps), &calls
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {

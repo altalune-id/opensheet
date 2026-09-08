@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
 	"altalune.id/opensheet/internal/platform/tenant"

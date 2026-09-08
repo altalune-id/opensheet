@@ -28,15 +28,23 @@ type Service struct {
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 	caps       Capabilities
+	snaps      SnapshotStore
 }
 
 // NewService binds the service to its dependencies.
-func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc, caps Capabilities) *Service {
+func NewService(
+	store Store,
+	log *slog.Logger,
+	unexpected apperror.UnexpectedFunc,
+	caps Capabilities,
+	snaps SnapshotStore,
+) *Service {
 	return &Service{
 		store:      store,
 		log:        log.With("module", "sheet"),
 		unexpected: unexpected,
 		caps:       caps,
+		snaps:      snaps,
 	}
 }
 
@@ -222,6 +230,27 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 			return err
 		}
 		return s.unexpected(ctx, "sheet.Delete: delete", err, "sheet_id", id)
+	}
+	return nil
+}
+
+// PurgeCache drops every cached tab of the identified sheet in the caller's tenant scope.
+func (s *Service) PurgeCache(ctx context.Context, id uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "sheet.PurgeCache",
+		trace.WithAttributes(attribute.String("sheet.id", id.String())))
+	defer span.End()
+
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	sh, err := s.loadScoped(ctx, span, tc, id, "sheet.PurgeCache")
+	if err != nil {
+		return err
+	}
+	if err := s.snaps.PurgeSheet(ctx, sh.ID); err != nil {
+		span.RecordError(err)
+		return s.unexpected(ctx, "sheet.PurgeCache: purge", err, "sheet_id", id)
 	}
 	return nil
 }
