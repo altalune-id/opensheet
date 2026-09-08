@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,7 +30,7 @@ const (
 
 const exchangeTimeout = 20 * time.Second
 
-// Scopes returns the exact scope set the connect flow requests.
+// Scopes returns the default scope set the connect flow requests.
 func Scopes() []string { return []string{scopeDriveFile, scopeEmail} }
 
 // ConnectWorkflow turns a Google consent into a sealed google_oauth credential.
@@ -38,9 +39,22 @@ type ConnectWorkflow struct {
 	sealer     sealer.Sealer
 	oauth      *oauth2.Config
 	secret     []byte
+	scopes     []string
 	now        func() time.Time
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
+}
+
+// ConnectOption tunes ConnectWorkflow construction.
+type ConnectOption func(*ConnectWorkflow)
+
+// WithScopes replaces the Google scope set the connect flow requests; an empty set keeps Scopes().
+func WithScopes(scopes []string) ConnectOption {
+	return func(w *ConnectWorkflow) {
+		if len(scopes) > 0 {
+			w.scopes = slices.Clone(scopes)
+		}
+	}
 }
 
 // NewConnectWorkflow binds the workflow to its dependencies; a nil now defaults to time.Now in UTC.
@@ -52,19 +66,25 @@ func NewConnectWorkflow(
 	now func() time.Time,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
+	opts ...ConnectOption,
 ) *ConnectWorkflow {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &ConnectWorkflow{
+	w := &ConnectWorkflow{
 		store:      store,
 		sealer:     sl,
 		oauth:      oauth,
 		secret:     secret,
+		scopes:     Scopes(),
 		now:        now,
 		log:        log.With("module", "credential"),
 		unexpected: unexpected,
 	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
 // Start returns the Google consent URL, carrying a signed state that binds the grant to one org, project and user.
@@ -103,11 +123,11 @@ func (w *ConnectWorkflow) Start(
 			"org_id", orgID, "project_id", projectID)
 	}
 
-	// SECURITY: the scope set is pinned here rather than read off the injected config, so a mis-wired client cannot widen it.
+	// SECURITY: the scope set is pinned here from construction rather than read off the injected config, so a mis-wired client cannot widen it.
 	// NOTE: prompt=consent is what makes access_type=offline return a refresh token on every reconnect, not only the first.
 	return w.oauth.AuthCodeURL(signed,
 		oauth2.AccessTypeOffline,
-		oauth2.SetAuthURLParam("scope", strings.Join(Scopes(), " ")),
+		oauth2.SetAuthURLParam("scope", strings.Join(w.scopes, " ")),
 		oauth2.SetAuthURLParam("prompt", "consent"),
 	), nil
 }

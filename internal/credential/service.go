@@ -14,8 +14,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/gsheets"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
@@ -178,7 +178,7 @@ func (s *Service) MarkReauthNeeded(ctx context.Context, id uuid.UUID) (*Credenti
 
 // TokenSourceFor unseals the credential and returns a Google token source.
 // SECURITY: plaintext never leaves this method — not in a return value, an error, a log field or a span attribute.
-func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (gsheets.TokenSource, error) {
+func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
 	ctx, span := tracer.Start(ctx, "credential.TokenSourceFor",
 		trace.WithAttributes(attribute.String("credential.id", id.String())))
 	defer span.End()
@@ -209,7 +209,7 @@ func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (gsheets.Tok
 }
 
 // SECURITY: plain holds a Google refresh token; it is handed straight to oauth2 and never returned, logged or recorded on a span.
-func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (gsheets.TokenSource, error) {
+func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (oauth2.TokenSource, error) {
 	if s.oauth == nil {
 		return nil, &NotConfiguredError{}
 	}
@@ -220,8 +220,8 @@ func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (gsheets
 	return s.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh}), nil
 }
 
-func serviceAccountTokenSource(ctx context.Context, plain []byte) (gsheets.TokenSource, error) {
-	cfg, err := google.JWTConfigFromJSON(plain, gsheets.ScopeReadOnly)
+func serviceAccountTokenSource(ctx context.Context, plain []byte) (oauth2.TokenSource, error) {
+	cfg, err := google.JWTConfigFromJSON(plain, gsheet.ScopeReadOnly)
 	if err != nil {
 		// SECURITY: the google error quotes the payload, so it is dropped rather than wrapped.
 		return nil, &InvalidServiceAccountError{Reason: "stored key is not a service account key"}
@@ -279,7 +279,7 @@ func serviceAccountEmail(raw []byte) (string, error) {
 	if err := checkTokenURI(f.TokenURI); err != nil {
 		return "", err
 	}
-	if _, err := google.JWTConfigFromJSON(raw, gsheets.ScopeReadOnly); err != nil {
+	if _, err := google.JWTConfigFromJSON(raw, gsheet.ScopeReadOnly); err != nil {
 		return "", &InvalidServiceAccountError{Reason: "missing a required service account field"}
 	}
 	return email, nil

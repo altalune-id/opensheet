@@ -14,10 +14,13 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 
+	"altalune.id/opensheet/gworkspace"
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/gsheets"
+	"altalune.id/opensheet/internal/gwerr"
 )
 
 const etagHexLen = 32
@@ -35,7 +38,7 @@ type Sources interface {
 
 // TokenSources resolves a credential id to a Google token source.
 type TokenSources interface {
-	TokenSourceFor(ctx context.Context, credentialID uuid.UUID) (gsheets.TokenSource, error)
+	TokenSourceFor(ctx context.Context, credentialID uuid.UUID) (oauth2.TokenSource, error)
 }
 
 // Reauthers flags a credential Google has rejected as needing reauthorization.
@@ -45,7 +48,7 @@ type Reauthers interface {
 
 // Rows is one read of a published tab, carrying its cache provenance.
 type Rows struct {
-	Values    []gsheets.Row
+	Values    []gsheet.Row
 	Warnings  []string
 	ETag      string
 	FetchedAt time.Time
@@ -59,7 +62,7 @@ type ReadWorkflow struct {
 	sources         Sources
 	tokens          TokenSources
 	reauth          Reauthers
-	clients         gsheets.Factory
+	clients         gsheet.Factory
 	caps            Capabilities
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
@@ -74,7 +77,7 @@ func NewReadWorkflow(
 	sources Sources,
 	tokens TokenSources,
 	reauth Reauthers,
-	clients gsheets.Factory,
+	clients gsheet.Factory,
 	caps Capabilities,
 	defaultTTL time.Duration,
 	maxPayloadBytes int64,
@@ -118,7 +121,7 @@ func (w *ReadWorkflow) Rows(ctx context.Context, sh *Sheet) (Rows, error) {
 	}
 
 	tab := strings.TrimSpace(sh.Tab)
-	var client *gsheets.Client
+	var client *gsheet.Client
 	if tab == "" {
 		client, err = w.client(ctx, sh, src)
 		if err != nil {
@@ -128,7 +131,7 @@ func (w *ReadWorkflow) Rows(ctx context.Context, sh *Sheet) (Rows, error) {
 		tab, err = client.FirstTab(ctx, src.GoogleFileID)
 		if err != nil {
 			span.RecordError(err)
-			return Rows{}, w.passthrough(ctx, "sheet.Rows: first tab", err, sh)
+			return Rows{}, w.passthrough(ctx, "sheet.Rows: first tab", gwerr.AppError(err), sh)
 		}
 	}
 	span.SetAttributes(attribute.String("sheet.tab", tab))
@@ -159,7 +162,7 @@ func (w *ReadWorkflow) Rows(ctx context.Context, sh *Sheet) (Rows, error) {
 	}
 	span.RecordError(err)
 
-	if gsheets.IsAuthExpiredError(err) {
+	if gworkspace.IsAuthExpiredError(err) {
 		if mErr := w.reauth.MarkReauthNeeded(ctx, src.CredentialID); mErr != nil {
 			_ = w.unexpected(ctx, "sheet.Rows: mark reauth needed", mErr,
 				"sheet_id", sh.ID, "credential_id", src.CredentialID)
@@ -178,7 +181,7 @@ func (w *ReadWorkflow) Rows(ctx context.Context, sh *Sheet) (Rows, error) {
 	return stale, nil
 }
 
-func (w *ReadWorkflow) client(ctx context.Context, sh *Sheet, src Source) (*gsheets.Client, error) {
+func (w *ReadWorkflow) client(ctx context.Context, sh *Sheet, src Source) (*gsheet.Client, error) {
 	ts, err := w.tokens.TokenSourceFor(ctx, src.CredentialID)
 	if err != nil {
 		return nil, w.passthrough(ctx, "sheet.Rows: token source", err, sh)
@@ -191,7 +194,7 @@ func (w *ReadWorkflow) client(ctx context.Context, sh *Sheet, src Source) (*gshe
 }
 
 // NOTE: singleflight.Do runs the loader on the calling goroutine, so no goroutine is started here and there is nothing to shut down.
-func (w *ReadWorkflow) fetch(ctx context.Context, client *gsheets.Client, sh *Sheet, src Source, key SnapshotKey) (Rows, error) {
+func (w *ReadWorkflow) fetch(ctx context.Context, client *gsheet.Client, sh *Sheet, src Source, key SnapshotKey) (Rows, error) {
 	v, err, shared := w.flight.Do(key.SheetID.String()+"\x00"+key.Tab, func() (any, error) {
 		return w.load(ctx, client, sh, src, key)
 	})
@@ -206,13 +209,13 @@ func (w *ReadWorkflow) fetch(ctx context.Context, client *gsheets.Client, sh *Sh
 	return out, nil
 }
 
-func (w *ReadWorkflow) load(ctx context.Context, client *gsheets.Client, sh *Sheet, src Source, key SnapshotKey) (Rows, error) {
+func (w *ReadWorkflow) load(ctx context.Context, client *gsheet.Client, sh *Sheet, src Source, key SnapshotKey) (Rows, error) {
 	values, warnings, err := client.Rows(ctx, src.GoogleFileID, key.Tab)
 	if err != nil {
-		return Rows{}, err
+		return Rows{}, gwerr.AppError(err)
 	}
 	if values == nil {
-		values = []gsheets.Row{}
+		values = []gsheet.Row{}
 	}
 	fetchedAt := time.Now().UTC()
 
@@ -233,13 +236,13 @@ func (w *ReadWorkflow) load(ctx context.Context, client *gsheets.Client, sh *She
 }
 
 func (w *ReadWorkflow) fromSnapshot(ctx context.Context, sh *Sheet, snap Snapshot, stale bool) (Rows, error) {
-	var values []gsheets.Row
+	var values []gsheet.Row
 	if err := json.Unmarshal(snap.Payload, &values); err != nil {
 		return Rows{}, w.unexpected(ctx, "sheet.Rows: decode snapshot", err,
 			"sheet_id", sh.ID, "etag", snap.ETag)
 	}
 	if values == nil {
-		values = []gsheets.Row{}
+		values = []gsheet.Row{}
 	}
 	return Rows{
 		Values:    values,
@@ -257,7 +260,7 @@ func (w *ReadWorkflow) ttl(sh *Sheet) time.Duration {
 	return w.defaultTTL
 }
 
-// NOTE: a gsheets or credential failure already carries a wire code and is an expected outcome the surfaces map, so it passes through instead of being reported as an incident.
+// NOTE: a Google or credential failure already carries a wire code and is an expected outcome the surfaces map, so it passes through instead of being reported as an incident.
 func (w *ReadWorkflow) passthrough(ctx context.Context, situation string, err error, sh *Sheet) error {
 	if _, ok := apperror.AsAppError(err); ok {
 		return err
@@ -271,16 +274,16 @@ func etagOf(payload []byte) string {
 }
 
 func isGoogleFailure(err error) bool {
-	return gsheets.IsNotFoundError(err) ||
-		gsheets.IsPermissionDeniedError(err) ||
-		gsheets.IsQuotaExceededError(err) ||
-		gsheets.IsUnavailableError(err) ||
-		gsheets.IsAuthExpiredError(err) ||
-		gsheets.IsTabNotFoundError(err)
+	return gworkspace.IsNotFoundError(err) ||
+		gworkspace.IsPermissionDeniedError(err) ||
+		gworkspace.IsQuotaExceededError(err) ||
+		gworkspace.IsUnavailableError(err) ||
+		gworkspace.IsAuthExpiredError(err) ||
+		gsheet.IsTabNotFoundError(err)
 }
 
-func cloneRows(in []gsheets.Row) []gsheets.Row {
-	out := make([]gsheets.Row, len(in))
+func cloneRows(in []gsheet.Row) []gsheet.Row {
+	out := make([]gsheet.Row, len(in))
 	for i, row := range in {
 		out[i] = maps.Clone(row)
 	}

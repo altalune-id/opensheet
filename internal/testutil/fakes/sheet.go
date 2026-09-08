@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	"altalune.id/opensheet/internal/gsheets"
 	"altalune.id/opensheet/internal/sheet"
 )
 
@@ -226,7 +225,7 @@ type SheetTokenSources struct {
 	mu    sync.Mutex
 	asked []uuid.UUID
 
-	Source gsheets.TokenSource
+	Source oauth2.TokenSource
 	Err    error
 }
 
@@ -244,7 +243,7 @@ func (f *SheetTokenSources) AskedIDs() []uuid.UUID {
 	return append([]uuid.UUID(nil), f.asked...)
 }
 
-func (f *SheetTokenSources) TokenSourceFor(_ context.Context, credentialID uuid.UUID) (gsheets.TokenSource, error) {
+func (f *SheetTokenSources) TokenSourceFor(_ context.Context, credentialID uuid.UUID) (oauth2.TokenSource, error) {
 	if f.Err != nil {
 		return nil, f.Err
 	}

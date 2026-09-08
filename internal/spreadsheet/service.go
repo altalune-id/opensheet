@@ -8,9 +8,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/oauth2"
 
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/gsheets"
+	"altalune.id/opensheet/internal/gwerr"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -19,7 +21,7 @@ var tracer = otel.Tracer("altalune.id/opensheet/internal/spreadsheet")
 
 // TokenSources resolves a credential id to a Google token source.
 type TokenSources interface {
-	TokenSourceFor(ctx context.Context, credentialID uuid.UUID) (gsheets.TokenSource, error)
+	TokenSourceFor(ctx context.Context, credentialID uuid.UUID) (oauth2.TokenSource, error)
 }
 
 // Service is the spreadsheets driving port.
@@ -28,7 +30,7 @@ type Service struct {
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 	tokens     TokenSources
-	clients    gsheets.Factory
+	clients    gsheet.Factory
 }
 
 // NewService binds the service to its dependencies.
@@ -37,7 +39,7 @@ func NewService(
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
 	tokens TokenSources,
-	clients gsheets.Factory,
+	clients gsheet.Factory,
 ) *Service {
 	return &Service{
 		store:      store,
@@ -231,7 +233,7 @@ func (s *Service) ListTabs(ctx context.Context, id uuid.UUID) ([]string, error) 
 	tabs, err := client.Tabs(ctx, sp.GoogleFileID)
 	if err != nil {
 		span.RecordError(err)
-		return nil, s.translate(ctx, "spreadsheet.ListTabs: tabs", err, sp)
+		return nil, s.translate(ctx, "spreadsheet.ListTabs: tabs", gwerr.AppError(err), sp)
 	}
 	span.SetAttributes(attribute.Int("spreadsheet.tabs", len(tabs)))
 	return tabs, nil
@@ -255,7 +257,7 @@ func (s *Service) resolve(ctx context.Context, id uuid.UUID, op string) (*Spread
 	return sp, nil
 }
 
-// NOTE: a gsheets or credential failure already carries a wire code and is an expected outcome the UI shows, so it passes through instead of being reported as an incident.
+// NOTE: a Google or credential failure already carries a wire code and is an expected outcome the UI shows, so it passes through instead of being reported as an incident.
 func (s *Service) translate(ctx context.Context, situation string, err error, sp *Spreadsheet) error {
 	if _, ok := apperror.AsAppError(err); ok {
 		return err

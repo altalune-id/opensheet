@@ -658,3 +658,50 @@ func TestConnectWorkflow_CompleteRejectsBadState(t *testing.T) {
 		}
 	})
 }
+
+func TestConnectWorkflow_InjectedScopesArePinnedOnTheAuthorizeURL(t *testing.T) {
+	newWorkflow := func(t *testing.T, opts ...credential.ConnectOption) *credential.ConnectWorkflow {
+		t.Helper()
+		return credential.NewConnectWorkflow(
+			fakes.NewCredential(), testSealer(t), oauthConfig(tokenEndpoint(t, tokenResponse{}).URL),
+			[]byte("connect-state-secret-0123456789abcdef"), nil,
+			slog.New(slog.NewTextHandler(io.Discard, nil)),
+			func(context.Context, string, error, ...any) *apperror.AppError {
+				t.Error("unexpected() must not be called")
+				return nil
+			},
+			opts...,
+		)
+	}
+	scopeParam := func(t *testing.T, w *credential.ConnectWorkflow) string {
+		t.Helper()
+		tc := scope(t)
+		raw, err := w.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return u.Query().Get("scope")
+	}
+
+	wider := append(credential.Scopes(), "https://www.googleapis.com/auth/documents.readonly")
+
+	if got := scopeParam(t, newWorkflow(t, credential.WithScopes(wider))); got != strings.Join(wider, " ") {
+		t.Errorf("scope = %q, want the injected set", got)
+	}
+	if got := scopeParam(t, newWorkflow(t)); got != strings.Join(credential.Scopes(), " ") {
+		t.Errorf("scope = %q, want the default set", got)
+	}
+	if got := scopeParam(t, newWorkflow(t, credential.WithScopes(nil))); got != strings.Join(credential.Scopes(), " ") {
+		t.Errorf("scope = %q, want the default set when nothing is injected", got)
+	}
+
+	w := newWorkflow(t, credential.WithScopes(wider))
+	wider[0] = "https://www.googleapis.com/auth/drive"
+	if got := scopeParam(t, w); !strings.HasPrefix(got, "https://www.googleapis.com/auth/drive.file ") {
+		t.Errorf("scope = %q; mutating the caller's slice changed the pinned set", got)
+	}
+}

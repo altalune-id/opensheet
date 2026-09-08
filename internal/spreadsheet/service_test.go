@@ -16,8 +16,9 @@ import (
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/gworkspace"
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/gsheets"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/testutil/fakes"
@@ -36,7 +37,7 @@ type fakeTokenSources struct {
 	calls []uuid.UUID
 }
 
-func (f *fakeTokenSources) TokenSourceFor(_ context.Context, credentialID uuid.UUID) (gsheets.TokenSource, error) {
+func (f *fakeTokenSources) TokenSourceFor(_ context.Context, credentialID uuid.UUID) (oauth2.TokenSource, error) {
 	f.calls = append(f.calls, credentialID)
 	if f.err != nil {
 		return nil, f.err
@@ -67,14 +68,14 @@ func sheetsServer(t *testing.T, status int, body string) *httptest.Server {
 	return srv
 }
 
-func factoryFor(t *testing.T, baseURL string) gsheets.Factory {
+func factoryFor(t *testing.T, baseURL string) gsheet.Factory {
 	t.Helper()
-	return func(ctx context.Context, ts gsheets.TokenSource) (*gsheets.Client, error) {
-		return gsheets.New(ctx, ts, gsheets.WithBaseURL(baseURL))
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
+		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(baseURL))
 	}
 }
 
-func newSvc(t *testing.T, store spreadsheet.Store, tokens spreadsheet.TokenSources, clients gsheets.Factory) (*spreadsheet.Service, *int) {
+func newSvc(t *testing.T, store spreadsheet.Store, tokens spreadsheet.TokenSources, clients gsheet.Factory) (*spreadsheet.Service, *int) {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
@@ -635,7 +636,7 @@ func TestService_ListTabs(t *testing.T) {
 		store := fakes.NewSpreadsheet()
 		ctx, tc := tenantCtx(t)
 		sp := seed(t, store, tc, goodFileID)
-		factory := func(context.Context, gsheets.TokenSource) (*gsheets.Client, error) {
+		factory := func(context.Context, oauth2.TokenSource) (*gsheet.Client, error) {
 			return nil, errors.New("cannot build client")
 		}
 		svc, unex := newSvc(t, store, &fakeTokenSources{}, factory)
@@ -654,11 +655,11 @@ func TestService_ListTabs(t *testing.T) {
 		body    string
 		wantErr func(error) bool
 	}{
-		{name: "404 is a gone google document", status: http.StatusNotFound, body: `{"error":{"code":404}}`, wantErr: gsheets.IsNotFoundError},
-		{name: "403 is permission denied", status: http.StatusForbidden, body: `{"error":{"code":403}}`, wantErr: gsheets.IsPermissionDeniedError},
-		{name: "429 is quota exceeded", status: http.StatusTooManyRequests, body: `{"error":{"code":429}}`, wantErr: gsheets.IsQuotaExceededError},
-		{name: "401 is an expired credential", status: http.StatusUnauthorized, body: `{"error":{"code":401}}`, wantErr: gsheets.IsAuthExpiredError},
-		{name: "500 is unavailable", status: http.StatusInternalServerError, body: `{"error":{"code":500}}`, wantErr: gsheets.IsUnavailableError},
+		{name: "404 is a gone google document", status: http.StatusNotFound, body: `{"error":{"code":404}}`, wantErr: gworkspace.IsNotFoundError},
+		{name: "403 is permission denied", status: http.StatusForbidden, body: `{"error":{"code":403}}`, wantErr: gworkspace.IsPermissionDeniedError},
+		{name: "429 is quota exceeded", status: http.StatusTooManyRequests, body: `{"error":{"code":429}}`, wantErr: gworkspace.IsQuotaExceededError},
+		{name: "401 is an expired credential", status: http.StatusUnauthorized, body: `{"error":{"code":401}}`, wantErr: gworkspace.IsAuthExpiredError},
+		{name: "500 is unavailable", status: http.StatusInternalServerError, body: `{"error":{"code":500}}`, wantErr: gworkspace.IsUnavailableError},
 	}
 	for _, tc := range googleFailures {
 		t.Run(tc.name, func(t *testing.T) {

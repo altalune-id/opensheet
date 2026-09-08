@@ -16,11 +16,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/gworkspace"
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/gsheets"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
@@ -110,9 +112,9 @@ func (f *fakeSheets) counts() (rows, meta int) {
 	return f.rowsCalls, f.metaCalls
 }
 
-func (f *fakeSheets) factory() gsheets.Factory {
-	return func(ctx context.Context, ts gsheets.TokenSource) (*gsheets.Client, error) {
-		return gsheets.New(ctx, ts, gsheets.WithBaseURL(f.url))
+func (f *fakeSheets) factory() gsheet.Factory {
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
+		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(f.url))
 	}
 }
 
@@ -366,11 +368,11 @@ func TestReadWorkflow_GoogleFailureWithNoSnapshotReturnsTheTypedError(t *testing
 		body   string
 		pred   func(error) bool
 	}{
-		{"not found", http.StatusNotFound, `{"error":{"code":404,"message":"gone"}}`, gsheets.IsNotFoundError},
-		{"permission denied", http.StatusForbidden, `{"error":{"code":403,"message":"nope"}}`, gsheets.IsPermissionDeniedError},
-		{"quota", http.StatusTooManyRequests, `{"error":{"code":429,"message":"slow"}}`, gsheets.IsQuotaExceededError},
-		{"unavailable", http.StatusServiceUnavailable, `{"error":{"code":503,"message":"down"}}`, gsheets.IsUnavailableError},
-		{"tab gone", http.StatusBadRequest, `{"error":{"code":400,"message":"bad range"}}`, gsheets.IsTabNotFoundError},
+		{"not found", http.StatusNotFound, `{"error":{"code":404,"message":"gone"}}`, gworkspace.IsNotFoundError},
+		{"permission denied", http.StatusForbidden, `{"error":{"code":403,"message":"nope"}}`, gworkspace.IsPermissionDeniedError},
+		{"quota", http.StatusTooManyRequests, `{"error":{"code":429,"message":"slow"}}`, gworkspace.IsQuotaExceededError},
+		{"unavailable", http.StatusServiceUnavailable, `{"error":{"code":503,"message":"down"}}`, gworkspace.IsUnavailableError},
+		{"tab gone", http.StatusBadRequest, `{"error":{"code":400,"message":"bad range"}}`, gsheet.IsTabNotFoundError},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -380,7 +382,7 @@ func TestReadWorkflow_GoogleFailureWithNoSnapshotReturnsTheTypedError(t *testing
 
 			_, err := h.wf.Rows(t.Context(), sh)
 			if !tc.pred(err) {
-				t.Fatalf("err = %v, want the typed gsheets error unchanged", err)
+				t.Fatalf("err = %v, want the typed google error unchanged", err)
 			}
 			if h.unex.Load() != 0 {
 				t.Errorf("unexpected reported %d times for an expected Google failure", h.unex.Load())
@@ -395,7 +397,7 @@ func TestReadWorkflow_AuthFailureMarksTheCredentialForReauth(t *testing.T) {
 	h.google.setRows(http.StatusUnauthorized, `{"error":{"code":401,"message":"invalid_grant"}}`)
 
 	_, err := h.wf.Rows(t.Context(), sh)
-	if !gsheets.IsAuthExpiredError(err) {
+	if !gworkspace.IsAuthExpiredError(err) {
 		t.Fatalf("err = %v, want AuthExpiredError", err)
 	}
 	marked := h.reauth.MarkedIDs()
@@ -411,7 +413,7 @@ func TestReadWorkflow_AuthFailureReportsAFailedReauthMarkAndStillReturnsTheGoogl
 	h.reauth.Err = errors.New("write failed")
 
 	_, err := h.wf.Rows(t.Context(), sh)
-	if !gsheets.IsAuthExpiredError(err) {
+	if !gworkspace.IsAuthExpiredError(err) {
 		t.Fatalf("err = %v, want AuthExpiredError", err)
 	}
 	if h.unex.Load() != 1 {
@@ -552,8 +554,8 @@ func TestReadWorkflow_FirstTabFailurePropagates(t *testing.T) {
 	sh, _ := h.seed(t, "", sheet.VisibilityKey, 0)
 	h.google.setMeta(http.StatusNotFound, `{"error":{"code":404,"message":"gone"}}`)
 
-	if _, err := h.wf.Rows(t.Context(), sh); !gsheets.IsNotFoundError(err) {
-		t.Fatalf("err = %v, want the typed gsheets error", err)
+	if _, err := h.wf.Rows(t.Context(), sh); !gworkspace.IsNotFoundError(err) {
+		t.Fatalf("err = %v, want the typed google error", err)
 	}
 	if h.unex.Load() != 0 {
 		t.Errorf("unexpected reported %d times for an expected Google failure", h.unex.Load())
@@ -565,7 +567,7 @@ func TestReadWorkflow_SpreadsheetWithNoTabsIsATabNotFound(t *testing.T) {
 	sh, _ := h.seed(t, "", sheet.VisibilityKey, 0)
 	h.google.setMeta(http.StatusOK, `{"properties":{"title":"Doc"}}`)
 
-	if _, err := h.wf.Rows(t.Context(), sh); !gsheets.IsTabNotFoundError(err) {
+	if _, err := h.wf.Rows(t.Context(), sh); !gsheet.IsTabNotFoundError(err) {
 		t.Fatalf("err = %v, want TabNotFoundError", err)
 	}
 	if h.unex.Load() != 0 {
@@ -656,7 +658,7 @@ func TestReadWorkflow_CorruptStaleSnapshotReturnsTheGoogleError(t *testing.T) {
 	})
 	h.google.setRows(http.StatusServiceUnavailable, `{"error":{"code":503,"message":"down"}}`)
 
-	if _, err := h.wf.Rows(t.Context(), sh); !gsheets.IsUnavailableError(err) {
+	if _, err := h.wf.Rows(t.Context(), sh); !gworkspace.IsUnavailableError(err) {
 		t.Fatalf("err = %v, want the Google failure when the stale payload cannot be decoded", err)
 	}
 	if h.unex.Load() != 1 {
