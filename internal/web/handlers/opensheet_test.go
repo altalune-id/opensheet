@@ -79,6 +79,12 @@ func (t readScopedTokens) TokenSourceFor(ctx context.Context, id uuid.UUID) (oau
 	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
 }
 
+type writeScopedTokens struct{ svc *credential.Service }
+
+func (t writeScopedTokens) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
+}
+
 func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *sheetsFixture {
 	t.Helper()
 	base := newFixture(t)
@@ -98,6 +104,9 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 	clients := func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
 		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(google.url))
 	}
+	writers := func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Writer, error) {
+		return gsheet.NewWriter(ctx, ts, gworkspace.WithBaseURL(google.url))
+	}
 
 	sl := testSealer(t)
 	credStore := fakes.NewCredential()
@@ -106,7 +115,8 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 
 	sprdStore := fakes.NewSpreadsheet()
 	sprds := spreadsheet.NewService(sprdStore, discardLogger(), passthroughUnexpected(),
-		readScopedTokens{svc: creds}, clients)
+		readScopedTokens{svc: creds}, clients,
+		writeScopedTokens{svc: creds}, writers)
 
 	snaps := fakes.NewSheetSnapshots()
 	sheetStore := fakes.NewSheet()

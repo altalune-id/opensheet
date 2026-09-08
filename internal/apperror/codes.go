@@ -71,6 +71,7 @@ const (
 	CodeSpreadsheetAlreadyExists = "SPR002"
 	CodeSpreadsheetInvalidFileID = "SPR003"
 	CodeSpreadsheetInvalidTitle  = "SPR004"
+	CodeSpreadsheetNotWritable   = "SPR005"
 
 	CodeSheetNotFound            = "SHT001"
 	CodeSheetAlreadyExists       = "SHT002"

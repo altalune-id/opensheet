@@ -26,27 +26,34 @@ type TokenSources interface {
 
 // Service is the spreadsheets driving port.
 type Service struct {
-	store      Store
-	log        *slog.Logger
-	unexpected apperror.UnexpectedFunc
-	tokens     TokenSources
-	clients    gsheet.Factory
+	store       Store
+	log         *slog.Logger
+	unexpected  apperror.UnexpectedFunc
+	tokens      TokenSources
+	clients     gsheet.Factory
+	writeTokens TokenSources
+	writers     gsheet.WriterFactory
 }
 
 // NewService binds the service to its dependencies.
+// NOTE: tokens and writeTokens are separate so a read stays read-scoped; only writeTokens is pinned to gsheet.ScopeReadWrite.
 func NewService(
 	store Store,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
 	tokens TokenSources,
 	clients gsheet.Factory,
+	writeTokens TokenSources,
+	writers gsheet.WriterFactory,
 ) *Service {
 	return &Service{
-		store:      store,
-		log:        log.With("module", "spreadsheet"),
-		unexpected: unexpected,
-		tokens:     tokens,
-		clients:    clients,
+		store:       store,
+		log:         log.With("module", "spreadsheet"),
+		unexpected:  unexpected,
+		tokens:      tokens,
+		clients:     clients,
+		writeTokens: writeTokens,
+		writers:     writers,
 	}
 }
 
@@ -259,6 +266,41 @@ func (s *Service) ListTabs(ctx context.Context, id uuid.UUID) ([]string, error) 
 	}
 	span.SetAttributes(attribute.Int("spreadsheet.tabs", len(tabs)))
 	return tabs, nil
+}
+
+// AddTab creates a tab titled title in the identified document, through its bound credential.
+func (s *Service) AddTab(ctx context.Context, spreadsheetID uuid.UUID, title string) error {
+	ctx, span := tracer.Start(ctx, "spreadsheet.AddTab",
+		trace.WithAttributes(attribute.String("spreadsheet.id", spreadsheetID.String())))
+	defer span.End()
+
+	sp, err := s.resolve(ctx, spreadsheetID, "AddTab")
+	if err != nil {
+		span.RecordError(err)
+		return err
+	}
+	// SECURITY: the flag is checked before any Google call, so a non-writable document is never mutated and never probed through the write path.
+	if !sp.Writable {
+		refusal := &NotWritableError{ID: sp.ID.String(), GoogleFileID: sp.GoogleFileID}
+		span.RecordError(refusal)
+		return refusal
+	}
+
+	ts, err := s.writeTokens.TokenSourceFor(ctx, sp.CredentialID)
+	if err != nil {
+		span.RecordError(err)
+		return s.translate(ctx, "spreadsheet.AddTab: token source", err, sp)
+	}
+	writer, err := s.writers(ctx, ts)
+	if err != nil {
+		span.RecordError(err)
+		return s.translate(ctx, "spreadsheet.AddTab: build writer", err, sp)
+	}
+	if err := writer.AddTab(ctx, sp.GoogleFileID, title); err != nil {
+		span.RecordError(err)
+		return s.translate(ctx, "spreadsheet.AddTab: add tab", gwerr.AppError(err), sp)
+	}
+	return nil
 }
 
 func (s *Service) resolve(ctx context.Context, id uuid.UUID, op string) (*Spreadsheet, error) {

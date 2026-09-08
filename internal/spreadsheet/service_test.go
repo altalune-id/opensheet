@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,7 +77,21 @@ func factoryFor(t *testing.T, baseURL string) gsheet.Factory {
 	}
 }
 
-func newSvc(t *testing.T, store spreadsheet.Store, tokens spreadsheet.TokenSources, clients gsheet.Factory) (*spreadsheet.Service, *int) {
+func writerFactoryFor(t *testing.T, baseURL string) gsheet.WriterFactory {
+	t.Helper()
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Writer, error) {
+		return gsheet.NewWriter(ctx, ts, gworkspace.WithBaseURL(baseURL))
+	}
+}
+
+func newFullSvc(
+	t *testing.T,
+	store spreadsheet.Store,
+	tokens spreadsheet.TokenSources,
+	clients gsheet.Factory,
+	writeTokens spreadsheet.TokenSources,
+	writers gsheet.WriterFactory,
+) (*spreadsheet.Service, *int) {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
@@ -84,7 +100,17 @@ func newSvc(t *testing.T, store spreadsheet.Store, tokens spreadsheet.TokenSourc
 		return apperror.New(apperror.CodeUnexpectedError, err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: apperror.CodeUnexpectedError}).WithCause(err)
 	}
-	return spreadsheet.NewService(store, log, unexpected, tokens, clients), &calls
+	return spreadsheet.NewService(store, log, unexpected, tokens, clients, writeTokens, writers), &calls
+}
+
+func newSvc(t *testing.T, store spreadsheet.Store, tokens spreadsheet.TokenSources, clients gsheet.Factory) (*spreadsheet.Service, *int) {
+	t.Helper()
+	return newFullSvc(t, store, tokens, clients, &fakeTokenSources{}, writerFactoryFor(t, "http://127.0.0.1:1"))
+}
+
+func newWriteSvc(t *testing.T, store spreadsheet.Store, writeTokens spreadsheet.TokenSources, writers gsheet.WriterFactory) (*spreadsheet.Service, *int) {
+	t.Helper()
+	return newFullSvc(t, store, &fakeTokenSources{}, factoryFor(t, "http://127.0.0.1:1"), writeTokens, writers)
 }
 
 func newStoreSvc(t *testing.T, store spreadsheet.Store) (*spreadsheet.Service, *int) {
@@ -748,6 +774,268 @@ func TestService_ListTabs(t *testing.T) {
 			svc, unex := newSvc(t, store, &fakeTokenSources{}, factoryFor(t, sheetsServer(t, tc.status, tc.body).URL))
 
 			_, err := svc.ListTabs(ctx, sp.ID)
+			if !tc.wantErr(err) {
+				t.Fatalf("wrong error type: %T: %v", err, err)
+			}
+			if *unex != 0 {
+				t.Error("a google failure is expected and shown to the user, not an incident")
+			}
+			if _, ok := apperror.AsAppError(err); !ok {
+				t.Error("the translated error must carry a wire code")
+			}
+		})
+	}
+}
+
+type recordedRequest struct {
+	method string
+	path   string
+	body   string
+}
+
+type recordingSheets struct {
+	mu       sync.Mutex
+	requests []recordedRequest
+
+	status int
+	body   string
+	url    string
+}
+
+func newRecordingSheets(t *testing.T, status int, body string) *recordingSheets {
+	t.Helper()
+	f := &recordingSheets{status: status, body: body}
+	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	t.Cleanup(srv.Close)
+	f.url = srv.URL
+	return f
+}
+
+func (f *recordingSheets) serve(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	f.mu.Lock()
+	f.requests = append(f.requests, recordedRequest{method: r.Method, path: r.URL.Path, body: strings.TrimSpace(string(body))})
+	f.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if f.status != http.StatusOK {
+		w.WriteHeader(f.status)
+	}
+	_, _ = w.Write([]byte(f.body))
+}
+
+func (f *recordingSheets) recorded() []recordedRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.requests)
+}
+
+func (f *recordingSheets) writers(t *testing.T) gsheet.WriterFactory {
+	t.Helper()
+	return writerFactoryFor(t, f.url)
+}
+
+func seedWritable(t *testing.T, store *fakes.Spreadsheet, tc tenant.Context, fileID string) *spreadsheet.Spreadsheet {
+	t.Helper()
+	sp := seed(t, store, tc, fileID)
+	sp.SetWritable(true)
+	if err := store.Save(context.Background(), sp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return sp
+}
+
+func TestService_AddTab(t *testing.T) {
+	t.Run("refuses a non-writable spreadsheet before any google call", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seed(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, unex := newWriteSvc(t, store, &fakeTokenSources{}, google.writers(t))
+
+		err := svc.AddTab(ctx, sp.ID, "Q2")
+		if !spreadsheet.IsNotWritableError(err) {
+			t.Fatalf("want IsNotWritableError, got %T: %v", err, err)
+		}
+		if got := google.recorded(); len(got) != 0 {
+			t.Errorf("no request may reach Google for a non-writable spreadsheet, got %v", got)
+		}
+		if *unex != 0 {
+			t.Error("a refusal is expected, not an incident")
+		}
+		if _, ok := apperror.AsAppError(err); !ok {
+			t.Error("the refusal must carry a wire code")
+		}
+	})
+	t.Run("creates the tab through a batchUpdate", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, unex := newWriteSvc(t, store, &fakeTokenSources{}, google.writers(t))
+
+		if err := svc.AddTab(ctx, sp.ID, "Q2"); err != nil {
+			t.Fatalf("AddTab: %v", err)
+		}
+		got := google.recorded()
+		if len(got) != 1 {
+			t.Fatalf("recorded %d requests, want 1: %v", len(got), got)
+		}
+		if got[0].method != http.MethodPost {
+			t.Errorf("method = %q, want POST", got[0].method)
+		}
+		if want := "/v4/spreadsheets/" + goodFileID + ":batchUpdate"; got[0].path != want {
+			t.Errorf("path = %q, want %q", got[0].path, want)
+		}
+		if want := `{"requests":[{"addSheet":{"properties":{"title":"Q2"}}}]}`; got[0].body != want {
+			t.Errorf("body = %s, want %s", got[0].body, want)
+		}
+		if *unex != 0 {
+			t.Errorf("unexpected() called %d times", *unex)
+		}
+	})
+	t.Run("asks the write-scoped token source, not the read one", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		read, write := &fakeTokenSources{}, &fakeTokenSources{}
+		svc, _ := newFullSvc(t, store, read, factoryFor(t, google.url), write, google.writers(t))
+
+		if err := svc.AddTab(ctx, sp.ID, "Q2"); err != nil {
+			t.Fatalf("AddTab: %v", err)
+		}
+		if len(write.calls) != 1 || write.calls[0] != sp.CredentialID {
+			t.Errorf("write token source asked for %v, want %v", write.calls, sp.CredentialID)
+		}
+		if len(read.calls) != 0 {
+			t.Error("a write must not be minted from the read-only token source")
+		}
+	})
+	t.Run("unknown spreadsheet is NotFoundError", func(t *testing.T) {
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, unex := newWriteSvc(t, fakes.NewSpreadsheet(), &fakeTokenSources{}, google.writers(t))
+		ctx, _ := tenantCtx(t)
+
+		err := svc.AddTab(ctx, uuid.New(), "Q2")
+		if !spreadsheet.IsNotFoundError(err) {
+			t.Fatalf("want IsNotFoundError, got %T: %v", err, err)
+		}
+		if len(google.recorded()) != 0 {
+			t.Error("an unresolved id must not reach Google")
+		}
+		if *unex != 0 {
+			t.Error("a miss is expected, not an incident")
+		}
+	})
+	t.Run("another org's spreadsheet is NotFoundError", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, _ := tenantCtx(t)
+		other := seedWritable(t, store, tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()}, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, _ := newWriteSvc(t, store, &fakeTokenSources{}, google.writers(t))
+
+		err := svc.AddTab(ctx, other.ID, "Q2")
+		if !spreadsheet.IsNotFoundError(err) {
+			t.Fatalf("want IsNotFoundError, got %T: %v", err, err)
+		}
+		if len(google.recorded()) != 0 {
+			t.Error("another tenant's writable document must not be mutated")
+		}
+	})
+	t.Run("missing tenant returns MissingError", func(t *testing.T) {
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, _ := newWriteSvc(t, fakes.NewSpreadsheet(), &fakeTokenSources{}, google.writers(t))
+
+		if err := svc.AddTab(context.Background(), uuid.New(), "Q2"); !tenant.IsMissingError(err) {
+			t.Fatalf("want tenant.MissingError, got %T: %v", err, err)
+		}
+	})
+	t.Run("the writer's own title validation surfaces", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, _ := newWriteSvc(t, store, &fakeTokenSources{}, google.writers(t))
+
+		for _, title := range []string{"   ", strings.Repeat("x", 101)} {
+			err := svc.AddTab(ctx, sp.ID, title)
+			if !gsheet.IsInvalidTabTitleError(err) {
+				t.Fatalf("title %q: want IsInvalidTabTitleError, got %T: %v", title, err, err)
+			}
+		}
+		if len(google.recorded()) != 0 {
+			t.Error("an invalid title must not reach Google")
+		}
+	})
+	t.Run("a coded token-source failure passes through", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, unex := newWriteSvc(t, store, &fakeTokenSources{err: &appErrStub{}}, google.writers(t))
+
+		err := svc.AddTab(ctx, sp.ID, "Q2")
+		var stub *appErrStub
+		if !errors.As(err, &stub) {
+			t.Fatalf("want *appErrStub, got %T: %v", err, err)
+		}
+		if *unex != 0 {
+			t.Error("a coded credential failure is expected, not an incident")
+		}
+	})
+	t.Run("an uncoded token-source failure routes through unexpected", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		google := newRecordingSheets(t, http.StatusOK, `{}`)
+		svc, unex := newWriteSvc(t, store, &fakeTokenSources{err: errors.New("boom")}, google.writers(t))
+
+		if err := svc.AddTab(ctx, sp.ID, "Q2"); err == nil {
+			t.Fatal("want error")
+		}
+		if *unex != 1 {
+			t.Errorf("unexpected() called %d times, want 1", *unex)
+		}
+	})
+	t.Run("a writer factory failure routes through unexpected", func(t *testing.T) {
+		store := fakes.NewSpreadsheet()
+		ctx, tc := tenantCtx(t)
+		sp := seedWritable(t, store, tc, goodFileID)
+		writers := func(context.Context, oauth2.TokenSource) (*gsheet.Writer, error) {
+			return nil, errors.New("cannot build writer")
+		}
+		svc, unex := newWriteSvc(t, store, &fakeTokenSources{}, writers)
+
+		if err := svc.AddTab(ctx, sp.ID, "Q2"); err == nil {
+			t.Fatal("want error")
+		}
+		if *unex != 1 {
+			t.Errorf("unexpected() called %d times, want 1", *unex)
+		}
+	})
+
+	googleFailures := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr func(error) bool
+	}{
+		{name: "404 is a gone google document", status: http.StatusNotFound, body: `{"error":{"code":404}}`, wantErr: gworkspace.IsNotFoundError},
+		{name: "403 is permission denied", status: http.StatusForbidden, body: `{"error":{"code":403}}`, wantErr: gworkspace.IsPermissionDeniedError},
+		{name: "429 is quota exceeded", status: http.StatusTooManyRequests, body: `{"error":{"code":429}}`, wantErr: gworkspace.IsQuotaExceededError},
+		{name: "401 is an expired credential", status: http.StatusUnauthorized, body: `{"error":{"code":401}}`, wantErr: gworkspace.IsAuthExpiredError},
+		{name: "500 is unavailable", status: http.StatusInternalServerError, body: `{"error":{"code":500}}`, wantErr: gworkspace.IsUnavailableError},
+	}
+	for _, tc := range googleFailures {
+		t.Run(tc.name, func(t *testing.T) {
+			store := fakes.NewSpreadsheet()
+			ctx, tctx := tenantCtx(t)
+			sp := seedWritable(t, store, tctx, goodFileID)
+			google := newRecordingSheets(t, tc.status, tc.body)
+			svc, unex := newWriteSvc(t, store, &fakeTokenSources{}, google.writers(t))
+
+			err := svc.AddTab(ctx, sp.ID, "Q2")
 			if !tc.wantErr(err) {
 				t.Fatalf("wrong error type: %T: %v", err, err)
 			}

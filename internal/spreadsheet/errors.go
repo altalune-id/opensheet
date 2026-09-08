@@ -181,3 +181,39 @@ func IsInvalidCredentialError(err error) bool {
 	_, ok := errors.AsType[*InvalidCredentialError](err)
 	return ok
 }
+
+// NotWritableError signals a structural change to a spreadsheet that was never opted in to writes.
+type NotWritableError struct {
+	ID           string
+	GoogleFileID string
+}
+
+func (e *NotWritableError) Error() string {
+	if e.GoogleFileID == "" {
+		return "spreadsheet: not writable: id=" + e.ID
+	}
+	return fmt.Sprintf("spreadsheet: not writable: id=%s google_file_id=%q", e.ID, e.GoogleFileID)
+}
+
+// ToAppError maps NotWritableError to a PermissionDenied envelope.
+func (e *NotWritableError) ToAppError() *apperror.AppError {
+	meta := map[string]string{}
+	if e.ID != "" {
+		meta["spreadsheet_id"] = e.ID
+	}
+	if e.GoogleFileID != "" {
+		meta["google_file_id"] = e.GoogleFileID
+	}
+	return apperror.New(
+		apperror.CodeSpreadsheetNotWritable,
+		"This spreadsheet is not writable",
+		codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeSpreadsheetNotWritable, Meta: meta},
+	)
+}
+
+// IsNotWritableError reports whether err's chain contains a *NotWritableError.
+func IsNotWritableError(err error) bool {
+	_, ok := errors.AsType[*NotWritableError](err)
+	return ok
+}

@@ -180,6 +180,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	}
 
 	clients := gsheetFactory(cfg)
+	writers := gsheetWriterFactory(cfg)
 	connector, oauthCfg := buildGoogleConnector(cfg, log)
 	var credOpts []credential.ServiceOption
 	if oauthCfg != nil {
@@ -189,7 +190,8 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	sheetCaps := capsForSheet{caps: caps}
 	credentials := credential.NewService(credentialStore, log, reporter.Unexpected, k.Sealer, credOpts...)
 	spreadsheets := spreadsheet.NewService(spreadsheetStore, log, reporter.Unexpected,
-		tokensForSpreadsheetRead{svc: credentials}, clients)
+		tokensForSpreadsheetRead{svc: credentials}, clients,
+		tokensForSpreadsheetWrite{svc: credentials}, writers)
 	sheets := sheet.NewService(sheetStore, log, reporter.Unexpected, sheetCaps, snaps, sheetAttempts)
 	apiKeys := apikey.NewService(apiKeyStore, log, reporter.Unexpected, sheetStoreForAPIKey{store: sheetStore})
 
@@ -306,6 +308,12 @@ func assertServicesWiring(s *Services) error {
 func gsheetFactory(cfg *config.Config) gsheet.Factory {
 	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
 		return gsheet.New(ctx, ts, gworkspace.WithTimeout(cfg.Google.Timeout))
+	}
+}
+
+func gsheetWriterFactory(cfg *config.Config) gsheet.WriterFactory {
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Writer, error) {
+		return gsheet.NewWriter(ctx, ts, gworkspace.WithTimeout(cfg.Google.Timeout))
 	}
 }
 

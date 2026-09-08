@@ -114,7 +114,8 @@ func newHarnessOpts(t *testing.T, p session.Principal, aerr error) *harness {
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
 	todoSvc := todo.NewService(tds, log, reporter.Unexpected)
 	credSvc := credential.NewService(creds, log, reporter.Unexpected, sl)
-	sprdSvc := spreadsheet.NewService(sprds, log, reporter.Unexpected, stubTokenSources{}, googleFactory(t))
+	sprdSvc := spreadsheet.NewService(sprds, log, reporter.Unexpected, stubTokenSources{}, googleFactory(t),
+		stubTokenSources{}, googleWriterFactory(t))
 	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps, sheet.NewMemoryIdempotencyStore())
 	keySheets := fakes.NewAPIKeySheets()
 	keySvc := apikey.NewService(keys, log, reporter.Unexpected, keySheets)
@@ -177,6 +178,18 @@ func googleFactory(t *testing.T) gsheet.Factory {
 	t.Cleanup(srv.Close)
 	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
 		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(srv.URL))
+	}
+}
+
+func googleWriterFactory(t *testing.T) gsheet.WriterFactory {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "{}")
+	}))
+	t.Cleanup(srv.Close)
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Writer, error) {
+		return gsheet.NewWriter(ctx, ts, gworkspace.WithBaseURL(srv.URL))
 	}
 }
 

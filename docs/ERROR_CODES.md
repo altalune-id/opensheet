@@ -124,6 +124,7 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SPR002` | `apperror.CodeSpreadsheetAlreadyExists` | Spreadsheet Already Registered |
 | `SPR003` | `apperror.CodeSpreadsheetInvalidFileID` | Spreadsheet Invalid File ID    |
 | `SPR004` | `apperror.CodeSpreadsheetInvalidTitle`  | Spreadsheet Invalid Title      |
+| `SPR005` | `apperror.CodeSpreadsheetNotWritable`   | Spreadsheet Not Writable       |
 
 ## SHT — Sheets
 
