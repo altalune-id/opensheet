@@ -3,40 +3,65 @@
 Embedded goose migrations for Postgres and SQLite, the runtime migrator, the
 RLS boot-time guard, and the tenant-table registry consumed by `tenant.PgConn`.
 
-Migrations are `.sql` templates rendered with `{{.Schema}}`, `{{.TablePrefix}}`,
-and `{{.Role}}` before goose applies them. Both dialects satisfy the same
+Migrations are `.sql` templates rendered with `{{.Schema}}`, `{{.TablePrefix}}`
+and `{{.RLSEnforce}}` before goose applies them. Both dialects satisfy the same
 domain interfaces — SQLite is dev/demo, Postgres is production.
 
 ## Layout
 
 ```
 schema/
-├── migrations/postgres/    # 001_init, 002_rls, 003_bootstrap, VERSION
-├── migrations/sqlite/      # 001_init, 002_bootstrap, VERSION
+├── migrations/postgres/    # 001_init … 008_opensheet_definer, VERSION
+├── migrations/sqlite/      # 001_init … 004_opensheet, VERSION
 ├── migrator.go             # goose runner, template rendering, embed FS
 ├── migrator_templatefs.go  # per-boot template-rendered file system
-├── rls_guard.go            # boot-time BYPASSRLS assertion
+├── rls_guard.go            # boot-time BYPASSRLS rejection + pg_policies audit
 └── tenant_tables_gen.go    # generated from RLS migrations (make tenant-tables)
 ```
 
-`TenantTableSuffixes` (in `tenant_tables_gen.go`) drives RLS policy
-enforcement — every table in this list carries `org_id` and gets
-`FORCE ROW LEVEL SECURITY` on Postgres. Regenerate with
-`make tenant-tables` after adding a tenant-scoped table.
+`TenantTableSuffixes` (in `tenant_tables_gen.go`) drives RLS enforcement —
+every table in that list carries `org_id` and gets `FORCE ROW LEVEL SECURITY`
+on Postgres. Regenerate with `make tenant-tables` after adding a tenant-scoped
+table; the generator derives the list from the RLS migrations, so a table with
+no policy silently will not appear.
+
+## Template variables
+
+Exactly three, defined by `templateVars` in `migrator_templatefs.go`:
+
+| Variable           | Meaning                                                                 |
+| ------------------ | ----------------------------------------------------------------------- |
+| `{{.Schema}}`      | schema holding the app's tables (`db.schema`)                           |
+| `{{.TablePrefix}}` | prepended to every table, index, policy and function (`db.tablePrefix`) |
+| `{{.RLSEnforce}}`  | `db.allowBypassRLS` inverted — wraps the whole body of an RLS migration |
+
+There is **no `Role` variable.** Migrations do not `SET ROLE`; the migrator
+_connection_ does. `boot.MigratorDBConfig` sets `DBConfig.Role` from
+`db.migrator.role` and `internal/platform/db/db.go:97-109` issues one
+`SET ROLE` on that session, optionally over a separate `db.migrator.dsn`. A
+`{{.Role}}` reference in SQL is not an error — Go templates render a missing map
+key as the zero value — so `{{if .Role}}` is silently always false and any DDL
+inside it would run as the app role. Do not write one.
 
 ## Tables
 
 ```mermaid
 erDiagram
     users ||--o{ memberships : "belongs to"
-    users ||--o{ orgs : "created"
     users ||--o{ invites : "invited by"
-    users ||--o{ todos : "assigned to"
+    users ||--o{ credentials : "authorized"
     orgs ||--o{ memberships : "has"
     orgs ||--o{ projects : "owns"
     orgs ||--o{ invites : "pending"
-    orgs ||--o{ todos : "scopes"
-    projects ||--o{ todos : "contains"
+    projects ||--o{ credentials : "holds"
+    projects ||--o{ spreadsheets : "registers"
+    projects ||--o{ sheets : "publishes"
+    projects ||--o{ api_keys : "issues"
+    credentials ||--o{ spreadsheets : "grants access"
+    spreadsheets ||--o{ sheets : "has tabs"
+    sheets ||--o{ sheet_snapshots : "cached as"
+    api_keys ||--o{ api_key_sheets : "granted"
+    sheets ||--o{ api_key_sheets : "granted to"
 
     users {
         uuid id PK
@@ -80,26 +105,131 @@ erDiagram
         timestamptz accepted_at
         uuid invited_by FK
     }
-    todos {
+    credentials {
         uuid id PK
         uuid org_id FK
         uuid project_id FK
-        uuid user_id FK
+        text name "unique per project"
+        text kind "service_account|google_oauth"
+        text status "active|reauth_needed"
+        uuid authorized_by_user_id FK
+        text google_account_email
+        bytea sealed "AES-256-GCM, AAD-bound"
+    }
+    spreadsheets {
+        uuid id PK
+        uuid org_id FK
+        uuid project_id FK
+        uuid credential_id FK "RESTRICT"
+        text google_file_id "unique per project"
         text title
-        bool done
+    }
+    sheets {
+        uuid id PK
+        uuid org_id FK
+        uuid project_id FK
+        uuid spreadsheet_id FK "CASCADE"
+        text tab "empty means first tab"
+        text slug "unique per project"
+        text visibility "key|public"
+        int cache_ttl_secs "0 means default, max 86400"
+    }
+    api_keys {
+        uuid id PK
+        uuid org_id FK
+        uuid project_id FK
+        text name
+        text key_prefix UK
+        bytea secret_hash "SHA-256"
+        text_array scopes
+        timestamptz expires_at
+        timestamptz last_used_at
+        timestamptz revoked_at
+    }
+    api_key_sheets {
+        uuid api_key_id PK
+        uuid sheet_id PK
+        uuid org_id FK
+    }
+    sheet_snapshots {
+        uuid sheet_id PK
+        text tab PK
+        text etag
+        bytea payload "exact bytes served"
+        timestamptz fetched_at
+        timestamptz expires_at
+        uuid org_id FK
+        uuid project_id FK
     }
 ```
 
-`users` is global (no `org_id`); everything else is tenant-scoped and
-appears in `TenantTableSuffixes`.
+`users` is global (no `org_id`); every other table is tenant-scoped and appears
+in `TenantTableSuffixes`. `api_key_sheets` carries `org_id` despite being a join
+table for exactly that reason — a join table still needs its own policy.
+
+An **empty `api_key_sheets` set means "every sheet in the key's project"**, not
+"no sheets". That default is why `apikey.ByPrefix` reads the grant inside a
+transaction scoped to the key's own org rather than defaulting it — see below.
+
+`sheet_snapshots.payload` is `bytea`, not `jsonb`, because `etag` is a hash of
+those exact bytes and `jsonb` would reorder keys and normalise numbers.
+
+## SECURITY DEFINER wrappers
+
+Some lookups run before any tenant scope exists, so they cannot pass through
+RLS. Each is a `SECURITY DEFINER` function owned by the migrator role, with
+`SET search_path` pinned and `EXECUTE` revoked from `PUBLIC`:
+
+| Function                         | Migration | Consulted before scope exists to…         |
+| -------------------------------- | --------- | ----------------------------------------- |
+| `current_org_id`                 | `002`     | read the GUC RLS policies compare against |
+| `list_org_ids`                   | `005`     | enumerate tenants for the scheduler       |
+| `resolve_org_by_slug`            | `005`     | turn a URL slug into an org               |
+| `list_orgs_for_user`             | `005`     | list a user's orgs at login               |
+| `resolve_invite_by_token_hash`   | `005`     | redeem an invite                          |
+| `list_pending_invites_for_email` | `005`     | find an invite during signup              |
+| `apikey_by_prefix`               | `008`     | resolve a presented API key's org         |
+
+SECURITY: `apikey_by_prefix` returns `SETOF api_keys` — the key row only. It
+deliberately does **not** join `api_key_sheets`, which has its own RLS policy.
+A pre-scope join there returns zero grant rows, and an empty grant means "every
+sheet in the project", so a key restricted to one sheet would authenticate as
+unrestricted. `ByPrefix` therefore resolves the key without RLS and then reads
+the grant inside a `BeginTenanted` transaction on that key's own org. Do not
+collapse it into one query.
 
 ## Adding a migration
 
 1. Add `NNN_<name>.sql` under both `migrations/postgres/` and
-   `migrations/sqlite/`. Use goose `-- +goose Up` / `-- +goose Down`
-   markers and `{{.Schema}}` / `{{.TablePrefix}}` template variables.
-2. Bump `VERSION` in the affected dialect(s) to the highest `NNN` present.
-3. If the new table carries `org_id`, add its RLS policy in the Postgres
-   migration and run `make tenant-tables` to regenerate the registry.
-4. If the migration must run as owner (DDL), prefix the block with
-   `{{if .Role}}SET ROLE {{.Role}};{{end}}`.
+   `migrations/sqlite/`, with goose `-- +goose Up` / `-- +goose Down` and
+   `-- +goose StatementBegin` / `StatementEnd` markers.
+2. **Bump `VERSION`** in the affected dialect to the highest `NNN` present.
+   `migrator.go` reads it as goose's target, so a file beyond the pin is
+   **silently ignored** — no error, just an absent table.
+3. Write identifiers **unquoted**: `{{.Schema}}.{{.TablePrefix}}widgets`. Plain
+   `CREATE TABLE` — no existing migration uses `IF NOT EXISTS`, goose's version
+   table already makes it redundant.
+4. If the table carries `org_id`, add its policy to the Postgres RLS migration
+   and run `make tenant-tables`. Policies use `USING (...)` only, call the
+   `current_org_id()` helper, and never inline
+   `current_setting('app.current_org_id', ...)` —
+   `tenant_policy_guard_test.go` counts inlined uses and fails the build.
+   Wrap the whole body in `{{if .RLSEnforce}} … {{end}}`, and pair
+   `ENABLE ROW LEVEL SECURITY` with `FORCE ROW LEVEL SECURITY`.
+5. Migrations are append-only history. Never edit or delete one that a deployed
+   instance has already applied — correct it with a new migration instead.
+
+## Verifying
+
+```bash
+go test ./schema/...                                  # template + guard tests
+go test -tags=integration ./schema/...                # against real Postgres
+opensheet migrate up                                  # NOT `migrate`, which only prints help
+make tenant-tables                                    # regenerate the registry
+```
+
+The integration suite is the only thing that proves a policy actually works:
+`TestAuditPolicies_AcceptsMigratedHelperScopedPolicies` runs `AuditPolicies`
+over every `TenantTableNames` entry against a freshly migrated schema. A test
+connecting as a superuser proves nothing about RLS, so the fixtures bind the
+store to a `NOBYPASSRLS` role and assert `rolbypassrls = false` first.
