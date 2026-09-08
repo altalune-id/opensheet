@@ -1138,3 +1138,28 @@ func setTenant(ctx context.Context, orgID, userID uuid.UUID) context.Context {
 func setTenantProject(ctx context.Context, orgID, projectID, userID uuid.UUID) context.Context {
 	return tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID, UserID: userID})
 }
+
+// NOTE: a fragment rendered with Deps.Base instead of Deps.fragment loses ActiveOrg, so
+// ProjectPath collapses to /orgs and every swapped form posts there.
+func TestTodoHandler_FragmentLinksStayProjectScoped(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	uid := uuid.Must(uuid.NewV7())
+	o := f.seedOrg(t, "acme", uid)
+	ctx := setTenant(context.Background(), o.ID, uid)
+	proj, err := f.Projects.Create(ctx, o.ID, "alpha", "Alpha")
+	require.NoError(t, err)
+
+	h := handlers.NewTodoHandler(f.Deps, f.Projects, f.Todos)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	p := session.Principal{UserID: uid, ActiveOrgID: o.ID, ActiveProjectID: proj.ID}
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/orgs/acme/projects/alpha/todos", "title=milk", p))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "/orgs/acme/projects/alpha/todos",
+		"the swapped todo fragment must keep links under the project")
+	assert.NotContains(t, rec.Body.String(), `"/orgs"`,
+		"a fragment rendered without ActiveOrg collapses ProjectPath to /orgs")
+}
