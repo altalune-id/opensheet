@@ -22,7 +22,7 @@ fail=0
 declare -a missing_notes
 
 # List of modules that follow the full store-backed shape.
-STORE_BACKED=(todo user org project invite)
+STORE_BACKED=(todo user org project invite credential spreadsheet sheet apikey)
 
 # Modules exempt from store-backed conventions.
 STATELESS=(auth)
@@ -88,5 +88,6 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: every module under internal/{todo,user,org,project,invite,auth}/ has its canonical file set"
+all_checked="$(printf '%s,' "${STORE_BACKED[@]}" "${STATELESS[@]}" | sed 's/,$//')"
+echo "OK: every module under internal/{${all_checked}}/ has its canonical file set"
 exit 0
