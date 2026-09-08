@@ -92,7 +92,7 @@ func newPgSessionFixture(t *testing.T) *pgSessionFixture {
 }
 
 func (f *pgSessionFixture) newStore(unexpected apperror.UnexpectedFunc) session.Store {
-	return session.NewStore(f.dbCfg, db.Pool{W: f.appDB, R: f.appDB}, f.sealer, discardLogger(), unexpected)
+	return session.NewStore(f.dbCfg, db.Pool{W: f.appDB, R: f.appDB}, f.sealer, unexpected)
 }
 
 // NOTE: without this, one subtest's expired row is swept by the next subtest's DeleteExpired count.
