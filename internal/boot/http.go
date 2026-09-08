@@ -74,6 +74,7 @@ func buildWebHandler(
 	projects *project.Service,
 	todos *todo.Service,
 	invites *invite.Service,
+	svcs *Services,
 	onboards *onboard.Service,
 	required *atomic.Bool,
 	setupToken string,
@@ -94,6 +95,11 @@ func buildWebHandler(
 	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
 	projectHandler := webhandlers.NewProjectHandler(deps, projects)
 	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
+	credentialHandler := webhandlers.NewCredentialHandler(deps, projects, svcs.Credentials, svcs.Connect)
+	spreadsheetHandler := webhandlers.NewSpreadsheetHandler(deps, projects, svcs.Spreadsheets, svcs.Credentials)
+	sheetHandler := webhandlers.NewSheetHandler(deps, projects, svcs.Sheets, svcs.Spreadsheets, svcs.Read)
+	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, projects, svcs.APIKeys, svcs.Sheets)
+	googleHandler := webhandlers.NewGoogleConnectHandler(deps, projects, svcs.Credentials, svcs.Connect)
 	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
 	localeHandler := webhandlers.NewLocaleHandler(deps, users)
 	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
@@ -106,7 +112,9 @@ func buildWebHandler(
 		BasePath: cfg.HTTP.BasePath,
 		HealthOK: healthOK,
 		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler, inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
+			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler,
+			credentialHandler, spreadsheetHandler, sheetHandler, apiKeyHandler, googleHandler,
+			inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
 		},
 		APIHandler:  apiHandler,
 		DataHandler: dataHandler,

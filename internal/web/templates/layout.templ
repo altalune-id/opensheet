@@ -488,6 +488,18 @@ templ projectMenu(d web.LayoutData, slug string) {
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
 			@icons.Icon("list-checks", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.todos") }</span>
 		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/credentials")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "credentials") }>
+			@icons.Icon("shield", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.credentials") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/spreadsheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "spreadsheets") }>
+			@icons.Icon("file-spreadsheet", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.spreadsheets") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/sheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "sheets") }>
+			@icons.Icon("table-2", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.sheets") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/keys")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "keys") }>
+			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.keys") }</span>
+		</a>
 	</nav>
 }
 

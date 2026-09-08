@@ -1,0 +1,166 @@
+package templates
+
+import (
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+type ScopeOption struct {
+	Value   string
+	Checked bool
+}
+
+type KeyRow struct {
+	ID       string
+	Name     string
+	Prefix   string
+	Scopes   string
+	Sheets   string
+	Expires  string
+	LastUsed string
+	Revoked  bool
+}
+
+type KeysView struct {
+	ProjectSlug  string
+	Rows         []KeyRow
+	Scopes       []ScopeOption
+	SheetOptions []OptionRow
+	Name         string
+	Minted       string
+	Error        string
+	ErrorCode    string
+}
+
+templ KeySection(d web.LayoutData, v KeysView) {
+	<section id="keys-section">
+		if v.Error != "" {
+			<div data-error="keys">
+				@ErrorBanner(d, v.Error, v.ErrorCode)
+			</div>
+		}
+		if v.Minted != "" {
+			<div data-minted-key class="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/25 dark:bg-emerald-500/10">
+				<p class="text-sm font-medium text-emerald-900 dark:text-emerald-200">{ d.Tr("keys.minted_heading") }</p>
+				<p class="mt-2 break-all rounded-md bg-background px-3 py-2 font-mono text-xs text-foreground">{ v.Minted }</p>
+				<p class="mt-2 text-xs text-emerald-900/80 dark:text-emerald-200/80">{ d.Tr("keys.minted_warning") }</p>
+			</div>
+		}
+		<form
+			method="post"
+			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys")) }
+			hx-post={ d.ProjectPath(v.ProjectSlug, "/keys") }
+			hx-target="#keys-section"
+			hx-swap="outerHTML"
+			class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm"
+		>
+			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("keys.mint_heading") }</h2>
+			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("keys.mint_subtitle") }</p>
+			<div class="mt-4 grid gap-4 sm:grid-cols-2">
+				<div>
+					<label for="key-name" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.name") }</label>
+					<input id="key-name" name="name" type="text" required value={ v.Name } placeholder={ d.Tr("keys.name_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+				</div>
+				<div>
+					<label for="key-expires" class="block text-sm font-medium text-foreground/90">{ d.Tr("keys.expires") }</label>
+					<input id="key-expires" name="expires_at" type="date" class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+					<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("keys.expires_hint") }</p>
+				</div>
+			</div>
+			<fieldset class="mt-4">
+				<legend class="text-sm font-medium text-foreground/90">{ d.Tr("keys.scopes") }</legend>
+				<div class="mt-2 grid gap-1.5 sm:grid-cols-2">
+					for _, s := range v.Scopes {
+						<label class="flex items-center gap-2 text-sm text-foreground">
+							<input type="checkbox" name="scopes" value={ s.Value } checked?={ s.Checked } class="size-4"/>
+							<span class="font-mono text-xs">{ s.Value }</span>
+						</label>
+					}
+				</div>
+			</fieldset>
+			if len(v.SheetOptions) > 0 {
+				<fieldset class="mt-4">
+					<legend class="text-sm font-medium text-foreground/90">{ d.Tr("keys.grant") }</legend>
+					<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("keys.grant_hint") }</p>
+					<div class="mt-2 grid gap-1.5 sm:grid-cols-2">
+						for _, s := range v.SheetOptions {
+							<label class="flex items-center gap-2 text-sm text-foreground">
+								<input type="checkbox" name="sheet_ids" value={ s.Value } class="size-4"/>
+								<span class="font-mono text-xs">{ s.Label }</span>
+							</label>
+						}
+					</div>
+				</fieldset>
+			}
+			<button type="submit" class="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("key", "h-4 w-4")
+				<span>{ d.Tr("keys.mint_submit") }</span>
+			</button>
+		</form>
+		if len(v.Rows) == 0 {
+			<div data-empty="keys" class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">{ d.Tr("keys.empty") }</p>
+			</div>
+		} else {
+			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				for _, k := range v.Rows {
+					<li class="flex items-center gap-3 px-4 py-3">
+						<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
+							@icons.Icon("key", "h-4 w-4")
+						</span>
+						<span class="min-w-0 flex-1">
+							<span class="flex items-center gap-2">
+								<span class="truncate text-sm font-medium text-foreground">{ k.Name }</span>
+								<span class="font-mono text-xs text-muted-foreground">{ k.Prefix + "…" }</span>
+								if k.Revoked {
+									<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("keys.revoked") }</span>
+								}
+							</span>
+							<span class="mt-0.5 block truncate text-xs text-muted-foreground">{ k.Scopes }</span>
+							<span class="mt-0.5 block truncate text-xs text-muted-foreground/80">{ k.Sheets + " · " + k.Expires + " · " + k.LastUsed }</span>
+						</span>
+						if !k.Revoked {
+							<form
+								method="post"
+								action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/revoke")) }
+								hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/revoke") }
+								hx-target="#keys-section"
+								hx-swap="outerHTML"
+								class="inline"
+							>
+								<button type="submit" class="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">{ d.Tr("keys.revoke") }</button>
+							</form>
+						}
+						<form
+							method="post"
+							action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/delete")) }
+							hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/delete") }
+							hx-target="#keys-section"
+							hx-swap="outerHTML"
+							hx-confirm={ d.Tr("keys.delete_confirm") }
+							class="inline"
+						>
+							<button type="submit" class="rounded p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40" aria-label={ d.Tr("common.delete") }>
+								@icons.Icon("trash-2", "h-4 w-4")
+							</button>
+						</form>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+templ KeysPage(d web.LayoutData, v KeysView) {
+	<div>
+		<header class="border-b border-border pb-4">
+			<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("nav.keys") }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("keys.subtitle") }</p>
+		</header>
+		@KeySection(d, v)
+	</div>
+}
+
+templ KeysLayout(d web.LayoutData, v KeysView) {
+	@Layout(web.WithContent(d, KeysPage(d, v)))
+}

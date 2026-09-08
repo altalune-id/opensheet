@@ -1,0 +1,65 @@
+package templates
+
+import "altalune.id/opensheet/internal/web"
+
+type GooglePickerView struct {
+	ProjectSlug  string
+	APIKey       string
+	AccessToken  string
+	ReturnURL    string
+}
+
+// GooglePickerPage opens Google's file chooser and hands the picked document back to the registry form.
+// NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so an
+// OPENSHEET_UI_MODE=vendored deployment keeps one external runtime dependency on this page alone.
+// https://developers.google.com/drive/picker/guides/overview
+templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
+	<div class="mx-auto max-w-xl">
+		<header class="border-b border-border pb-4">
+			<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } class="text-xs text-muted-foreground hover:text-foreground">{ "← " + d.Tr("nav.spreadsheets") }</a>
+			<h1 class="mt-2 text-2xl font-semibold text-foreground">{ d.Tr("picker.title") }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("picker.subtitle") }</p>
+		</header>
+		<div
+			id="opensheet-picker"
+			data-api-key={ v.APIKey }
+			data-access-token={ v.AccessToken }
+			data-return-url={ v.ReturnURL }
+			class="mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm"
+		>
+			{ d.Tr("picker.loading") }
+		</div>
+		<noscript>
+			<p class="mt-4 text-sm text-muted-foreground">{ d.Tr("picker.noscript") }</p>
+		</noscript>
+		<script src="https://apis.google.com/js/api.js" async defer onload="opensheetPickerReady()"></script>
+		<script>
+		function opensheetPickerReady() {
+			var host = document.getElementById('opensheet-picker');
+			if (!host || !window.gapi) return;
+			gapi.load('picker', function() {
+				var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
+				view.setIncludeFolders(true);
+				var picker = new google.picker.PickerBuilder()
+					.setDeveloperKey(host.getAttribute('data-api-key'))
+					.setOAuthToken(host.getAttribute('data-access-token'))
+					.addView(view)
+					.setCallback(function(data) {
+						if (data.action !== google.picker.Action.PICKED) return;
+						var doc = data.docs[0];
+						var url = host.getAttribute('data-return-url') +
+							'?google_file_id=' + encodeURIComponent(doc.id) +
+							'&title=' + encodeURIComponent(doc.name || '');
+						window.location.assign(url);
+					})
+					.build();
+				picker.setVisible(true);
+			});
+		}
+		</script>
+	</div>
+}
+
+templ GooglePickerLayout(d web.LayoutData, v GooglePickerView) {
+	@Layout(web.WithContent(d, GooglePickerPage(d, v)))
+}

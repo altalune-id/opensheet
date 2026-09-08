@@ -255,7 +255,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	dataHandler := buildDataHandler(cfg, caps, log, svcs)
 
 	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
-		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, setup,
+		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs, svcs.Onboards, required, setup,
 		apiHandler, dataHandler, bundle, defaultLoc)
 
 	httpHandler := webHandler
