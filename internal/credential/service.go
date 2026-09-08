@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"altalune.id/opensheet/internal/apperror"
@@ -28,16 +29,35 @@ type Service struct {
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 	sealer     sealer.Sealer
+	oauth      *oauth2.Config
+}
+
+// ServiceOption tunes Service construction.
+type ServiceOption func(*Service)
+
+// WithGoogleOAuth installs the deployment's OAuth client so google_oauth credentials can mint tokens.
+func WithGoogleOAuth(cfg *oauth2.Config) ServiceOption {
+	return func(s *Service) { s.oauth = cfg }
 }
 
 // NewService binds the service to its dependencies.
-func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc, sl sealer.Sealer) *Service {
-	return &Service{
+func NewService(
+	store Store,
+	log *slog.Logger,
+	unexpected apperror.UnexpectedFunc,
+	sl sealer.Sealer,
+	opts ...ServiceOption,
+) *Service {
+	s := &Service{
 		store:      store,
 		log:        log.With("module", "credential"),
 		unexpected: unexpected,
 		sealer:     sl,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // UploadServiceAccount seals an uploaded Google service-account key into a new credential.
@@ -170,8 +190,7 @@ func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (gsheets.Tok
 	if c.Status == StatusReauthNeeded {
 		return nil, &ReauthNeededError{ID: id.String()}
 	}
-	if c.Kind != KindServiceAccount {
-		// TODO: google_oauth token sources land with the connect flow in Phase 1b.
+	if !c.Kind.Valid() {
 		return nil, &InvalidKindError{Kind: string(c.Kind)}
 	}
 	if len(c.Sealed) == 0 {
@@ -183,7 +202,25 @@ func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (gsheets.Tok
 		span.RecordError(err)
 		return nil, err
 	}
+	if c.Kind == KindGoogleOAuth {
+		return s.refreshTokenSource(ctx, plain)
+	}
+	return serviceAccountTokenSource(ctx, plain)
+}
 
+// SECURITY: plain holds a Google refresh token; it is handed straight to oauth2 and never returned, logged or recorded on a span.
+func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (gsheets.TokenSource, error) {
+	if s.oauth == nil {
+		return nil, &NotConfiguredError{}
+	}
+	refresh := strings.TrimSpace(string(plain))
+	if refresh == "" {
+		return nil, &NotSealedError{Situation: "token source"}
+	}
+	return s.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh}), nil
+}
+
+func serviceAccountTokenSource(ctx context.Context, plain []byte) (gsheets.TokenSource, error) {
 	cfg, err := google.JWTConfigFromJSON(plain, gsheets.ScopeReadOnly)
 	if err != nil {
 		// SECURITY: the google error quotes the payload, so it is dropped rather than wrapped.

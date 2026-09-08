@@ -214,3 +214,75 @@ func IsNotSealedError(err error) bool {
 	_, ok := errors.AsType[*NotSealedError](err)
 	return ok
 }
+
+// StateInvalidError reports that a Google connect state failed verification.
+type StateInvalidError struct{ Reason string }
+
+// SECURITY: Reason is a fixed phrase; it must never quote the received state.
+func (e *StateInvalidError) Error() string { return "credential: connect state: " + e.Reason }
+
+// ToAppError converts the typed error into the wire envelope.
+func (e *StateInvalidError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeCredentialStateInvalid,
+		"This Google connection attempt is no longer valid; start again",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeCredentialStateInvalid,
+			Meta: map[string]string{"reason": e.Reason},
+		},
+	)
+}
+
+// IsStateInvalidError reports whether err's chain contains a *StateInvalidError.
+func IsStateInvalidError(err error) bool {
+	_, ok := errors.AsType[*StateInvalidError](err)
+	return ok
+}
+
+// NoRefreshTokenError reports that Google granted access without a refresh token, so the grant cannot outlive the browser.
+type NoRefreshTokenError struct{}
+
+func (*NoRefreshTokenError) Error() string {
+	return "credential: connect: google returned no refresh token"
+}
+
+// ToAppError converts the typed error into the wire envelope.
+func (*NoRefreshTokenError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeCredentialReauthNeeded,
+		"Google did not return a refresh token; revoke opensheet's access in your Google account and connect again",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeCredentialReauthNeeded},
+	)
+}
+
+// IsNoRefreshTokenError reports whether err's chain contains a *NoRefreshTokenError.
+func IsNoRefreshTokenError(err error) bool {
+	_, ok := errors.AsType[*NoRefreshTokenError](err)
+	return ok
+}
+
+// NotConfiguredError reports that this deployment has no Google OAuth client, so no connect flow and no google_oauth token source.
+type NotConfiguredError struct{}
+
+func (*NotConfiguredError) Error() string {
+	return "credential: google oauth: not configured on this deployment"
+}
+
+// ToAppError converts the typed error into the wire envelope.
+// CodeCredentialGoogleNotConfigured once internal/apperror and docs/ERROR_CODES.md carry it.
+func (*NotConfiguredError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeCredentialGoogleNotConfigured,
+		"Connecting a Google account is not available on this deployment",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeCredentialGoogleNotConfigured},
+	)
+}
+
+// IsNotConfiguredError reports whether err's chain contains a *NotConfiguredError.
+func IsNotConfiguredError(err error) bool {
+	_, ok := errors.AsType[*NotConfiguredError](err)
+	return ok
+}

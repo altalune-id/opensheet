@@ -54,7 +54,12 @@ func testSealer(t *testing.T) sealer.Sealer {
 	return s
 }
 
-func newSvc(t *testing.T, store credential.Store, sl sealer.Sealer) (*credential.Service, *int) {
+func newSvc(
+	t *testing.T,
+	store credential.Store,
+	sl sealer.Sealer,
+	opts ...credential.ServiceOption,
+) (*credential.Service, *int) {
 	t.Helper()
 	calls := 0
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
@@ -63,7 +68,29 @@ func newSvc(t *testing.T, store credential.Store, sl sealer.Sealer) (*credential
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return credential.NewService(store, log, unexpected, sl), &calls
+	return credential.NewService(store, log, unexpected, sl, opts...), &calls
+}
+
+func seedOAuth(
+	t *testing.T,
+	store *fakes.Credential,
+	sl sealer.Sealer,
+	tc tenant.Context,
+	refresh string,
+) *credential.Credential {
+	t.Helper()
+	id := uuid.Must(uuid.NewV7())
+	sealed, err := sl.Seal([]byte(refresh), credential.SealAAD(tc.OrgID, tc.ProjectID, id))
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	c, err := credential.New(id, tc.OrgID, tc.ProjectID, tc.UserID,
+		"connected google account", credential.KindGoogleOAuth, testAccountEmail, sealed)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	store.Seed(c)
+	return c
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
@@ -375,18 +402,115 @@ func TestService_TokenSourceFor(t *testing.T) {
 		}
 	})
 
-	t.Run("a google_oauth credential is not yet supported", func(t *testing.T) {
+	t.Run("a google_oauth credential mints tokens through the deployment's client", func(t *testing.T) {
+		sl := testSealer(t)
+		store := fakes.NewCredential()
+		cfg := oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)
+		svc, unex := newSvc(t, store, sl, credential.WithGoogleOAuth(cfg))
+		ctx, tc := tenantCtx(t)
+		c := seedOAuth(t, store, sl, tc, testRefreshToken)
+
+		ts, err := svc.TokenSourceFor(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("TokenSourceFor: %v", err)
+		}
+		tok, err := ts.Token()
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		if tok.AccessToken != "access-token" {
+			t.Errorf("AccessToken = %q", tok.AccessToken)
+		}
+		if *unex != 0 {
+			t.Errorf("unexpected() called %d times", *unex)
+		}
+	})
+
+	t.Run("a deployment with no oauth client cannot use a google_oauth credential", func(t *testing.T) {
+		sl := testSealer(t)
+		store := fakes.NewCredential()
+		svc, _ := newSvc(t, store, sl)
+		ctx, tc := tenantCtx(t)
+		c := seedOAuth(t, store, sl, tc, testRefreshToken)
+
+		if _, err := svc.TokenSourceFor(ctx, c.ID); !credential.IsNotConfiguredError(err) {
+			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
+		}
+	})
+
+	t.Run("a google_oauth row sealed for another credential fails to open", func(t *testing.T) {
+		sl := testSealer(t)
+		store := fakes.NewCredential()
+		cfg := oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)
+		svc, unex := newSvc(t, store, sl, credential.WithGoogleOAuth(cfg))
+		ctx, tc := tenantCtx(t)
+
+		victim := seedOAuth(t, store, sl, tc, testRefreshToken)
+		thief := seedOAuth(t, store, sl, tc, testRefreshToken)
+		thief.Sealed = victim.Sealed
+		store.Seed(thief)
+
+		_, err := svc.TokenSourceFor(ctx, thief.ID)
+		if !sealer.IsOpenFailedError(err) {
+			t.Fatalf("error = %T %v, want sealer.OpenFailedError", err, err)
+		}
+		if sealer.IsUnavailableError(err) {
+			t.Error("a tampered row must not read as a missing key")
+		}
+		if *unex != 0 {
+			t.Error("an undecryptable row is a key problem, not an unexpected one")
+		}
+	})
+
+	t.Run("a disabled sealer on a google_oauth row reports encryption unavailable", func(t *testing.T) {
+		sl := testSealer(t)
+		store := fakes.NewCredential()
+		ctx, tc := tenantCtx(t)
+		c := seedOAuth(t, store, sl, tc, testRefreshToken)
+
+		cfg := oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)
+		svc, _ := newSvc(t, store, sealer.Disabled(), credential.WithGoogleOAuth(cfg))
+		_, err := svc.TokenSourceFor(ctx, c.ID)
+		if !sealer.IsUnavailableError(err) {
+			t.Fatalf("error = %T %v, want sealer.UnavailableError", err, err)
+		}
+		if sealer.IsOpenFailedError(err) {
+			t.Error("a missing key must not read as a tampered row")
+		}
+	})
+
+	t.Run("a google_oauth row whose plaintext is blank is not sealed", func(t *testing.T) {
+		sl := testSealer(t)
+		store := fakes.NewCredential()
+		cfg := oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)
+		svc, _ := newSvc(t, store, sl, credential.WithGoogleOAuth(cfg))
+		ctx, tc := tenantCtx(t)
+		c := seedOAuth(t, store, sl, tc, "   ")
+
+		if _, err := svc.TokenSourceFor(ctx, c.ID); !credential.IsNotSealedError(err) {
+			t.Fatalf("error = %T %v, want *NotSealedError", err, err)
+		}
+	})
+
+	t.Run("a row carrying an unknown kind is rejected before it is unsealed", func(t *testing.T) {
 		store := fakes.NewCredential()
 		svc, _ := newSvc(t, store, testSealer(t))
 		ctx, tc := tenantCtx(t)
-		c, err := credential.New(uuid.Nil, tc.OrgID, tc.ProjectID, tc.UserID,
-			"oauth", credential.KindGoogleOAuth, "u@x.com", []byte("sealed"))
+		store.Seed(&credential.Credential{
+			ID:        uuid.Must(uuid.NewV7()),
+			OrgID:     tc.OrgID,
+			ProjectID: tc.ProjectID,
+			Name:      "corrupt",
+			Kind:      credential.Kind("workload_identity"),
+			Status:    credential.StatusActive,
+			Sealed:    []byte("ciphertext"),
+		})
+		all, err := store.List(ctx, tc.OrgID, tc.ProjectID)
 		if err != nil {
-			t.Fatalf("New: %v", err)
+			t.Fatalf("List: %v", err)
 		}
-		store.Seed(c)
-		if _, tsErr := svc.TokenSourceFor(ctx, c.ID); !credential.IsInvalidKindError(tsErr) {
-			t.Fatalf("error = %T %v, want *InvalidKindError", tsErr, tsErr)
+		if _, err := svc.TokenSourceFor(ctx, all[0].ID); !credential.IsInvalidKindError(err) {
+			t.Fatalf("error = %T %v, want *InvalidKindError", err, err)
 		}
 	})
 

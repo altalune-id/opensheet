@@ -259,6 +259,21 @@ func TestErrors_ToAppErrorAndPredicates(t *testing.T) {
 			toApp:    (&NotSealedError{Situation: "rotate"}).ToAppError,
 			wantCode: apperror.CodeCredentialNotSealed, wantIn: "rotate", predicate: IsNotSealedError,
 		},
+		{
+			name: "state invalid", err: &StateInvalidError{Reason: reasonStale},
+			toApp:    (&StateInvalidError{Reason: reasonStale}).ToAppError,
+			wantCode: apperror.CodeCredentialStateInvalid, wantIn: reasonStale, predicate: IsStateInvalidError,
+		},
+		{
+			name: "no refresh token", err: &NoRefreshTokenError{},
+			toApp:    (&NoRefreshTokenError{}).ToAppError,
+			wantCode: apperror.CodeCredentialReauthNeeded, wantIn: "refresh token", predicate: IsNoRefreshTokenError,
+		},
+		{
+			name: "google oauth not configured", err: &NotConfiguredError{},
+			toApp:    (&NotConfiguredError{}).ToAppError,
+			wantCode: apperror.CodeCredentialGoogleNotConfigured, wantIn: "not configured", predicate: IsNotConfiguredError,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

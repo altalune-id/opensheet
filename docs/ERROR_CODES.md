@@ -102,18 +102,19 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 
 ## CRD — Credentials
 
-| Code     | Constant                               | Meaning                          |
-| -------- | -------------------------------------- | -------------------------------- |
-| `CRD001` | `apperror.CodeCredentialNotFound`      | Credential Not Found             |
-| `CRD002` | `apperror.CodeCredentialAlreadyExists` | Credential Already Exists        |
-| `CRD003` | `apperror.CodeCredentialInvalidName`   | Credential Invalid Name          |
-| `CRD004` | `apperror.CodeCredentialInvalidKind`   | Credential Invalid Kind          |
-| `CRD005` | `apperror.CodeCredentialInUse`         | Credential In Use                |
-| `CRD006` | `apperror.CodeCredentialReauthNeeded`  | Credential Needs Reauthorization |
-| `CRD007` | `apperror.CodeEncryptionUnavailable`   | Encryption Unavailable           |
-| `CRD008` | `apperror.CodeCredentialStateInvalid`  | Connect State Invalid Or Expired |
-| `CRD009` | `apperror.CodeEncryptionOpenFailed`    | Encryption Open Failed           |
-| `CRD010` | `apperror.CodeCredentialNotSealed`     | Credential Not Sealed            |
+| Code     | Constant                                     | Meaning                          |
+| -------- | -------------------------------------------- | -------------------------------- |
+| `CRD001` | `apperror.CodeCredentialNotFound`            | Credential Not Found             |
+| `CRD002` | `apperror.CodeCredentialAlreadyExists`       | Credential Already Exists        |
+| `CRD003` | `apperror.CodeCredentialInvalidName`         | Credential Invalid Name          |
+| `CRD004` | `apperror.CodeCredentialInvalidKind`         | Credential Invalid Kind          |
+| `CRD005` | `apperror.CodeCredentialInUse`               | Credential In Use                |
+| `CRD006` | `apperror.CodeCredentialReauthNeeded`        | Credential Needs Reauthorization |
+| `CRD007` | `apperror.CodeEncryptionUnavailable`         | Encryption Unavailable           |
+| `CRD008` | `apperror.CodeCredentialStateInvalid`        | Connect State Invalid Or Expired |
+| `CRD009` | `apperror.CodeEncryptionOpenFailed`          | Encryption Open Failed           |
+| `CRD010` | `apperror.CodeCredentialNotSealed`           | Credential Not Sealed            |
+| `CRD011` | `apperror.CodeCredentialGoogleNotConfigured` | Google Connect Not Configured    |
 
 ## SPR — Spreadsheets
 
