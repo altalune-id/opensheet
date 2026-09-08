@@ -47,8 +47,11 @@ func PrincipalFrom(ctx context.Context) Principal {
 	return p
 }
 
+// Store persists sessions by opaque id.
 type Store interface {
 	Save(ctx context.Context, sid string, p Principal, exp time.Time) error
 	Load(ctx context.Context, sid string) (Principal, bool, error)
 	Delete(ctx context.Context, sid string) error
+	// DeleteExpired removes sessions whose expiry has passed and reports how many went.
+	DeleteExpired(ctx context.Context) (int, error)
 }
