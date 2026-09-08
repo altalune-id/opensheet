@@ -5,7 +5,9 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/data"
@@ -212,6 +214,40 @@ func (s spreadsheetsForSheet) SourceFor(ctx context.Context, spreadsheetID uuid.
 	}
 	return sheet.Source{GoogleFileID: sp.GoogleFileID, CredentialID: sp.CredentialID}, nil
 }
+
+// TODO: replace with gsheet.ScopeReadWrite once gworkspace/gsheet/writer.go lands.
+const scopeSpreadsheetsReadWrite = "https://www.googleapis.com/auth/spreadsheets"
+
+type tokensForSheetRead struct{ svc *credential.Service }
+
+func (t tokensForSheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+}
+
+type tokensForSheetWrite struct{ svc *credential.Service }
+
+func (t tokensForSheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, scopeSpreadsheetsReadWrite)
+}
+
+type tokensForSpreadsheetRead struct{ svc *credential.Service }
+
+func (t tokensForSpreadsheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+}
+
+type tokensForSpreadsheetWrite struct{ svc *credential.Service }
+
+func (t tokensForSpreadsheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, scopeSpreadsheetsReadWrite)
+}
+
+var (
+	_ sheet.TokenSources       = tokensForSheetRead{}
+	_ sheet.TokenSources       = tokensForSheetWrite{}
+	_ spreadsheet.TokenSources = tokensForSpreadsheetRead{}
+	_ spreadsheet.TokenSources = tokensForSpreadsheetWrite{}
+)
 
 type credentialsForSheet struct{ svc *credential.Service }
 

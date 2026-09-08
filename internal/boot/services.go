@@ -187,14 +187,15 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 
 	sheetCaps := capsForSheet{caps: caps}
 	credentials := credential.NewService(credentialStore, log, reporter.Unexpected, k.Sealer, credOpts...)
-	spreadsheets := spreadsheet.NewService(spreadsheetStore, log, reporter.Unexpected, credentials, clients)
+	spreadsheets := spreadsheet.NewService(spreadsheetStore, log, reporter.Unexpected,
+		tokensForSpreadsheetRead{svc: credentials}, clients)
 	sheets := sheet.NewService(sheetStore, log, reporter.Unexpected, sheetCaps, snaps)
 	apiKeys := apikey.NewService(apiKeyStore, log, reporter.Unexpected, sheetStoreForAPIKey{store: sheetStore})
 
 	readWorkflow := sheet.NewReadWorkflow(
 		snaps,
 		spreadsheetsForSheet{svc: spreadsheets},
-		credentials,
+		tokensForSheetRead{svc: credentials},
 		credentialsForSheet{svc: credentials},
 		clients,
 		sheetCaps,

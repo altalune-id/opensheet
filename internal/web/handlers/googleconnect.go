@@ -157,7 +157,7 @@ func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc projectSco
 			"The Picker needs a connected Google account. A service-account credential cannot open it.")
 		return "", false
 	}
-	ts, err := h.Credentials.TokenSourceFor(sc.req.Context(), credID)
+	ts, err := h.Credentials.TokenSourceFor(sc.req.Context(), credID, driveFileScope)
 	if err != nil {
 		h.LogErr("web google picker: token source", err)
 		h.ErrorPage(w, sc.req, http.StatusBadGateway, "Google is unreachable", connectMessage(err), err)

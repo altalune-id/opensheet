@@ -176,9 +176,9 @@ func (s *Service) MarkReauthNeeded(ctx context.Context, id uuid.UUID) (*Credenti
 	return c, nil
 }
 
-// TokenSourceFor unseals the credential and returns a Google token source.
+// TokenSourceFor unseals the credential and returns a Google token source minted at scope.
 // SECURITY: plaintext never leaves this method — not in a return value, an error, a log field or a span attribute.
-func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID, scope string) (oauth2.TokenSource, error) {
 	ctx, span := tracer.Start(ctx, "credential.TokenSourceFor",
 		trace.WithAttributes(attribute.String("credential.id", id.String())))
 	defer span.End()
@@ -205,9 +205,11 @@ func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.Toke
 	if c.Kind == KindGoogleOAuth {
 		return s.refreshTokenSource(ctx, plain)
 	}
-	return serviceAccountTokenSource(ctx, plain)
+	return serviceAccountTokenSource(ctx, plain, scope)
 }
 
+// NOTE: scope does not reach here — a refresh grant posts only grant_type and refresh_token (RFC 6749 Section 6),
+// so Google returns the consented set, which already includes the read-write drive.file.
 // SECURITY: plain holds a Google refresh token; it is handed straight to oauth2 and never returned, logged or recorded on a span.
 func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (oauth2.TokenSource, error) {
 	if s.oauth == nil {
@@ -220,8 +222,9 @@ func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (oauth2.
 	return s.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refresh}), nil
 }
 
-func serviceAccountTokenSource(ctx context.Context, plain []byte) (oauth2.TokenSource, error) {
-	cfg, err := google.JWTConfigFromJSON(plain, gsheet.ScopeReadOnly)
+// NOTE: unlike refreshTokenSource, scope is binding here — a JWT assertion mints exactly what it asks for.
+func serviceAccountTokenSource(ctx context.Context, plain []byte, scope string) (oauth2.TokenSource, error) {
+	cfg, err := google.JWTConfigFromJSON(plain, scope)
 	if err != nil {
 		// SECURITY: the google error quotes the payload, so it is dropped rather than wrapped.
 		return nil, &InvalidServiceAccountError{Reason: "stored key is not a service account key"}

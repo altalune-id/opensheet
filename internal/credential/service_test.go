@@ -2,8 +2,12 @@ package credential_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
@@ -14,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/platform/sealer"
@@ -348,7 +353,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		ctx, _ := tenantCtx(t)
 		c := upload(ctx, t, svc, "prod")
 
-		ts, err := svc.TokenSourceFor(ctx, c.ID)
+		ts, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if err != nil {
 			t.Fatalf("TokenSourceFor: %v", err)
 		}
@@ -362,7 +367,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 
 	t.Run("missing tenant returns MissingError", func(t *testing.T) {
 		svc, _ := newSvc(t, fakes.NewCredential(), testSealer(t))
-		if _, err := svc.TokenSourceFor(context.Background(), uuid.New()); !tenant.IsMissingError(err) {
+		if _, err := svc.TokenSourceFor(context.Background(), uuid.New(), gsheet.ScopeReadOnly); !tenant.IsMissingError(err) {
 			t.Fatalf("error = %T %v, want tenant.MissingError", err, err)
 		}
 	})
@@ -370,7 +375,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 	t.Run("unknown id is NotFoundError", func(t *testing.T) {
 		svc, unex := newSvc(t, fakes.NewCredential(), testSealer(t))
 		ctx, _ := tenantCtx(t)
-		if _, err := svc.TokenSourceFor(ctx, uuid.New()); !credential.IsNotFoundError(err) {
+		if _, err := svc.TokenSourceFor(ctx, uuid.New(), gsheet.ScopeReadOnly); !credential.IsNotFoundError(err) {
 			t.Fatalf("error = %T %v, want *NotFoundError", err, err)
 		}
 		if *unex != 0 {
@@ -385,7 +390,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		c := upload(ctxA, t, svc, "prod")
 
 		ctxB, _ := tenantCtx(t)
-		if _, err := svc.TokenSourceFor(ctxB, c.ID); !credential.IsNotFoundError(err) {
+		if _, err := svc.TokenSourceFor(ctxB, c.ID, gsheet.ScopeReadOnly); !credential.IsNotFoundError(err) {
 			t.Fatalf("error = %T %v, want *NotFoundError", err, err)
 		}
 	})
@@ -397,7 +402,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		if _, err := svc.MarkReauthNeeded(ctx, c.ID); err != nil {
 			t.Fatalf("MarkReauthNeeded: %v", err)
 		}
-		if _, err := svc.TokenSourceFor(ctx, c.ID); !credential.IsReauthNeededError(err) {
+		if _, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly); !credential.IsReauthNeededError(err) {
 			t.Fatalf("error = %T %v, want *ReauthNeededError", err, err)
 		}
 	})
@@ -410,7 +415,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		ctx, tc := tenantCtx(t)
 		c := seedOAuth(t, store, sl, tc, testRefreshToken)
 
-		ts, err := svc.TokenSourceFor(ctx, c.ID)
+		ts, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if err != nil {
 			t.Fatalf("TokenSourceFor: %v", err)
 		}
@@ -433,7 +438,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		ctx, tc := tenantCtx(t)
 		c := seedOAuth(t, store, sl, tc, testRefreshToken)
 
-		if _, err := svc.TokenSourceFor(ctx, c.ID); !credential.IsNotConfiguredError(err) {
+		if _, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly); !credential.IsNotConfiguredError(err) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}
 	})
@@ -450,7 +455,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		thief.Sealed = victim.Sealed
 		store.Seed(thief)
 
-		_, err := svc.TokenSourceFor(ctx, thief.ID)
+		_, err := svc.TokenSourceFor(ctx, thief.ID, gsheet.ScopeReadOnly)
 		if !sealer.IsOpenFailedError(err) {
 			t.Fatalf("error = %T %v, want sealer.OpenFailedError", err, err)
 		}
@@ -470,7 +475,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 
 		cfg := oauthConfig(tokenEndpoint(t, tokenResponse{}).URL)
 		svc, _ := newSvc(t, store, sealer.Disabled(), credential.WithGoogleOAuth(cfg))
-		_, err := svc.TokenSourceFor(ctx, c.ID)
+		_, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if !sealer.IsUnavailableError(err) {
 			t.Fatalf("error = %T %v, want sealer.UnavailableError", err, err)
 		}
@@ -487,7 +492,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		ctx, tc := tenantCtx(t)
 		c := seedOAuth(t, store, sl, tc, "   ")
 
-		if _, err := svc.TokenSourceFor(ctx, c.ID); !credential.IsNotSealedError(err) {
+		if _, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly); !credential.IsNotSealedError(err) {
 			t.Fatalf("error = %T %v, want *NotSealedError", err, err)
 		}
 	})
@@ -509,7 +514,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
-		if _, err := svc.TokenSourceFor(ctx, all[0].ID); !credential.IsInvalidKindError(err) {
+		if _, err := svc.TokenSourceFor(ctx, all[0].ID, gsheet.ScopeReadOnly); !credential.IsInvalidKindError(err) {
 			t.Fatalf("error = %T %v, want *InvalidKindError", err, err)
 		}
 	})
@@ -527,7 +532,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		thief.Sealed = victim.Sealed
 		store.Seed(thief)
 
-		_, err := svc.TokenSourceFor(ctx, thief.ID)
+		_, err := svc.TokenSourceFor(ctx, thief.ID, gsheet.ScopeReadOnly)
 		if !sealer.IsOpenFailedError(err) {
 			t.Fatalf("error = %T %v, want sealer.OpenFailedError", err, err)
 		}
@@ -551,7 +556,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 			t.Fatalf("sealer.New: %v", err)
 		}
 		svcAfterRotation, unex := newSvc(t, store, rotated)
-		_, err = svcAfterRotation.TokenSourceFor(ctx, c.ID)
+		_, err = svcAfterRotation.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if !sealer.IsOpenFailedError(err) {
 			t.Fatalf("error = %T %v, want sealer.OpenFailedError", err, err)
 		}
@@ -567,7 +572,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		c := upload(ctx, t, svc, "prod")
 
 		disabled, _ := newSvc(t, store, sealer.Disabled())
-		_, err := disabled.TokenSourceFor(ctx, c.ID)
+		_, err := disabled.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if !sealer.IsUnavailableError(err) {
 			t.Fatalf("error = %T %v, want sealer.UnavailableError", err, err)
 		}
@@ -594,7 +599,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		}
 		store.Seed(c)
 
-		_, err = svc.TokenSourceFor(ctx, c.ID)
+		_, err = svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 		if !credential.IsInvalidServiceAccountError(err) {
 			t.Fatalf("error = %T %v, want *InvalidServiceAccountError", err, err)
 		}
@@ -616,7 +621,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		c.Sealed = nil
 		store.Seed(c)
 
-		if _, tsErr := svc.TokenSourceFor(ctx, c.ID); !credential.IsNotSealedError(tsErr) {
+		if _, tsErr := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly); !credential.IsNotSealedError(tsErr) {
 			t.Fatalf("error = %T %v, want *NotSealedError", tsErr, tsErr)
 		}
 	})
@@ -628,7 +633,7 @@ func TestService_TokenSourceFor(t *testing.T) {
 		}
 		svc, unex := newSvc(t, store, testSealer(t))
 		ctx, _ := tenantCtx(t)
-		if _, err := svc.TokenSourceFor(ctx, uuid.New()); err == nil {
+		if _, err := svc.TokenSourceFor(ctx, uuid.New(), gsheet.ScopeReadOnly); err == nil {
 			t.Fatal("want an error")
 		}
 		if *unex != 1 {
@@ -643,7 +648,7 @@ func TestService_TokenSourceFor_ReturnsNoPlaintext(t *testing.T) {
 	ctx, _ := tenantCtx(t)
 	c := upload(ctx, t, svc, "prod")
 
-	ts, err := svc.TokenSourceFor(ctx, c.ID)
+	ts, err := svc.TokenSourceFor(ctx, c.ID, gsheet.ScopeReadOnly)
 	if err != nil {
 		t.Fatalf("TokenSourceFor: %v", err)
 	}
@@ -653,6 +658,70 @@ func TestService_TokenSourceFor_ReturnsNoPlaintext(t *testing.T) {
 	}
 	if strings.Contains(string(rendered), "PRIVATE KEY") {
 		t.Fatalf("the returned token source exposes the private key: %s", rendered)
+	}
+}
+
+// TODO: replace with gsheet.ScopeReadWrite once gworkspace/gsheet/writer.go lands.
+const scopeSpreadsheetsReadWrite = "https://www.googleapis.com/auth/spreadsheets"
+
+// NOTE: serviceAccountJSON's private_key is base64 of an ASCII string, so nothing ever parses it and
+// a scope test built on it would pass while proving nothing. This one is a real RSA key.
+func realServiceAccountJSON(t *testing.T) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("MarshalPKCS8PrivateKey: %v", err)
+	}
+	if _, err := x509.ParsePKCS8PrivateKey(der); err != nil {
+		t.Fatalf("the fixture key must be parseable: %v", err)
+	}
+	out, err := json.Marshal(map[string]string{
+		"type":         "service_account",
+		"project_id":   "opensheet-test",
+		"client_email": "writer@opensheet-test.iam.gserviceaccount.com",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"token_uri":    "https://oauth2.googleapis.com/token",
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return out
+}
+
+// NOTE: this proves a write scope is accepted, not that it reaches the minted token — asserting
+// propagation needs a seam credential does not have.
+func TestService_TokenSourceForAcceptsAWriteScope(t *testing.T) {
+	scopes := []struct {
+		name  string
+		scope string
+	}{
+		{"read scope", gsheet.ScopeReadOnly},
+		{"write scope", scopeSpreadsheetsReadWrite},
+	}
+	for _, tc := range scopes {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, unex := newSvc(t, fakes.NewCredential(), testSealer(t))
+			ctx, _ := tenantCtx(t)
+			c, err := svc.UploadServiceAccount(ctx, "writer", realServiceAccountJSON(t))
+			if err != nil {
+				t.Fatalf("UploadServiceAccount: %v", err)
+			}
+
+			ts, err := svc.TokenSourceFor(ctx, c.ID, tc.scope)
+			if err != nil {
+				t.Fatalf("TokenSourceFor(%q): %v", tc.scope, err)
+			}
+			if ts == nil {
+				t.Fatalf("TokenSourceFor(%q) returned a nil token source", tc.scope)
+			}
+			if *unex != 0 {
+				t.Errorf("unexpected() called %d times", *unex)
+			}
+		})
 	}
 }
 

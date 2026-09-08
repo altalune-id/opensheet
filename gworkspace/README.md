@@ -89,8 +89,8 @@ import (
 	"altalune.id/opensheet/internal/gwerr"
 )
 
-// credential.Service.TokenSourceFor returns an oauth2.TokenSource for one
-// stored credential — see internal/credential/service.go:181.
+// credential.Service.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly) returns an
+// oauth2.TokenSource for one stored credential — see internal/credential/service.go.
 c, err := gsheet.New(ctx, ts)
 if err != nil {
 	return err
