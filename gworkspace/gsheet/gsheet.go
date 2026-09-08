@@ -21,6 +21,12 @@ const metaFields = "properties.title,sheets.properties.title"
 // Row is one spreadsheet row keyed by its normalized column header.
 type Row map[string]string
 
+// Table is a tab's raw header row and its data rows, in sheet order.
+type Table struct {
+	Headers []string
+	Rows    [][]string
+}
+
 // Factory builds a Client for one credential.
 type Factory func(ctx context.Context, ts oauth2.TokenSource) (*Client, error)
 
@@ -76,34 +82,56 @@ func (c *Client) FirstTab(ctx context.Context, fileID string) (string, error) {
 	return titles[0], nil
 }
 
-// Rows returns a tab's data rows keyed by its header row, plus one warning per renamed header.
-func (c *Client) Rows(ctx context.Context, fileID, tab string) ([]Row, []string, error) {
+// Table reads tab as its raw header row plus its data rows, each in sheet order.
+func (c *Client) Table(ctx context.Context, fileID, tab string) (Table, error) {
 	tab = strings.TrimSpace(tab)
 	if tab == "" {
-		return nil, nil, &TabNotFoundError{Tab: tab}
+		return Table{}, &TabNotFoundError{Tab: tab}
 	}
 	resp, err := c.svc.Spreadsheets.Values.Get(fileID, quoteRange(tab)).Context(ctx).Do()
 	if err != nil {
-		return nil, nil, translateRange(err, fileID, tab)
+		return Table{}, translateRange(err, fileID, tab)
 	}
 	if len(resp.Values) == 0 {
+		return Table{}, nil
+	}
+
+	out := Table{
+		Headers: make([]string, len(resp.Values[0])),
+		Rows:    make([][]string, 0, len(resp.Values)-1),
+	}
+	for i, cell := range resp.Values[0] {
+		out.Headers[i] = cellString(cell)
+	}
+	for _, cells := range resp.Values[1:] {
+		row := make([]string, len(cells))
+		for i, cell := range cells {
+			row[i] = cellString(cell)
+		}
+		out.Rows = append(out.Rows, row)
+	}
+	return out, nil
+}
+
+// Rows returns a tab's data rows keyed by its header row, plus one warning per renamed header.
+func (c *Client) Rows(ctx context.Context, fileID, tab string) ([]Row, []string, error) {
+	tbl, err := c.Table(ctx, fileID, tab)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tbl.Headers == nil {
 		return nil, nil, nil
 	}
 
-	raw := make([]string, len(resp.Values[0]))
-	for i, cell := range resp.Values[0] {
-		raw[i] = cellString(cell)
-	}
-	names, warnings := normalizeHeaders(raw)
-
-	rows := make([]Row, 0, len(resp.Values)-1)
-	for _, cells := range resp.Values[1:] {
+	names, warnings := normalizeHeaders(tbl.Headers)
+	rows := make([]Row, 0, len(tbl.Rows))
+	for _, cells := range tbl.Rows {
 		row := make(Row, len(names))
 		for i, cell := range cells {
 			if i >= len(names) {
 				break
 			}
-			row[names[i]] = cellString(cell)
+			row[names[i]] = cell
 		}
 		rows = append(rows, row)
 	}

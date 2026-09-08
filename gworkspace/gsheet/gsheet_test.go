@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -377,5 +379,161 @@ func TestRows_DropsCellsBeyondTheHeader(t *testing.T) {
 	}
 	if len(rows) != 1 || len(rows[0]) != 1 || rows[0]["a"] != "1" {
 		t.Fatalf("rows = %#v, want one row keyed only by the single header", rows)
+	}
+}
+
+func valuesClient(t *testing.T, body string) *Client {
+	t.Helper()
+	srv := fakeSheets(t, map[string]string{"/v4/spreadsheets/FILE/values/": body})
+	return newTestClient(t, srv.URL)
+}
+
+func TestClient_TableReturnsRawHeadersAndOrderedRows(t *testing.T) {
+	t.Parallel()
+	c := valuesClient(t, `{"values":[[" ID ","Name","id"],["1","ada"],["2","bob","x"]]}`)
+
+	got, err := c.Table(context.Background(), "FILE", "Rates")
+	if err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	wantHeaders := []string{" ID ", "Name", "id"}
+	if !slices.Equal(got.Headers, wantHeaders) {
+		t.Errorf("Headers = %q, want %q (raw: normalizeHeaders would rename the second id and trim nothing)", got.Headers, wantHeaders)
+	}
+	wantRows := [][]string{{"1", "ada"}, {"2", "bob", "x"}}
+	if !slices.EqualFunc(got.Rows, wantRows, slices.Equal[[]string]) {
+		t.Errorf("Rows = %q, want %q (each row keeps its own width: no padding, no truncation)", got.Rows, wantRows)
+	}
+}
+
+func TestClient_TableRejectsAnEmptyTab(t *testing.T) {
+	t.Parallel()
+	c := valuesClient(t, `{"values":[]}`)
+
+	if _, err := c.Table(context.Background(), "FILE", "  "); !IsTabNotFoundError(err) {
+		t.Fatalf("error = %v, want TabNotFoundError", err)
+	}
+}
+
+func TestClient_TableEmptySheetHasNilHeaders(t *testing.T) {
+	t.Parallel()
+	c := valuesClient(t, `{"values":[]}`)
+
+	got, err := c.Table(context.Background(), "FILE", "Rates")
+	if err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	if got.Headers != nil || got.Rows != nil {
+		t.Fatalf("Table = %#v, want the zero Table for an empty sheet", got)
+	}
+}
+
+func TestClient_TableHeaderOnlySheetHasNonNilEmptyHeaders(t *testing.T) {
+	t.Parallel()
+	c := valuesClient(t, `{"values":[[]]}`)
+
+	got, err := c.Table(context.Background(), "FILE", "Rates")
+	if err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	if got.Headers == nil {
+		t.Fatal("Headers = nil for a present-but-empty header row; nil is reserved for the empty sheet")
+	}
+	if len(got.Headers) != 0 {
+		t.Fatalf("Headers = %q, want empty", got.Headers)
+	}
+}
+
+func TestClient_RowsBehaviourIsUnchangedByTheTableRefactor(t *testing.T) {
+	t.Parallel()
+	t.Run("empty sheet returns nil rows", func(t *testing.T) {
+		t.Parallel()
+		c := valuesClient(t, `{"values":[]}`)
+		rows, warns, err := c.Rows(context.Background(), "FILE", "Rates")
+		if err != nil {
+			t.Fatalf("Rows: %v", err)
+		}
+		if rows != nil || warns != nil {
+			t.Fatalf("rows = %#v, warnings = %#v; want nil, nil", rows, warns)
+		}
+	})
+	t.Run("header only returns non-nil empty", func(t *testing.T) {
+		t.Parallel()
+		c := valuesClient(t, `{"values":[["a","b"]]}`)
+		rows, _, err := c.Rows(context.Background(), "FILE", "Rates")
+		if err != nil {
+			t.Fatalf("Rows: %v", err)
+		}
+		if rows == nil {
+			t.Fatal("rows = nil for a header-only sheet, want a non-nil empty slice")
+		}
+		if len(rows) != 0 {
+			t.Fatalf("rows = %#v, want empty", rows)
+		}
+	})
+	t.Run("a present but empty header row returns non-nil empty", func(t *testing.T) {
+		t.Parallel()
+		c := valuesClient(t, `{"values":[[]]}`)
+		rows, _, err := c.Rows(context.Background(), "FILE", "Rates")
+		if err != nil {
+			t.Fatalf("Rows: %v", err)
+		}
+		if rows == nil {
+			t.Fatal("rows = nil; only an absent header row may answer nil, so the empty-sheet test must discriminate on nil headers, not on their length")
+		}
+		if len(rows) != 0 {
+			t.Fatalf("rows = %#v, want empty", rows)
+		}
+	})
+	t.Run("short row omits trailing keys", func(t *testing.T) {
+		t.Parallel()
+		c := valuesClient(t, `{"values":[["a","b"],["1"]]}`)
+		rows, _, err := c.Rows(context.Background(), "FILE", "Rates")
+		if err != nil {
+			t.Fatalf("Rows: %v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("got %d rows, want 1", len(rows))
+		}
+		if _, present := rows[0]["b"]; present {
+			t.Errorf("rows[0] = %#v; a missing cell must be an absent key, not an empty string", rows[0])
+		}
+	})
+	t.Run("extra cells are dropped", func(t *testing.T) {
+		t.Parallel()
+		c := valuesClient(t, `{"values":[["a"],["1","2"]]}`)
+		rows, _, err := c.Rows(context.Background(), "FILE", "Rates")
+		if err != nil {
+			t.Fatalf("Rows: %v", err)
+		}
+		if len(rows) != 1 || len(rows[0]) != 1 {
+			t.Fatalf("rows = %#v, want one row keyed only by the single header", rows)
+		}
+	})
+}
+
+func TestClient_RowsMakesOneValuesCallPerRead(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"values":[["a","b"],["1","2"]]}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := newTestClient(t, srv.URL)
+
+	if _, _, err := c.Rows(context.Background(), "FILE", "Rates"); err != nil {
+		t.Fatalf("Rows: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("Rows made %d requests, want exactly 1", got)
+	}
+	calls.Store(0)
+	if _, err := c.Table(context.Background(), "FILE", "Rates"); err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("Table made %d requests, want exactly 1", got)
 	}
 }
