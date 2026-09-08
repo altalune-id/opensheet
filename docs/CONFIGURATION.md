@@ -122,6 +122,11 @@ timezone is an operator knob.
 The separate reader handle is Postgres-only; under `driver: sqlite` its DSN is
 ignored and the reader aliases the writer.
 
+`driver: postgres` requires `security.encryptionKey`
+(`OPENSHEET_SECURITY_ENCRYPTION_KEY`, 32 bytes hex or base64) in every mode:
+web sessions are persisted to the `sessions` table with the `Principal` sealed
+at rest, so boot is refused without a key rather than failing every login.
+
 `/readyz` reports the snapshot the `db-health` worker writes, so
 `db.health.interval` sets how stale a readiness answer can be. Boot takes one
 synchronous probe, so `/readyz` is accurate before the first tick. The worker

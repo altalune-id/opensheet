@@ -9,6 +9,7 @@ import (
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/scheduler"
@@ -17,11 +18,12 @@ import (
 // schedulerDomains names each slot in schedulerProviders, in order.
 //
 //nolint:gochecknoglobals // Immutable wiring manifest; not runtime state.
-var schedulerDomains = []string{"todo"}
+var schedulerDomains = []string{"todo", "session"}
 
-func schedulerProviders(s *Services, loc scheduler.LocationFunc, log *slog.Logger) []scheduler.Provider {
+func schedulerProviders(k *platform.Kernel, s *Services, loc scheduler.LocationFunc, log *slog.Logger) []scheduler.Provider {
 	return []scheduler.Provider{
 		todo.NewScheduler(s.Todos, log, loc),
+		session.NewScheduler(k.Sessions, log),
 	}
 }
 
@@ -53,7 +55,7 @@ func buildScheduler(
 		return nil, err
 	}
 
-	providers := schedulerProviders(s, loc, log)
+	providers := schedulerProviders(k, s, loc, log)
 	if wErr := assertSchedulerWiring(providers); wErr != nil {
 		return nil, wErr
 	}

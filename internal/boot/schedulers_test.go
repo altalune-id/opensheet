@@ -31,8 +31,9 @@ func TestAssertSchedulerWiring(t *testing.T) {
 		providers []scheduler.Provider
 		wantErr   string
 	}{
-		{"all wired", []scheduler.Provider{stubProvider{}}, ""},
-		{"only slot missing", []scheduler.Provider{nil}, "todo"},
+		{"all wired", []scheduler.Provider{stubProvider{}, stubProvider{}}, ""},
+		{"first slot missing", []scheduler.Provider{nil, stubProvider{}}, "todo"},
+		{"second slot missing", []scheduler.Provider{stubProvider{}, nil}, "session"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -47,11 +48,11 @@ func TestAssertSchedulerWiring(t *testing.T) {
 }
 
 func TestAssertSchedulerWiring_LengthMismatchIsAnError(t *testing.T) {
-	require.Error(t, assertSchedulerWiring([]scheduler.Provider{stubProvider{}, stubProvider{}}))
+	require.Error(t, assertSchedulerWiring([]scheduler.Provider{stubProvider{}, stubProvider{}, stubProvider{}}))
 }
 
 func TestSchedulerDomains_MatchesProviderCount(t *testing.T) {
-	require.Len(t, schedulerDomains, 1, "add the new domain to schedulerDomains and schedulerProviders together")
+	require.Len(t, schedulerDomains, 2, "add the new domain to schedulerDomains and schedulerProviders together")
 }
 
 func TestWarnUnusedTimezoneOverrides(t *testing.T) {
@@ -115,7 +116,7 @@ func TestBootServer_RegistersEveryProvidersJobs(t *testing.T) {
 	for _, j := range srv.Scheduler.Jobs() {
 		names = append(names, j.Name)
 	}
-	require.Equal(t, []string{"todo-autocomplete-stale"}, names,
+	require.Equal(t, []string{"session-sweep", "todo-autocomplete-stale"}, names,
 		"the db health probe is a standalone worker, not a scheduler job")
 }
 

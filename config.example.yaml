@@ -206,7 +206,7 @@ scheduler:
   timezone: UTC
 
 security:
-  # [required, mode:cloud, secret, bootstrap] env: OPENSHEET_SECURITY_ENCRYPTION_KEY
+  # [required, secret, bootstrap] env: OPENSHEET_SECURITY_ENCRYPTION_KEY
   encryptionKey: ""
 
 session:

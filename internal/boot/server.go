@@ -136,7 +136,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, err
 	}
 
-	sessions := session.NewMemoryStore()
+	sessions := session.NewStore(cfg.DB, pool, sealed, reporter.Unexpected)
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{

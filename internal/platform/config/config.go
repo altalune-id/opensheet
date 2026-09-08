@@ -55,7 +55,7 @@ type Config struct {
 
 // SecurityConfig holds the envelope-encryption key protecting stored third-party credentials.
 type SecurityConfig struct {
-	EncryptionKey string `yaml:"encryptionKey" mapstructure:"encryptionKey" awareness:"required,mode:cloud,secret,bootstrap"`
+	EncryptionKey string `yaml:"encryptionKey" mapstructure:"encryptionKey" awareness:"required,secret,bootstrap"`
 }
 
 // GoogleConfig configures the Google Sheets integration.
@@ -305,6 +305,9 @@ func validateInvariants(c *Config) error {
 	if err := validateCachePostgresNeedsPostgres(c); err != nil {
 		return err
 	}
+	if err := validatePostgresNeedsEncryptionKey(c); err != nil {
+		return err
+	}
 	switch c.Mode {
 	case ModeSelfhosted:
 		return validateSelfhosted(c)
@@ -406,6 +409,13 @@ func validateGoogleSecretNeedsClientID(c *Config) error {
 func validateCachePostgresNeedsPostgres(c *Config) error {
 	if c.Cache.Driver == CacheDriverPostgres && c.DB.Driver == db.DriverSQLite {
 		return errors.New("config: cache.driver=postgres requires db.driver=postgres (set OPENSHEET_CACHE_DRIVER=auto)")
+	}
+	return nil
+}
+
+func validatePostgresNeedsEncryptionKey(c *Config) error {
+	if c.DB.Driver == db.DriverPostgres && c.Security.EncryptionKey == "" {
+		return errors.New("config: db.driver=postgres requires security.encryptionKey — 32 bytes hex or base64; without it persisted web sessions cannot be sealed and every login fails (set OPENSHEET_SECURITY_ENCRYPTION_KEY)")
 	}
 	return nil
 }

@@ -463,6 +463,17 @@ func TestValidate_CloudRequiresEncryptionKey(t *testing.T) {
 	}
 }
 
+func TestValidate_PostgresSessionStoreRequiresAnEncryptionKey(t *testing.T) {
+	c := validSelfhostedConfig(t)
+	c.DB.Driver = db.DriverPostgres
+	c.DB.DSN = "postgres://localhost/opensheet"
+	c.Security.EncryptionKey = ""
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "OPENSHEET_SECURITY_ENCRYPTION_KEY") {
+		t.Fatalf("Validate() = %v, want an error naming OPENSHEET_SECURITY_ENCRYPTION_KEY", err)
+	}
+}
+
 func TestValidate_GoogleClientSecretWithoutClientID(t *testing.T) {
 	c := validSelfhostedConfig(t)
 	c.Google.OAuth.ClientSecret = "shhh"

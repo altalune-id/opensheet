@@ -161,7 +161,8 @@ per-tick failures must not reach the scheduler's `ErrorReporter`.
 Platform packages MAY import: stdlib, third-party libs the primitive
 requires, `internal/apperror`, and other platform packages ONLY along
 the allow-list (`logger`↔`reqid`+`telemetry`, `tenant`→`apperror`,
-`tokens`→`session`, `notify`→`apperror`+`mailer`, `telemetry`→`logger`).
+`tokens`→`session`, `session`→`db`+`sealer`+`scheduler`,
+`notify`→`apperror`+`mailer`, `telemetry`→`logger`).
 
 Platform packages MUST NOT import: any `internal/<domain>/` package,
 `internal/api`, `internal/web`, `internal/cli`, `internal/boot`.

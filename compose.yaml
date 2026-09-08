@@ -54,6 +54,9 @@ services:
       OPENSHEET_DB_ALLOW_BYPASS_RLS: "true"
       OPENSHEET_DB_AUTO_MIGRATE: "true"
 
+      # 32 bytes hex or base64; required with db.driver=postgres
+      OPENSHEET_SECURITY_ENCRYPTION_KEY: "92ffe7e38aea660083a2354e1fccdfb7afdac5376c1b598bbd4408fa040eaf82"
+
       OPENSHEET_MAIL_DRIVER: smtp
       OPENSHEET_MAIL_FROM: "no-reply@opensheet.local"
       OPENSHEET_MAIL_SMTP_HOST: mailpit
