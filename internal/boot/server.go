@@ -71,6 +71,9 @@ type Server struct {
 	// SetupToken gates /onboard while onboarding is still required; empty once onboarded.
 	SetupToken string
 
+	// SECURITY: StateSecret is the single resolved http.stateSecret — the HMAC key behind every signed cookie and OAuth state.
+	StateSecret []byte
+
 	Web        http.Handler
 	API        *api.Server
 	Scheduler  *scheduler.Runner
@@ -90,6 +93,11 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	log := o.logger
 	if log == nil {
 		log = logger.New(cfg.Log)
+	}
+
+	stateSecret, err := resolveStateSecret(cfg, log)
+	if err != nil {
+		return nil, err
 	}
 
 	tp, mp, shutdownOTel, err := telemetry.Setup(ctx, cfg.Telemetry, log)
@@ -122,7 +130,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: tokens: %w", err)
 	}
 
-	altAuth, err := buildAltAuth(ctx, cfg, log)
+	altAuth, err := buildAltAuth(ctx, cfg, stateSecret)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -162,7 +170,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 	kernel.AddCloser(pool)
 
-	svcs, err := buildServices(cfg, kernel, caps)
+	svcs, err := buildServices(cfg, kernel, caps, stateSecret)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -256,7 +264,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs, svcs.Onboards, required, setup,
-		apiHandler, dataHandler, bundle, defaultLoc)
+		apiHandler, dataHandler, bundle, defaultLoc, stateSecret)
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -281,6 +289,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		APIKeys:      svcs.APIKeys,
 		Onboarded:    onboarded,
 		SetupToken:   setup,
+		StateSecret:  stateSecret,
 		Onboard:      svcs.Onboard,
 		Read:         svcs.Read,
 		Connect:      svcs.Connect,
@@ -348,13 +357,9 @@ func oidcRedirectURL(cfg *config.Config) string {
 		strings.TrimRight(cfg.HTTP.BaseURL, "/"), cfg.HTTP.BasePath)
 }
 
-func buildAltAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*authl.Client, error) {
+func buildAltAuth(ctx context.Context, cfg *config.Config, stateSecret []byte) (*authl.Client, error) {
 	if cfg.OIDC.Issuer == "" {
 		return nil, nil
-	}
-	secret, err := resolveStateSecret(cfg, log)
-	if err != nil {
-		return nil, err
 	}
 	redirect := oidcRedirectURL(cfg)
 	return authl.NewClient(ctx, authl.Config{
@@ -367,7 +372,7 @@ func buildAltAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*a
 		RememberLastUser: true,
 		LastUserCookie:   "opensheet_last_user",
 		StateCookie:      "opensheet_oidc_state",
-		StateSecret:      secret,
+		StateSecret:      stateSecret,
 		CookieSecure:     cfg.HTTP.CookieSecure,
 	})
 }

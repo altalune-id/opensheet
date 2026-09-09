@@ -1,7 +1,9 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"log"
 	"log/slog"
@@ -96,6 +98,7 @@ func newFixture(t *testing.T) *handlerFixture {
 		Cfg:      cfg,
 		Caps:     caps,
 		Sessions: sessions,
+		Secret:   []byte(cfg.HTTP.StateSecret),
 		Logger:   discardStdLogger(),
 		Orgs:     orgs,
 		Projects: projects,
@@ -132,6 +135,34 @@ func (f *handlerFixture) authedRequest(t *testing.T, method, target string, body
 	r.AddCookie(&http.Cookie{Name: web.SessionCookieName, Value: cookie})
 	r = r.WithContext(session.PrincipalInto(r.Context(), p))
 	return r
+}
+
+// TestDeps_SecretBytesIsTheResolvedSecretVerbatim guards the double-keying regression: the cookie HMAC key must be the bytes boot resolved, never a second derivation from cfg.HTTP.StateSecret.
+func TestDeps_SecretBytesIsTheResolvedSecretVerbatim(t *testing.T) {
+	t.Parallel()
+	want := bytes.Repeat([]byte{0xA5}, 32)
+	cfg := &config.Config{}
+	cfg.HTTP.StateSecret = base64.RawURLEncoding.EncodeToString(want)
+
+	d := handlers.Deps{Cfg: cfg, Secret: want}
+
+	require.Equal(t, want, d.SecretBytes())
+	require.NotEqual(t, []byte(cfg.HTTP.StateSecret), d.SecretBytes(),
+		"SecretBytes must not re-derive the key from the raw config string")
+}
+
+func TestDeps_SecretBytesSignsAndVerifiesARoundTrip(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	sid, err := web.NewSID()
+	require.NoError(t, err)
+	require.NoError(t, f.Sessions.Save(t.Context(), sid, session.Principal{UserID: uuid.New()}, time.Now().Add(web.SessionTTL)))
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.AddCookie(&http.Cookie{Name: web.SessionCookieName, Value: web.SignCookie(f.Deps.SecretBytes(), sid)})
+	_, gotSID, ok := f.Deps.LoadSession(r)
+	require.True(t, ok)
+	require.Equal(t, sid, gotSID)
 }
 
 func TestSanitizeReturnTo(t *testing.T) {

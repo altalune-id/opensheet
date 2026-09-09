@@ -77,6 +77,7 @@ func TestPostRemoveMember_SystemProtected_Returns409(t *testing.T) {
 		Cfg:      cfg,
 		Caps:     capabilities.Capabilities{OrgCreation: true},
 		Sessions: sessions,
+		Secret:   []byte(cfg.HTTP.StateSecret),
 		Logger:   log.New(io.Discard, "", 0),
 	}
 	h := handlers.NewOrgHandler(deps, orgSvc)

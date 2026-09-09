@@ -127,6 +127,13 @@ ignored and the reader aliases the writer.
 web sessions are persisted to the `sessions` table with the `Principal` sealed
 at rest, so boot is refused without a key rather than failing every login.
 
+`driver: postgres` likewise requires `http.stateSecret`
+(`OPENSHEET_HTTP_STATE_SECRET`, base64 decoding to at least 32 bytes) in every
+mode: it is the HMAC key for the session cookie, and when it is empty boot mints
+a fresh ephemeral key, so every persisted session stops verifying on restart.
+Under `driver: sqlite` the ephemeral fallback stands — nothing outlives the
+process anyway.
+
 `/readyz` reports the snapshot the `db-health` worker writes, so
 `db.health.interval` sets how stale a readiness answer can be. Boot takes one
 synchronous probe, so `/readyz` is accurate before the first tick. The worker

@@ -3,6 +3,7 @@ package boot_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -179,8 +180,39 @@ func probeCookie(t *testing.T, srv *boot.Server, p session.Principal) *http.Cook
 	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid, p, time.Now().Add(time.Hour)))
 	return &http.Cookie{
 		Name:  web.SessionCookieName,
-		Value: web.SignCookie([]byte(srv.Cfg.HTTP.StateSecret), sid),
+		Value: web.SignCookie(srv.StateSecret, sid),
 	}
+}
+
+// TestBootServer_SessionCookiesUseTheResolvedStateSecret pins one HMAC key across boot and the web handlers, so a cookie signed with the raw cfg.HTTP.StateSecret string cannot authenticate.
+func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
+	raw := bytes.Repeat([]byte{0x5A}, 32)
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(c *config.Config) {
+		c.HTTP.StateSecret = encoded
+	})
+	require.Equal(t, raw, srv.StateSecret, "boot must decode http.stateSecret once and share those bytes")
+
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "secret-probe@example.com", Name: "Secret Probe", Source: user.SourceLocal,
+	})
+	require.NoError(t, err)
+	sid, err := web.NewSID()
+	require.NoError(t, err)
+	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid,
+		session.Principal{UserID: owner.ID}, time.Now().Add(time.Hour)))
+
+	status := func(secret []byte) int {
+		req := httptest.NewRequest(http.MethodGet, "/orgs", nil)
+		req.AddCookie(&http.Cookie{Name: web.SessionCookieName, Value: web.SignCookie(secret, sid)})
+		rec := httptest.NewRecorder()
+		srv.Web.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	require.Equal(t, http.StatusOK, status(srv.StateSecret),
+		"a cookie signed with the resolved secret must load the session")
+	require.Equal(t, http.StatusSeeOther, status([]byte(encoded)),
+		"a cookie signed with the raw config string must not authenticate")
 }
 
 // walkRoutes drives every route as p and fails on any 5xx or any tenant-scope error.

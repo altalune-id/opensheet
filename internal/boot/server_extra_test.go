@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"io"
@@ -10,7 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -68,6 +71,23 @@ func TestResolveStateSecret_EmptyReturnsEphemeral(t *testing.T) {
 	assert.GreaterOrEqual(t, len(got), 32)
 }
 
+// TestNewWebDeps_CarriesTheResolvedStateSecret guards the double-keying regression: web Deps must hold the bytes resolveStateSecret produced, not a second derivation from cfg.HTTP.StateSecret.
+func TestNewWebDeps_CarriesTheResolvedStateSecret(t *testing.T) {
+	t.Parallel()
+	raw := bytes.Repeat([]byte{0x5A}, 32)
+	cfg := &config.Config{}
+	cfg.HTTP.StateSecret = base64.RawURLEncoding.EncodeToString(raw)
+
+	secret, err := resolveStateSecret(cfg, discardLogger())
+	require.NoError(t, err)
+	require.Equal(t, raw, secret)
+
+	deps := newWebDeps(cfg, capabilities.Capabilities{}, session.NewMemoryStore(), discardLogger(), secret)
+	assert.Equal(t, secret, deps.SecretBytes())
+	assert.NotEqual(t, []byte(cfg.HTTP.StateSecret), deps.SecretBytes(),
+		"web Deps must not re-key off the raw config string")
+}
+
 func TestBootClient_Wires(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
@@ -85,7 +105,7 @@ func TestBuildAltAuth_NilWhenOIDCUnset(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
 	cfg.OIDC.Issuer = ""
-	got, err := buildAltAuth(context.Background(), cfg, discardLogger())
+	got, err := buildAltAuth(context.Background(), cfg, bytes.Repeat([]byte{0x01}, 32))
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }

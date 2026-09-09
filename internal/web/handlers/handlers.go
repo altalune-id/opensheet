@@ -31,6 +31,8 @@ type Deps struct {
 	Cfg      *config.Config
 	Caps     capabilities.Capabilities
 	Sessions session.Store
+	// SECURITY: Secret is the resolved (decoded) http.stateSecret; never re-derive it from Cfg.
+	Secret   []byte
 	Logger   *log.Logger
 	Orgs     *org.Service
 	Projects *project.Service
@@ -204,8 +206,8 @@ func capitaliseRole(role string) string {
 	return strings.ToUpper(role[:1]) + strings.ToLower(role[1:])
 }
 
-// SecretBytes returns cfg.HTTP.StateSecret as bytes.
-func (d Deps) SecretBytes() []byte { return []byte(d.Cfg.HTTP.StateSecret) }
+// SecretBytes returns the HMAC key every cookie and OAuth state in this package is signed with.
+func (d Deps) SecretBytes() []byte { return d.Secret }
 
 // LogErr prints via the injected logger (or the stdlib default when nil).
 func (d Deps) LogErr(msg string, err error) {

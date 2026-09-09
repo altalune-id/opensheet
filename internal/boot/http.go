@@ -84,8 +84,9 @@ func buildWebHandler(
 	dataHandler http.Handler,
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
+	stateSecret []byte,
 ) http.Handler {
-	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger)
+	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger, stateSecret)
 	deps.Orgs = orgs
 	deps.Projects = projects
 	deps.I18n = bundle
@@ -128,7 +129,7 @@ func buildWebHandler(
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
-				Secret: []byte(cfg.HTTP.StateSecret),
+				Secret: deps.SecretBytes(),
 			}),
 			webmw.Tenant,
 			i18npkg.Middleware(i18npkg.MiddlewareOpts{
@@ -167,11 +168,13 @@ func sessionLocaleLookup(ctx context.Context) string {
 	return session.PrincipalFrom(ctx).Locale
 }
 
-func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store, slogger *slog.Logger) webhandlers.Deps {
+func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store,
+	slogger *slog.Logger, stateSecret []byte) webhandlers.Deps {
 	return webhandlers.Deps{
 		Cfg:      cfg,
 		Caps:     caps,
 		Sessions: sessions,
+		Secret:   stateSecret,
 		Logger:   stdlog.New(logSlogWriter{log: slogger}, "", 0),
 	}
 }

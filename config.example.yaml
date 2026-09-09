@@ -122,7 +122,7 @@ http:
   cookieSecure: false
   # env: OPENSHEET_HTTP_ROBOTS_TXT
   robotsTxt: ""
-  # [required, mode:cloud, secret, bootstrap] env: OPENSHEET_HTTP_STATE_SECRET
+  # [required, secret, bootstrap] env: OPENSHEET_HTTP_STATE_SECRET
   stateSecret: ""
 
 i18n:

@@ -64,7 +64,8 @@ type Services struct {
 	KeyUsage *apikey.UsageWorker
 }
 
-func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities) (*Services, error) {
+func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities,
+	stateSecret []byte) (*Services, error) {
 	pool := k.Pool
 	pgConn := k.PgConn
 	log := k.Log
@@ -218,17 +219,11 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		log,
 		reporter.Unexpected,
 	)
-	// NOTE: resolved rather than read raw, because http.stateSecret is empty by default and an empty
-	// key made every Google connect return CRD011 instead of signing a state.
-	connectSecret, err := resolveStateSecret(cfg, log)
-	if err != nil {
-		return nil, err
-	}
 	connectWorkflow := credential.NewConnectWorkflow(
 		credentialStore,
 		k.Sealer,
 		connector,
-		connectSecret,
+		stateSecret,
 		nil,
 		log,
 		reporter.Unexpected,

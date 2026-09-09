@@ -98,6 +98,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 		c.Tenant.SingletonOrg.Slug = "default"
 		c.Tenant.SingletonOrg.Name = "Default Organization"
 		c.Security.EncryptionKey = "0123456789abcdef"
+		c.HTTP.StateSecret = testStateSecret
 		return c
 	}
 
@@ -351,6 +352,8 @@ func writeTempYAML(t *testing.T, name, content string) string {
 	return p
 }
 
+const testStateSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+
 func validDB() db.DBConfig {
 	return db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:"}
 }
@@ -471,6 +474,18 @@ func TestValidate_PostgresSessionStoreRequiresAnEncryptionKey(t *testing.T) {
 	err := c.Validate()
 	if err == nil || !strings.Contains(err.Error(), "OPENSHEET_SECURITY_ENCRYPTION_KEY") {
 		t.Fatalf("Validate() = %v, want an error naming OPENSHEET_SECURITY_ENCRYPTION_KEY", err)
+	}
+}
+
+func TestValidate_PostgresSessionStoreRequiresAStateSecret(t *testing.T) {
+	c := validSelfhostedConfig(t)
+	c.DB.Driver = db.DriverPostgres
+	c.DB.DSN = "postgres://localhost/opensheet"
+	c.Security.EncryptionKey = "0123456789abcdef"
+	c.HTTP.StateSecret = ""
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "OPENSHEET_HTTP_STATE_SECRET") {
+		t.Fatalf("Validate() = %v, want an error naming OPENSHEET_HTTP_STATE_SECRET", err)
 	}
 }
 
@@ -607,6 +622,7 @@ func validCloudConfig(t *testing.T) *Config {
 	c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "cid", ClientSecret: "csecret"}
 	c.Genesis.BreakGlass = true
 	c.Security.EncryptionKey = "0123456789abcdef"
+	c.HTTP.StateSecret = testStateSecret
 	return c
 }
 
@@ -624,6 +640,7 @@ func loadWithMode(t *testing.T, mode Mode) *Config {
 		t.Setenv("OPENSHEET_OIDC_CLIENT_ID", "cid")
 		t.Setenv("OPENSHEET_OIDC_CLIENT_SECRET", "csecret")
 		t.Setenv("OPENSHEET_SECURITY_ENCRYPTION_KEY", "0123456789abcdef")
+		t.Setenv("OPENSHEET_HTTP_STATE_SECRET", testStateSecret)
 	}
 	cfg, err := Load("")
 	require.NoError(t, err)

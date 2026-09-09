@@ -57,6 +57,9 @@ services:
       # 32 bytes hex or base64; required with db.driver=postgres
       OPENSHEET_SECURITY_ENCRYPTION_KEY: "92ffe7e38aea660083a2354e1fccdfb7afdac5376c1b598bbd4408fa040eaf82"
 
+      # base64 decoding to >= 32 bytes; required with db.driver=postgres or restarts invalidate every session
+      OPENSHEET_HTTP_STATE_SECRET: "d10021d4fe160ef91697fccf3b30bccc35d96964ba9aa384c246500c32fb05f0"
+
       OPENSHEET_MAIL_DRIVER: smtp
       OPENSHEET_MAIL_FROM: "no-reply@opensheet.local"
       OPENSHEET_MAIL_SMTP_HOST: mailpit

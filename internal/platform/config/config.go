@@ -127,7 +127,7 @@ type HTTPConfig struct {
 	BasePath     string `yaml:"basePath"     mapstructure:"basePath"`
 	BaseURL      string `yaml:"baseURL"      mapstructure:"baseURL"      awareness:"required"                  validate:"omitempty,url"`
 	CookieSecure bool   `yaml:"cookieSecure" mapstructure:"cookieSecure"`
-	StateSecret  string `yaml:"stateSecret"  mapstructure:"stateSecret"  awareness:"required,mode:cloud,secret,bootstrap"`
+	StateSecret  string `yaml:"stateSecret"  mapstructure:"stateSecret"  awareness:"required,secret,bootstrap"`
 	RobotsTxt    string `yaml:"robotsTxt"    mapstructure:"robotsTxt"`
 }
 
@@ -308,6 +308,9 @@ func validateInvariants(c *Config) error {
 	if err := validatePostgresNeedsEncryptionKey(c); err != nil {
 		return err
 	}
+	if err := validatePostgresNeedsStateSecret(c); err != nil {
+		return err
+	}
 	switch c.Mode {
 	case ModeSelfhosted:
 		return validateSelfhosted(c)
@@ -416,6 +419,13 @@ func validateCachePostgresNeedsPostgres(c *Config) error {
 func validatePostgresNeedsEncryptionKey(c *Config) error {
 	if c.DB.Driver == db.DriverPostgres && c.Security.EncryptionKey == "" {
 		return errors.New("config: db.driver=postgres requires security.encryptionKey — 32 bytes hex or base64; without it persisted web sessions cannot be sealed and every login fails (set OPENSHEET_SECURITY_ENCRYPTION_KEY)")
+	}
+	return nil
+}
+
+func validatePostgresNeedsStateSecret(c *Config) error {
+	if c.DB.Driver == db.DriverPostgres && c.HTTP.StateSecret == "" {
+		return errors.New("config: db.driver=postgres requires http.stateSecret — base64 decoding to at least 32 bytes; without it a fresh key is minted every boot and every persisted web session stops verifying after a restart (set OPENSHEET_HTTP_STATE_SECRET)")
 	}
 	return nil
 }
