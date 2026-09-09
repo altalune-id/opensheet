@@ -150,7 +150,7 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))).
-		ORDER_BY(s.table.CreatedAt.DESC())
+		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
 	var rows []sqliteCredentialRow
 	if qErr := stmt.QueryContext(ctx, s.db, &rows); qErr != nil {
 		return nil, fmt.Errorf("credential.sqlite.List: %w", qErr)

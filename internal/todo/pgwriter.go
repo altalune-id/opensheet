@@ -110,7 +110,7 @@ func (s *postgresStore) markDoneBatch(ctx context.Context, orgID uuid.UUID, cuto
 				AND(s.table.Done.EQ(postgres.Bool(false))).
 				AND(s.table.CreatedAt.LT(postgres.TimestampzT(cutoff.UTC()))),
 		).
-		ORDER_BY(s.table.CreatedAt.ASC()).
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC()).
 		LIMIT(int64(batch))
 
 	stmt := s.table.UPDATE(s.table.Done, s.table.UpdatedAt).

@@ -180,15 +180,15 @@ Some lookups run before any tenant scope exists, so they cannot pass through
 RLS. Each is a `SECURITY DEFINER` function owned by the migrator role, with
 `SET search_path` pinned and `EXECUTE` revoked from `PUBLIC`:
 
-| Function                         | Migration | Consulted before scope exists to…         |
-| -------------------------------- | --------- | ----------------------------------------- |
-| `current_org_id`                 | `002`     | read the GUC RLS policies compare against |
-| `list_org_ids`                   | `005`     | enumerate tenants for the scheduler       |
-| `resolve_org_by_slug`            | `005`     | turn a URL slug into an org               |
-| `list_orgs_for_user`             | `005`     | list a user's orgs at login               |
-| `resolve_invite_by_token_hash`   | `005`     | redeem an invite                          |
-| `list_pending_invites_for_email` | `005`     | find an invite during signup              |
-| `apikey_by_prefix`               | `008`     | resolve a presented API key's org         |
+| Function                         | Migration    | Consulted before scope exists to…         |
+| -------------------------------- | ------------ | ----------------------------------------- |
+| `current_org_id`                 | `002`        | read the GUC RLS policies compare against |
+| `list_org_ids`                   | `005`, `013` | enumerate tenants for the scheduler       |
+| `resolve_org_by_slug`            | `005`        | turn a URL slug into an org               |
+| `list_orgs_for_user`             | `005`, `013` | list a user's orgs at login               |
+| `resolve_invite_by_token_hash`   | `005`        | redeem an invite                          |
+| `list_pending_invites_for_email` | `005`        | find an invite during signup              |
+| `apikey_by_prefix`               | `008`        | resolve a presented API key's org         |
 
 SECURITY: `apikey_by_prefix` returns `SETOF api_keys` — the key row only. It
 deliberately does **not** join `api_key_sheets`, which has its own RLS policy.

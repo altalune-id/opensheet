@@ -156,7 +156,7 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteSpreadsheetRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("spreadsheet.sqlite.List: %w", err)

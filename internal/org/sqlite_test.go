@@ -155,6 +155,59 @@ func TestSQLite_MembershipsRoundtrip(t *testing.T) {
 	}
 }
 
+func TestSQLite_ListMembers_TiedCreatedAtOrdersByUserID(t *testing.T) {
+	store, sqlDB, prefix := newSQLiteStoreForTest(t)
+	ctx := context.Background()
+	lo, hi := seedUser(t, sqlDB, prefix), seedUser(t, sqlDB, prefix)
+	if lo.String() > hi.String() {
+		lo, hi = hi, lo
+	}
+
+	o, err := org.NewOrg("acme", "Acme", lo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, o); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	tie := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	for _, userID := range []uuid.UUID{hi, lo} {
+		m, mErr := org.NewMembership(o.ID, userID, org.RoleMember)
+		if mErr != nil {
+			t.Fatal(mErr)
+		}
+		m.CreatedAt = tie
+		if sErr := store.SaveMembership(ctx, m); sErr != nil {
+			t.Fatalf("SaveMembership: %v", sErr)
+		}
+	}
+
+	for i := range 5 {
+		members, mErr := store.ListMembers(ctx, o.ID)
+		if mErr != nil {
+			t.Fatalf("ListMembers %d: %v", i, mErr)
+		}
+		if len(members) != 2 {
+			t.Fatalf("ListMembers %d: got %d rows, want 2", i, len(members))
+		}
+		if members[0].UserID != lo || members[1].UserID != hi {
+			t.Fatalf("ListMembers %d: tied created_at must order by user_id ascending, got %v then %v", i, members[0].UserID, members[1].UserID)
+		}
+
+		profiles, pErr := store.ListMemberProfiles(ctx, o.ID)
+		if pErr != nil {
+			t.Fatalf("ListMemberProfiles %d: %v", i, pErr)
+		}
+		if len(profiles) != 2 {
+			t.Fatalf("ListMemberProfiles %d: got %d rows, want 2", i, len(profiles))
+		}
+		if profiles[0].UserID != lo || profiles[1].UserID != hi {
+			t.Fatalf("ListMemberProfiles %d: tied created_at must order by user_id ascending, got %v then %v", i, profiles[0].UserID, profiles[1].UserID)
+		}
+	}
+}
+
 func TestSQLite_RemoveMember_Missing(t *testing.T) {
 	store, _, _ := newSQLiteStoreForTest(t)
 	err := store.RemoveMember(context.Background(), uuid.New(), uuid.New())

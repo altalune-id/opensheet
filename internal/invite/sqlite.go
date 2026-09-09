@@ -134,7 +134,7 @@ func (s *sqliteStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*Invi
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.ListPending: %w", err)
@@ -156,7 +156,7 @@ func (s *sqliteStore) FindPendingForEmail(ctx context.Context, email string) ([]
 		FROM(s.table).
 		WHERE(s.table.Email.EQ(sqlite.String(email)).
 			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.FindPendingForEmail: %w", err)

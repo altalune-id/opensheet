@@ -49,7 +49,7 @@ func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID, op
 	stmt := postgres.SELECT(s.table.AllColumns).
 		FROM(s.table).
 		WHERE(where).
-		ORDER_BY(s.table.CreatedAt.DESC())
+		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
 	var rows []pgTodoRow
 	if qErr := stmt.QueryContext(ctx, tx, &rows); qErr != nil {
 		return nil, fmt.Errorf("todo.postgres.List: %w", qErr)

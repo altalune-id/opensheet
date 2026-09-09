@@ -30,7 +30,7 @@ func NewOrgReader(pool db.Pool, driver db.Driver, schema, tablePrefix string) Or
 		return &pgOrgReader{conn: pool.W, query: query, args: args}
 	}
 	orgs := sqliteent.NewOrgs(tablePrefix)
-	query, args := jetsqlite.SELECT(orgs.ID).FROM(orgs).ORDER_BY(orgs.CreatedAt.ASC()).Sql()
+	query, args := jetsqlite.SELECT(orgs.ID).FROM(orgs).ORDER_BY(orgs.CreatedAt.ASC(), orgs.ID.ASC()).Sql()
 	return &sqliteOrgReader{conn: pool.W, query: query, args: args}
 }
 

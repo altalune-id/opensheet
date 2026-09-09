@@ -123,7 +123,7 @@ func (s *sqliteStore) List(ctx context.Context, orgID uuid.UUID) ([]*Project, er
 	).
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String()))).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteProjectRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("project.sqlite.List: %w", err)

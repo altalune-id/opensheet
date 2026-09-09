@@ -66,6 +66,52 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, proj
 	return
 }
 
+func orderedV7Pair(t *testing.T) (lo, hi uuid.UUID) {
+	t.Helper()
+	a := uuid.Must(uuid.NewV7())
+	b := uuid.Must(uuid.NewV7())
+	if a == b {
+		t.Fatal("NewV7 returned two identical ids")
+	}
+	if a.String() > b.String() {
+		return b, a
+	}
+	return a, b
+}
+
+func TestSQLiteStore_List_TiedCreatedAtOrdersByIDDescending(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+	tie := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	lo, hi := orderedV7Pair(t)
+
+	for _, id := range []uuid.UUID{lo, hi} {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, "tied "+id.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.ID = id
+		td.CreatedAt = tie
+		td.UpdatedAt = tie
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	for i := range 5 {
+		got, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{})
+		if err != nil {
+			t.Fatalf("List %d: %v", i, err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("List %d: got %d rows, want 2", i, len(got))
+		}
+		if got[0].ID != hi || got[1].ID != lo {
+			t.Fatalf("List %d: tied created_at must order by id descending, got %v then %v", i, got[0].ID, got[1].ID)
+		}
+	}
+}
+
 func TestSQLiteStore_SaveAndByID(t *testing.T) {
 	store, _, tc := newSQLiteStoreForTest(t)
 	ctx := tenant.Into(context.Background(), tc)

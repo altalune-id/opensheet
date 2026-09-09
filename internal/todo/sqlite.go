@@ -141,7 +141,7 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts
 	stmt := sqlite.SELECT(s.table.AllColumns).
 		FROM(s.table).
 		WHERE(where).
-		ORDER_BY(s.table.CreatedAt.DESC())
+		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
 	var rows []sqliteTodoRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("todo.sqlite.List: %w", err)
@@ -217,7 +217,7 @@ func (s *sqliteStore) MarkDoneOlderThan(ctx context.Context, orgID uuid.UUID, cu
 					AND(s.table.Done.EQ(sqlite.Int(0))).
 					AND(s.table.CreatedAt.LT(sqlite.String(cut))),
 			).
-			ORDER_BY(s.table.CreatedAt.ASC()).
+			ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC()).
 			LIMIT(int64(batch))
 
 		stmt := s.table.UPDATE(s.table.Done, s.table.UpdatedAt).

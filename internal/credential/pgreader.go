@@ -45,7 +45,7 @@ func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(postgres.UUID(orgID)).
 			AND(s.table.ProjectID.EQ(postgres.UUID(projectID)))).
-		ORDER_BY(s.table.CreatedAt.DESC())
+		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
 	var rows []pgCredentialRow
 	if qErr := stmt.QueryContext(ctx, tx, &rows); qErr != nil {
 		return nil, fmt.Errorf("credential.postgres.List: %w", qErr)

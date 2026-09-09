@@ -68,6 +68,33 @@ func (f *sqliteFixture) save(t *testing.T, fileID, title string) *spreadsheet.Sp
 	return sp
 }
 
+func (f *sqliteFixture) saveAt(t *testing.T, id uuid.UUID, createdAt time.Time, fileID, title string) {
+	t.Helper()
+	sp, err := spreadsheet.New(f.tc.OrgID, f.tc.ProjectID, f.credentialID, fileID, title)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	sp.ID = id
+	sp.CreatedAt = createdAt
+	sp.UpdatedAt = createdAt
+	if err := f.store.Save(f.ctx(), sp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+}
+
+func orderedV7Pair(t *testing.T) (lo, hi uuid.UUID) {
+	t.Helper()
+	a := uuid.Must(uuid.NewV7())
+	b := uuid.Must(uuid.NewV7())
+	if a == b {
+		t.Fatal("NewV7 returned two identical ids")
+	}
+	if a.String() > b.String() {
+		return b, a
+	}
+	return a, b
+}
+
 func seedSQLiteTenant(t *testing.T, sqlDB *sql.DB, prefix string, tc tenant.Context) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -258,6 +285,28 @@ func TestSQLiteStore_List(t *testing.T) {
 	}
 	if len(crossOrg) != 0 {
 		t.Errorf("another org's scope returned %d rows", len(crossOrg))
+	}
+}
+
+func TestSQLiteStore_List_TiedCreatedAtOrdersByID(t *testing.T) {
+	f := newSQLiteFixture(t)
+	tie := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	lo, hi := orderedV7Pair(t)
+
+	f.saveAt(t, hi, tie, "BBB", "B")
+	f.saveAt(t, lo, tie, "AAA", "A")
+
+	for i := range 5 {
+		got, err := f.store.List(f.ctx(), f.tc.OrgID, f.tc.ProjectID)
+		if err != nil {
+			t.Fatalf("List %d: %v", i, err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("List %d: got %d rows, want 2", i, len(got))
+		}
+		if got[0].ID != lo || got[1].ID != hi {
+			t.Fatalf("List %d: tied created_at must order by id ascending, got %v then %v", i, got[0].ID, got[1].ID)
+		}
 	}
 }
 
