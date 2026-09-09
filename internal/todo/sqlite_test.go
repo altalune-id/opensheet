@@ -106,6 +106,7 @@ func TestSQLiteStore_List_TiedCreatedAtOrdersByIDDescending(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("List %d: got %d rows, want 2", i, len(got))
 		}
+		// NOTE: plan-dependent — TestSQLiteStore_ListStatementCarriesTheIDTiebreak locks the emitted ORDER BY.
 		if got[0].ID != hi || got[1].ID != lo {
 			t.Fatalf("List %d: tied created_at must order by id descending, got %v then %v", i, got[0].ID, got[1].ID)
 		}

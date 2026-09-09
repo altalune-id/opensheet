@@ -187,7 +187,7 @@ RLS. Each is a `SECURITY DEFINER` function owned by the migrator role, with
 | `resolve_org_by_slug`            | `005`        | turn a URL slug into an org               |
 | `list_orgs_for_user`             | `005`, `013` | list a user's orgs at login               |
 | `resolve_invite_by_token_hash`   | `005`        | redeem an invite                          |
-| `list_pending_invites_for_email` | `005`        | find an invite during signup              |
+| `list_pending_invites_for_email` | `005`, `014` | find an invite during signup              |
 | `apikey_by_prefix`               | `008`        | resolve a presented API key's org         |
 
 SECURITY: `apikey_by_prefix` returns `SETOF api_keys` — the key row only. It

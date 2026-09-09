@@ -144,6 +144,14 @@ func (s *sqliteStore) ByGoogleFileID(ctx context.Context, orgID, projectID uuid.
 	)
 }
 
+func (s *sqliteStore) listStmt(orgID, projectID uuid.UUID) sqlite.SelectStatement {
+	return sqlite.SELECT(s.table.AllColumns).
+		FROM(s.table).
+		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
+			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))).
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
+}
+
 func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*Spreadsheet, error) {
 	tc, err := tenant.From(ctx)
 	if err != nil {
@@ -152,11 +160,7 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*
 	if tc.OrgID != orgID {
 		return []*Spreadsheet{}, nil
 	}
-	stmt := sqlite.SELECT(s.table.AllColumns).
-		FROM(s.table).
-		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
-			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))).
-		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
+	stmt := s.listStmt(orgID, projectID)
 	var rows []sqliteSpreadsheetRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("spreadsheet.sqlite.List: %w", err)

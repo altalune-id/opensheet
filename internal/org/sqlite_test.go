@@ -191,6 +191,7 @@ func TestSQLite_ListMembers_TiedCreatedAtOrdersByUserID(t *testing.T) {
 		if len(members) != 2 {
 			t.Fatalf("ListMembers %d: got %d rows, want 2", i, len(members))
 		}
+		// NOTE: plan-dependent — TestSQLiteStore_MemberListStatementsCarryTheUserIDTiebreak locks the emitted ORDER BY.
 		if members[0].UserID != lo || members[1].UserID != hi {
 			t.Fatalf("ListMembers %d: tied created_at must order by user_id ascending, got %v then %v", i, members[0].UserID, members[1].UserID)
 		}

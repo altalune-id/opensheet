@@ -39,3 +39,9 @@ func TestPostgresStore_WrapperStatementsProjectEveryOrgColumn(t *testing.T) {
 		require.Contains(t, stmt, "public.opensheet_", "%s must qualify the wrapper with the configured schema", name)
 	}
 }
+
+func TestPostgresStore_ListForUserOrdersOnTheOuterStatement(t *testing.T) {
+	s := newPostgresStore(pdb.Pool{}, nil, "", "opensheet_")
+	require.Contains(t, s.listForUserStmt, "ORDER BY o.created_at ASC, o.id ASC",
+		"Postgres may inline the LANGUAGE sql wrapper, so only the outer ORDER BY is a guarantee")
+}

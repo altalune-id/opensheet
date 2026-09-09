@@ -121,14 +121,7 @@ func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID) (*Todo, error) {
 	return row.toTodo()
 }
 
-func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts ListOpts) ([]*Todo, error) {
-	tc, err := tenant.From(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if tc.OrgID != orgID {
-		return []*Todo{}, nil
-	}
+func (s *sqliteStore) listStmt(orgID, projectID uuid.UUID, opts ListOpts) sqlite.SelectStatement {
 	where := s.table.OrgID.EQ(sqlite.String(orgID.String())).
 		AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))
 	if opts.Done != nil {
@@ -138,10 +131,21 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts
 		}
 		where = where.AND(s.table.Done.EQ(sqlite.Int(val)))
 	}
-	stmt := sqlite.SELECT(s.table.AllColumns).
+	return sqlite.SELECT(s.table.AllColumns).
 		FROM(s.table).
 		WHERE(where).
 		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
+}
+
+func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts ListOpts) ([]*Todo, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tc.OrgID != orgID {
+		return []*Todo{}, nil
+	}
+	stmt := s.listStmt(orgID, projectID, opts)
 	var rows []sqliteTodoRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("todo.sqlite.List: %w", err)
