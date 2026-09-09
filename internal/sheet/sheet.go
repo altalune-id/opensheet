@@ -57,6 +57,16 @@ type NewParams struct {
 	Writable      bool
 }
 
+// CreateRequest is the input to Service.Create.
+type CreateRequest struct {
+	SpreadsheetID uuid.UUID
+	Tab           string
+	Slug          string
+	Visibility    Visibility
+	CacheTTL      time.Duration
+	Writable      bool
+}
+
 // UpdateInput carries the mutable fields of a sheet; a nil field is left alone.
 type UpdateInput struct {
 	Tab        *string

@@ -89,7 +89,15 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		h.writeSection(w, sc, in)
 		return
 	}
-	if _, err := h.Sheets.Create(sc.req.Context(), sprdID, in.Tab, in.Slug, visibilityOf(in.Public), ttl, in.Writable); err != nil {
+	create := sheet.CreateRequest{
+		SpreadsheetID: sprdID,
+		Tab:           in.Tab,
+		Slug:          in.Slug,
+		Visibility:    visibilityOf(in.Public),
+		CacheTTL:      ttl,
+		Writable:      in.Writable,
+	}
+	if _, err := h.Sheets.Create(sc.req.Context(), create); err != nil {
 		h.LogErr("web sheet: create", err)
 		in.Error, in.ErrorCode = publishMessage(err), ErrorRef(err)
 		h.writeSection(w, sc, in)
@@ -315,7 +323,14 @@ func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, 
 		row.SlugEmpty = true
 		return
 	}
-	sh, err := h.Sheets.Create(sc.req.Context(), sp.ID, row.Tab, row.Slug, vis, ttl, false)
+	sh, err := h.Sheets.Create(sc.req.Context(), sheet.CreateRequest{
+		SpreadsheetID: sp.ID,
+		Tab:           row.Tab,
+		Slug:          row.Slug,
+		Visibility:    vis,
+		CacheTTL:      ttl,
+		Writable:      false,
+	})
 	if err != nil {
 		h.LogErr("web sheet: bulk create", err)
 		row.Failure = publishMessage(err)

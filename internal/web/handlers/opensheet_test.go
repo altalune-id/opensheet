@@ -238,7 +238,7 @@ func (f *sheetsFixture) seedSpreadsheet(t *testing.T, credID uuid.UUID) *spreads
 
 func (f *sheetsFixture) seedSheet(t *testing.T, sprdID uuid.UUID, slug string, vis sheet.Visibility) *sheet.Sheet {
 	t.Helper()
-	sh, err := f.Sheets.Create(f.ctx(), sprdID, "", slug, vis, 0, false)
+	sh, err := f.Sheets.Create(f.ctx(), sheet.CreateRequest{SpreadsheetID: sprdID, Slug: slug, Visibility: vis})
 	require.NoError(t, err)
 	return sh
 }
@@ -1193,7 +1193,7 @@ func TestSheetHandler_BulkPublishSkipsATabThatIsAlreadyPublished(t *testing.T) {
 	f := newSheetsFixture(t)
 	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	sp := f.seedSpreadsheet(t, cred.ID)
-	_, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0, false)
+	_, err := f.Sheets.Create(f.ctx(), sheet.CreateRequest{SpreadsheetID: sp.ID, Tab: "First", Slug: "first", Visibility: sheet.VisibilityKey})
 	require.NoError(t, err)
 
 	body := "tab=0&slug.0=first-again&tab=1&slug.1=second&visibility=key&cache_ttl=300"
@@ -1215,7 +1215,7 @@ func TestSheetHandler_BulkPanelDisablesAnAlreadyPublishedTab(t *testing.T) {
 	f := newSheetsFixture(t)
 	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	sp := f.seedSpreadsheet(t, cred.ID)
-	sh, err := f.Sheets.Create(f.ctx(), sp.ID, "First", "first", sheet.VisibilityKey, 0, false)
+	sh, err := f.Sheets.Create(f.ctx(), sheet.CreateRequest{SpreadsheetID: sp.ID, Tab: "First", Slug: "first", Visibility: sheet.VisibilityKey})
 	require.NoError(t, err)
 
 	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")

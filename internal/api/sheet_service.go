@@ -51,8 +51,14 @@ func (s *SheetService) Create(ctx context.Context, req *connect.Request[sheetv1.
 	if err != nil {
 		return nil, err
 	}
-	sh, err := s.sheets.Create(tctx, sprdID, req.Msg.GetTab(), req.Msg.GetSlug(),
-		sheet.Visibility(req.Msg.GetVisibility()), req.Msg.GetCacheTtl().AsDuration(), req.Msg.GetWritable())
+	sh, err := s.sheets.Create(tctx, sheet.CreateRequest{
+		SpreadsheetID: sprdID,
+		Tab:           req.Msg.GetTab(),
+		Slug:          req.Msg.GetSlug(),
+		Visibility:    sheet.Visibility(req.Msg.GetVisibility()),
+		CacheTTL:      req.Msg.GetCacheTtl().AsDuration(),
+		Writable:      req.Msg.GetWritable(),
+	})
 	if err != nil {
 		return nil, err
 	}

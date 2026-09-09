@@ -3,7 +3,6 @@ package sheet
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -51,12 +50,12 @@ func NewService(
 	}
 }
 
-// Create publishes a tab of spreadsheetID under slug in the caller's tenant scope.
-func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string, vis Visibility, ttl time.Duration, writable bool) (*Sheet, error) {
+// Create publishes a spreadsheet tab under the requested slug in the caller's tenant scope.
+func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error) {
 	ctx, span := tracer.Start(ctx, "sheet.Create",
 		trace.WithAttributes(
-			attribute.String("spreadsheet_id", spreadsheetID.String()),
-			attribute.String("sheet.slug", slug),
+			attribute.String("spreadsheet_id", req.SpreadsheetID.String()),
+			attribute.String("sheet.slug", req.Slug),
 		))
 	defer span.End()
 
@@ -69,7 +68,7 @@ func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
 
-	if err := s.gatePublic(vis, slug); err != nil {
+	if err := s.gatePublic(req.Visibility, req.Slug); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
@@ -77,26 +76,26 @@ func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug
 	sh, err := New(NewParams{
 		OrgID:         tc.OrgID,
 		ProjectID:     tc.ProjectID,
-		SpreadsheetID: spreadsheetID,
-		Tab:           tab,
-		Slug:          slug,
-		Visibility:    vis,
-		CacheTTL:      ttl,
-		Writable:      writable,
+		SpreadsheetID: req.SpreadsheetID,
+		Tab:           req.Tab,
+		Slug:          req.Slug,
+		Visibility:    req.Visibility,
+		CacheTTL:      req.CacheTTL,
+		Writable:      req.Writable,
 	})
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
 
-	_, err = s.store.BySlug(ctx, tc.OrgID, tc.ProjectID, slug)
+	_, err = s.store.BySlug(ctx, tc.OrgID, tc.ProjectID, req.Slug)
 	if err == nil {
-		return nil, &AlreadyExistsError{Field: "slug", Value: slug}
+		return nil, &AlreadyExistsError{Field: "slug", Value: req.Slug}
 	}
 	if !IsNotFoundError(err) {
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "sheet.Create: bySlug", err,
-			"org_id", tc.OrgID, "project_id", tc.ProjectID, "slug", slug)
+			"org_id", tc.OrgID, "project_id", tc.ProjectID, "slug", req.Slug)
 	}
 
 	if err := s.store.Save(ctx, sh); err != nil {
@@ -105,7 +104,7 @@ func (s *Service) Create(ctx context.Context, spreadsheetID uuid.UUID, tab, slug
 		}
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "sheet.Create: save", err,
-			"org_id", tc.OrgID, "project_id", tc.ProjectID, "slug", slug)
+			"org_id", tc.OrgID, "project_id", tc.ProjectID, "slug", req.Slug)
 	}
 	span.SetAttributes(attribute.String("sheet.id", sh.ID.String()))
 	return sh, nil
