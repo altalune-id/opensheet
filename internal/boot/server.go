@@ -3,7 +3,6 @@ package boot
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -262,9 +261,14 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	dataHandler := buildDataHandler(cfg, caps, log, svcs)
 
-	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
+	webHandler, err := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
 		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs, svcs.Onboards, required, setup,
 		apiHandler, dataHandler, bundle, defaultLoc, stateSecret)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -377,21 +381,10 @@ func buildAltAuth(ctx context.Context, cfg *config.Config, stateSecret []byte) (
 	})
 }
 
+// SECURITY: belt-and-braces — config.Validate already rejects a bad value; boot refuses to key a cookie on one regardless.
 func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
-	raw := cfg.HTTP.StateSecret
-	if raw != "" {
-		buf, err := base64.RawURLEncoding.DecodeString(raw)
-		if err != nil {
-			if b2, err2 := base64.StdEncoding.DecodeString(raw); err2 == nil {
-				buf = b2
-			} else {
-				return nil, fmt.Errorf("config: http.stateSecret must be base64url — %w", err)
-			}
-		}
-		if len(buf) < 32 {
-			return nil, errors.New("config: http.stateSecret must decode to >= 32 bytes")
-		}
-		return buf, nil
+	if cfg.HTTP.StateSecret != "" {
+		return config.ParseStateSecret(cfg.HTTP.StateSecret)
 	}
 	ephemeral, err := authl.GenerateStateSecret()
 	if err != nil {

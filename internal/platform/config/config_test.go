@@ -489,6 +489,52 @@ func TestValidate_PostgresSessionStoreRequiresAStateSecret(t *testing.T) {
 	}
 }
 
+// TestValidate_StateSecretMustDecodeToThirtyTwoBytes proves config-time validation raises the failure its own message describes, instead of deferring the length check to boot.
+func TestValidate_StateSecretMustDecodeToThirtyTwoBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		secret  string
+		wantSub string
+	}{
+		{"hex too short", "0f1e2d3c4b5a6978", "decodes to 8 bytes"},
+		{"base64 too short", "c2hvcnQ", "decodes to 5 bytes"},
+		{"not hex nor base64", "not-hex-or-base64!!$", "neither hex nor base64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validSelfhostedConfig(t)
+			c.HTTP.StateSecret = tt.secret
+			err := c.Validate()
+			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("Validate() = %v, want an error mentioning %q", err, tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), "OPENSHEET_HTTP_STATE_SECRET") {
+				t.Errorf("Validate() = %v, want an error naming OPENSHEET_HTTP_STATE_SECRET", err)
+			}
+		})
+	}
+}
+
+func TestValidate_StateSecretAcceptsHexAndBase64(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret string
+	}{
+		{"hex", testStateSecret},
+		{"base64url", "D_HtPEtaaXiHlqW0w9Lh8A_x7TxLWml4h5altMPS4fA"},
+		{"base64std", "D/HtPEtaaXiHlqW0w9Lh8A/x7TxLWml4h5altMPS4fA="},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validSelfhostedConfig(t)
+			c.HTTP.StateSecret = tt.secret
+			if err := c.Validate(); err != nil {
+				t.Fatalf("Validate() with a %s state secret = %v, want nil", tt.name, err)
+			}
+		})
+	}
+}
+
 func TestValidate_GoogleClientSecretWithoutClientID(t *testing.T) {
 	c := validSelfhostedConfig(t)
 	c.Google.OAuth.ClientSecret = "shhh"

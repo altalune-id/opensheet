@@ -308,7 +308,7 @@ func validateInvariants(c *Config) error {
 	if err := validatePostgresNeedsEncryptionKey(c); err != nil {
 		return err
 	}
-	if err := validatePostgresNeedsStateSecret(c); err != nil {
+	if err := validateStateSecret(c); err != nil {
 		return err
 	}
 	switch c.Mode {
@@ -423,11 +423,15 @@ func validatePostgresNeedsEncryptionKey(c *Config) error {
 	return nil
 }
 
-func validatePostgresNeedsStateSecret(c *Config) error {
-	if c.DB.Driver == db.DriverPostgres && c.HTTP.StateSecret == "" {
-		return errors.New("config: db.driver=postgres requires http.stateSecret — base64 decoding to at least 32 bytes; without it a fresh key is minted every boot and every persisted web session stops verifying after a restart (set OPENSHEET_HTTP_STATE_SECRET)")
+func validateStateSecret(c *Config) error {
+	if c.HTTP.StateSecret == "" {
+		if c.DB.Driver == db.DriverPostgres {
+			return errors.New("config: db.driver=postgres requires http.stateSecret — 32 bytes as hex or base64; without it a fresh key is minted every boot and every persisted web session stops verifying after a restart (set OPENSHEET_HTTP_STATE_SECRET)")
+		}
+		return nil
 	}
-	return nil
+	_, err := ParseStateSecret(c.HTTP.StateSecret)
+	return err
 }
 
 func validateAutoMigrateNeedsMigrator(c *Config) error {

@@ -122,17 +122,26 @@ timezone is an operator knob.
 The separate reader handle is Postgres-only; under `driver: sqlite` its DSN is
 ignored and the reader aliases the writer.
 
+### Secret format
+
+`security.encryptionKey` and `http.stateSecret` share one format: **32 bytes,
+written as 64 hex characters or as base64**. Generate either with
+`openssl rand -hex 32`. Hex is tried first and base64 second for both keys, so
+one generated value means the same 32 bytes to both. A shorter value is
+rejected — `openssl rand -hex 16` yields 16 bytes, not 32.
+
 `driver: postgres` requires `security.encryptionKey`
-(`OPENSHEET_SECURITY_ENCRYPTION_KEY`, 32 bytes hex or base64) in every mode:
-web sessions are persisted to the `sessions` table with the `Principal` sealed
-at rest, so boot is refused without a key rather than failing every login.
+(`OPENSHEET_SECURITY_ENCRYPTION_KEY`) in every mode: web sessions are persisted
+to the `sessions` table with the `Principal` sealed at rest, so boot is refused
+without a key rather than failing every login.
 
 `driver: postgres` likewise requires `http.stateSecret`
-(`OPENSHEET_HTTP_STATE_SECRET`, base64 decoding to at least 32 bytes) in every
-mode: it is the HMAC key for the session cookie, and when it is empty boot mints
-a fresh ephemeral key, so every persisted session stops verifying on restart.
-Under `driver: sqlite` the ephemeral fallback stands — nothing outlives the
-process anyway.
+(`OPENSHEET_HTTP_STATE_SECRET`) in every mode: it is the HMAC key for the
+session cookie, and when it is empty boot mints a fresh ephemeral key, so every
+persisted session stops verifying on restart. Under `driver: sqlite` the
+ephemeral fallback stands — nothing outlives the process anyway. A non-empty
+value is checked by `config.Validate()`, so a malformed secret is rejected
+before any listener opens, whichever driver is in use.
 
 `/readyz` reports the snapshot the `db-health` worker writes, so
 `db.health.interval` sets how stale a readiness answer can be. Boot takes one

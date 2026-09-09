@@ -133,7 +133,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 	connector, err := gworkspace.NewConnector(testOAuthConfig(google.tokenURL), nil)
 	require.NoError(t, err)
 	connect := credential.NewConnectWorkflow(credStore, sl, connector,
-		[]byte(base.Cfg.HTTP.StateSecret), nil, discardLogger(), passthroughUnexpected())
+		base.Deps.SecretBytes(), nil, discardLogger(), passthroughUnexpected())
 
 	base.Deps.Caps = caps
 	uid := uuid.New()
@@ -1111,7 +1111,7 @@ func (f *sheetsFixture) startState(t *testing.T) string {
 
 func (f *sheetsFixture) pickerPath(t *testing.T, credID uuid.UUID) string {
 	t.Helper()
-	state := handlers.PickerStateFor([]byte(f.Cfg.HTTP.StateSecret), f.Org.Slug, f.Project.Slug, credID)
+	state := handlers.PickerStateFor(f.Deps.SecretBytes(), f.Org.Slug, f.Project.Slug, credID)
 	return "/credentials/google/picker?state=" + url.QueryEscape(state)
 }
 

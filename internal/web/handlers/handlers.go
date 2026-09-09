@@ -3,6 +3,8 @@ package handlers
 
 import (
 	"cmp"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -31,12 +33,39 @@ type Deps struct {
 	Cfg      *config.Config
 	Caps     capabilities.Capabilities
 	Sessions session.Store
-	// SECURITY: Secret is the resolved (decoded) http.stateSecret; never re-derive it from Cfg.
-	Secret   []byte
 	Logger   *log.Logger
 	Orgs     *org.Service
 	Projects *project.Service
 	I18n     *i18n.Bundle
+
+	// SECURITY: secret is the resolved (decoded) http.stateSecret; unexported so only [NewDeps] can install one, and never re-derived from Cfg.
+	secret []byte
+}
+
+// MinSecretLen is the shortest HMAC key accepted for signing cookies and OAuth state.
+const MinSecretLen = 32
+
+// NewDeps returns d keyed on secret, refusing a key shorter than [MinSecretLen] bytes.
+func NewDeps(d Deps, secret []byte) (Deps, error) {
+	if len(secret) < MinSecretLen {
+		return Deps{}, &ShortSecretError{Len: len(secret)}
+	}
+	d.secret = secret
+	return d, nil
+}
+
+// ShortSecretError reports a cookie HMAC key shorter than [MinSecretLen] bytes.
+type ShortSecretError struct{ Len int }
+
+func (e *ShortSecretError) Error() string {
+	return fmt.Sprintf("handlers: cookie secret is %d bytes, want at least %d — pass the resolved http.stateSecret (set OPENSHEET_HTTP_STATE_SECRET)",
+		e.Len, MinSecretLen)
+}
+
+// IsShortSecretError reports whether err's chain contains a *ShortSecretError.
+func IsShortSecretError(err error) bool {
+	_, ok := errors.AsType[*ShortSecretError](err)
+	return ok
 }
 
 // Base builds a minimal LayoutData for chromeless pages (login, onboarding, error).
@@ -206,8 +235,13 @@ func capitaliseRole(role string) string {
 	return strings.ToUpper(role[:1]) + strings.ToLower(role[1:])
 }
 
-// SecretBytes returns the HMAC key every cookie and OAuth state in this package is signed with.
-func (d Deps) SecretBytes() []byte { return d.Secret }
+// SecretBytes returns the cookie and OAuth-state HMAC key. SECURITY: panics on a Deps that skipped [NewDeps], so no signing path is ever keyed on zero bytes.
+func (d Deps) SecretBytes() []byte {
+	if len(d.secret) < MinSecretLen {
+		panic((&ShortSecretError{Len: len(d.secret)}).Error() + " — build Deps with handlers.NewDeps")
+	}
+	return d.secret
+}
 
 // LogErr prints via the injected logger (or the stdlib default when nil).
 func (d Deps) LogErr(msg string, err error) {

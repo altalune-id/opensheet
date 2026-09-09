@@ -85,8 +85,11 @@ func buildWebHandler(
 	bundle *i18npkg.Bundle,
 	defaultLoc i18npkg.Locale,
 	stateSecret []byte,
-) http.Handler {
-	deps := newWebDeps(cfg, caps, kernel.Sessions, slogger, stateSecret)
+) (http.Handler, error) {
+	deps, err := newWebDeps(cfg, caps, kernel.Sessions, slogger, stateSecret)
+	if err != nil {
+		return nil, fmt.Errorf("boot: web deps: %w", err)
+	}
 	deps.Orgs = orgs
 	deps.Projects = projects
 	deps.I18n = bundle
@@ -140,7 +143,7 @@ func buildWebHandler(
 			webhandlers.OnboardingGate(cfg.HTTP.BasePath, required),
 			webhandlers.WelcomeGate(cfg.HTTP.BasePath, cfg.Compliance.RequireAcceptance),
 		},
-	})
+	}), nil
 }
 
 func healthOnlyHandler(cfg *config.Config, healthOK func() bool) http.Handler {
@@ -169,14 +172,13 @@ func sessionLocaleLookup(ctx context.Context) string {
 }
 
 func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store,
-	slogger *slog.Logger, stateSecret []byte) webhandlers.Deps {
-	return webhandlers.Deps{
+	slogger *slog.Logger, stateSecret []byte) (webhandlers.Deps, error) {
+	return webhandlers.NewDeps(webhandlers.Deps{
 		Cfg:      cfg,
 		Caps:     caps,
 		Sessions: sessions,
-		Secret:   stateSecret,
 		Logger:   stdlog.New(logSlogWriter{log: slogger}, "", 0),
-	}
+	}, stateSecret)
 }
 
 type logSlogWriter struct{ log *slog.Logger }

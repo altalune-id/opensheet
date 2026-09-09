@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"testing"
@@ -13,7 +14,9 @@ import (
 
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
+	webhandlers "altalune.id/opensheet/internal/web/handlers"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -44,6 +47,22 @@ func TestResolveStateSecret_ExplicitBase64Std(t *testing.T) {
 	got, err := resolveStateSecret(cfg, discardLogger())
 	require.NoError(t, err)
 	assert.Equal(t, raw, got)
+}
+
+// TestResolveStateSecret_ExplicitHex pins the one documented format story: the same 64-hex value keys both security.encryptionKey and http.stateSecret.
+func TestResolveStateSecret_ExplicitHex(t *testing.T) {
+	t.Parallel()
+	raw := bytes.Repeat([]byte{0x3C}, 32)
+	cfg := &config.Config{}
+	cfg.HTTP.StateSecret = hex.EncodeToString(raw)
+
+	got, err := resolveStateSecret(cfg, discardLogger())
+	require.NoError(t, err)
+	assert.Equal(t, raw, got)
+
+	sealed, err := sealer.ParseKey(cfg.HTTP.StateSecret)
+	require.NoError(t, err, "a hex state secret must also parse as a sealer key")
+	assert.Equal(t, got, sealed, "both secrets must decode one hex value to the same bytes")
 }
 
 func TestResolveStateSecret_TooShortErrors(t *testing.T) {
@@ -82,10 +101,32 @@ func TestNewWebDeps_CarriesTheResolvedStateSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, raw, secret)
 
-	deps := newWebDeps(cfg, capabilities.Capabilities{}, session.NewMemoryStore(), discardLogger(), secret)
+	deps, err := newWebDeps(cfg, capabilities.Capabilities{}, session.NewMemoryStore(), discardLogger(), secret)
+	require.NoError(t, err)
 	assert.Equal(t, secret, deps.SecretBytes())
 	assert.NotEqual(t, []byte(cfg.HTTP.StateSecret), deps.SecretBytes(),
 		"web Deps must not re-key off the raw config string")
+}
+
+// TestNewWebDeps_RejectsAShortSecret proves boot refuses to build web Deps on a key too short to sign a cookie, instead of relocating the silent-empty-key bug into the handlers.
+func TestNewWebDeps_RejectsAShortSecret(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		secret []byte
+	}{
+		{"nil", nil},
+		{"one byte short", bytes.Repeat([]byte{0x01}, webhandlers.MinSecretLen-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := newWebDeps(&config.Config{}, capabilities.Capabilities{},
+				session.NewMemoryStore(), discardLogger(), tt.secret)
+			require.Error(t, err)
+			assert.True(t, webhandlers.IsShortSecretError(err), "want a *ShortSecretError, got %T", err)
+		})
+	}
 }
 
 func TestBootClient_Wires(t *testing.T) {

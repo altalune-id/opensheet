@@ -52,7 +52,7 @@ func postLogin(t *testing.T, f *handlerFixture, h *handlers.AuthHandler, email, 
 		}
 	}
 	require.NotEmpty(t, raw, "a successful login must set a session cookie")
-	sid, err := web.VerifyCookie([]byte(f.Cfg.HTTP.StateSecret), raw)
+	sid, err := web.VerifyCookie(f.Deps.SecretBytes(), raw)
 	require.NoError(t, err)
 	p, ok, err := f.Sessions.Load(t.Context(), sid)
 	require.NoError(t, err)

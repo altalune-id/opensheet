@@ -67,11 +67,14 @@ type handlerFixture struct {
 	InvStore  *fakes.Invite
 }
 
+// testStateSecret is 32 bytes as 64 hex characters — the shape docs/CONFIGURATION.md documents and config.ParseStateSecret accepts.
+const testStateSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+
 func newFixture(t *testing.T) *handlerFixture {
 	t.Helper()
 	cfg := &config.Config{}
 	cfg.HTTP.BasePath = ""
-	cfg.HTTP.StateSecret = "0123456789abcdef0123456789abcdef"
+	cfg.HTTP.StateSecret = testStateSecret
 	cfg.HTTP.BaseURL = "http://localhost"
 	caps := capabilities.Capabilities{OrgCreation: true, LocalIdentity: true}
 	sessions := session.NewMemoryStore()
@@ -94,15 +97,17 @@ func newFixture(t *testing.T) *handlerFixture {
 	invStore := fakes.NewInvite()
 	invites := invite.NewService(invStore, nil, nil, true, discardLogger(), passthroughUnexpected())
 
-	deps := handlers.Deps{
+	secret, err := config.ParseStateSecret(cfg.HTTP.StateSecret)
+	require.NoError(t, err, "the fixture secret must satisfy the same rule boot enforces")
+	deps, err := handlers.NewDeps(handlers.Deps{
 		Cfg:      cfg,
 		Caps:     caps,
 		Sessions: sessions,
-		Secret:   []byte(cfg.HTTP.StateSecret),
 		Logger:   discardStdLogger(),
 		Orgs:     orgs,
 		Projects: projects,
-	}
+	}, secret)
+	require.NoError(t, err)
 	return &handlerFixture{
 		Deps: deps, Cfg: cfg, Sessions: sessions,
 		Users: users, UserStore: userStore,
@@ -119,7 +124,7 @@ func (f *handlerFixture) seedSession(t *testing.T, p session.Principal) string {
 	sid, err := web.NewSID()
 	require.NoError(t, err)
 	require.NoError(t, f.Sessions.Save(context.Background(), sid, p, time.Now().Add(web.SessionTTL)))
-	return web.SignCookie([]byte(f.Cfg.HTTP.StateSecret), sid)
+	return web.SignCookie(f.Deps.SecretBytes(), sid)
 }
 
 func (f *handlerFixture) authedRequest(t *testing.T, method, target string, body string, p session.Principal) *http.Request {
@@ -144,11 +149,60 @@ func TestDeps_SecretBytesIsTheResolvedSecretVerbatim(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.HTTP.StateSecret = base64.RawURLEncoding.EncodeToString(want)
 
-	d := handlers.Deps{Cfg: cfg, Secret: want}
+	d, err := handlers.NewDeps(handlers.Deps{Cfg: cfg}, want)
+	require.NoError(t, err)
 
 	require.Equal(t, want, d.SecretBytes())
 	require.NotEqual(t, []byte(cfg.HTTP.StateSecret), d.SecretBytes(),
 		"SecretBytes must not re-derive the key from the raw config string")
+}
+
+// TestFixture_MirrorsBootResolution proves the fixtures key on what config.ParseStateSecret returns, so a handler regressing to d.Cfg.HTTP.StateSecret fails here instead of staying green.
+func TestFixture_MirrorsBootResolution(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+
+	want, err := config.ParseStateSecret(f.Cfg.HTTP.StateSecret)
+	require.NoError(t, err)
+	require.Equal(t, want, f.Deps.SecretBytes())
+	require.NotEqual(t, []byte(f.Cfg.HTTP.StateSecret), f.Deps.SecretBytes(),
+		"the fixture must not be self-consistent with the raw config string")
+
+	sid, err := web.NewSID()
+	require.NoError(t, err)
+	_, err = web.VerifyCookie(f.Deps.SecretBytes(),
+		web.SignCookie([]byte(f.Cfg.HTTP.StateSecret), sid))
+	require.Error(t, err, "a cookie signed with the raw config string must not verify")
+}
+
+// TestNewDeps_RejectsAShortSecret closes the silent-empty-key class at the only place a Deps can acquire a key.
+func TestNewDeps_RejectsAShortSecret(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		secret []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"one byte short", bytes.Repeat([]byte{0x01}, handlers.MinSecretLen-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := handlers.NewDeps(handlers.Deps{Cfg: &config.Config{}}, tt.secret)
+			require.Error(t, err)
+			require.True(t, handlers.IsShortSecretError(err), "want a *ShortSecretError, got %T", err)
+			require.Contains(t, err.Error(), "32")
+		})
+	}
+}
+
+// TestDeps_SecretBytesRefusesAKeyNewDepsNeverIssued proves a hand-built Deps — the fork that forgets the field — cannot hand a short key to web.SignCookie.
+func TestDeps_SecretBytesRefusesAKeyNewDepsNeverIssued(t *testing.T) {
+	t.Parallel()
+	require.Panics(t, func() {
+		_ = web.SignCookie(handlers.Deps{Cfg: &config.Config{}}.SecretBytes(), "sid")
+	}, "SecretBytes must refuse a Deps that never went through NewDeps")
 }
 
 func TestDeps_SecretBytesSignsAndVerifiesARoundTrip(t *testing.T) {
