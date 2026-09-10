@@ -114,13 +114,24 @@ type patchCall struct {
 	patch   map[string]any
 }
 
+type rowWriteCall struct {
+	sheetID uuid.UUID
+	rowID   string
+	fields  map[string]any
+}
+
 type fakeWriter struct {
-	appended  int
-	appendErr error
-	row       gsheet.Row
-	patchErr  error
-	appends   []appendCall
-	patches   []patchCall
+	appended   int
+	appendErr  error
+	row        gsheet.Row
+	patchErr   error
+	written    sheet.WrittenRow
+	createErr  error
+	replaceErr error
+	appends    []appendCall
+	patches    []patchCall
+	creates    []rowWriteCall
+	replaces   []rowWriteCall
 }
 
 func (f *fakeWriter) Append(_ context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error) {
@@ -137,6 +148,24 @@ func (f *fakeWriter) PatchRow(_ context.Context, sh *sheet.Sheet, id string, pat
 		return nil, f.patchErr
 	}
 	return f.row, nil
+}
+
+func (f *fakeWriter) CreateRow(_ context.Context, sh *sheet.Sheet, fields map[string]any) (sheet.WrittenRow, error) {
+	f.creates = append(f.creates, rowWriteCall{sheetID: sh.ID, fields: fields})
+	if f.createErr != nil {
+		return sheet.WrittenRow{}, f.createErr
+	}
+	return f.written, nil
+}
+
+func (f *fakeWriter) ReplaceRow(
+	_ context.Context, sh *sheet.Sheet, id string, fields map[string]any,
+) (sheet.WrittenRow, error) {
+	f.replaces = append(f.replaces, rowWriteCall{sheetID: sh.ID, rowID: id, fields: fields})
+	if f.replaceErr != nil {
+		return sheet.WrittenRow{}, f.replaceErr
+	}
+	return f.written, nil
 }
 
 type addTabCall struct {
@@ -253,8 +282,16 @@ func newRig() *rig {
 			RowCount:          2,
 			Generation:        7,
 		}},
-		purger:        &fakePurger{},
-		writer:        &fakeWriter{appended: 1, row: gsheet.Row{"id": "42", "name": "ada"}},
+		purger: &fakePurger{},
+		writer: &fakeWriter{
+			appended: 1,
+			row:      gsheet.Row{"id": "42", "name": "ada"},
+			written: sheet.WrittenRow{
+				ID:   "42",
+				Data: gsheet.Row{"id": "42", "name": "ada"},
+				ETag: "rowtag",
+			},
+		},
 		tabs:          &fakeTabber{tabs: []string{"Rates", "Payroll"}},
 		authz:         &fakeAuthorizer{},
 		caps:          fakeCaps{public: true},
@@ -1554,5 +1591,183 @@ func TestHandler_CapabilitiesBeatsTheSlugPattern(t *testing.T) {
 	}
 	if len(g.inspector.calls) != 1 {
 		t.Errorf("TableInfo calls = %d, want 1", len(g.inspector.calls))
+	}
+}
+
+const createRowsPath = rowsPath + "/rows"
+
+func TestHandler_CreateRowReturns201WithTheRowAndItsETag(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, createRowsPath, []byte(`{"name":"ada"}`), keyHeader())
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"id":"42","name":"ada"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got, want := rec.Header().Get("ETag"), `"rowtag"`; got != want {
+		t.Errorf("ETag = %q, want %q", got, want)
+	}
+	if len(g.writer.creates) != 1 {
+		t.Fatalf("CreateRow calls = %d, want 1", len(g.writer.creates))
+	}
+	call := g.writer.creates[0]
+	if call.sheetID != g.sheets.ref.ID {
+		t.Errorf("sheetID = %s, want the resolved sheet", call.sheetID)
+	}
+	if got, ok := call.fields["name"].(string); !ok || got != "ada" {
+		t.Errorf("fields = %#v, want name=ada", call.fields)
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+}
+
+// SECURITY: allowRead bypasses authorization for a public sheet, so a write route that reused it would
+// hand anonymous write access to every public sheet. Both new routes call authorize directly.
+func TestHandler_CreateAndReplaceRowAuthorizeEvenOnAPublicSheet(t *testing.T) {
+	cases := map[string]struct {
+		method string
+		path   string
+	}{
+		"create":  {method: http.MethodPost, path: createRowsPath},
+		"replace": {method: http.MethodPut, path: rowPath},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+			g.sheets.ref.Visibility = sheet.VisibilityPublic
+			g.authz.err = errors.New("no grant")
+
+			rec := g.send(t, tc.method, tc.path, []byte(`{"name":"ada"}`), nil)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 for an unauthorized write; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+				t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+			}
+			if len(g.writer.creates) != 0 || len(g.writer.replaces) != 0 {
+				t.Error("an unauthorized write must not reach the workflow")
+			}
+		})
+	}
+}
+
+// The numeric_columns control key is what keyed create closes the backlog item on: it names a hint, and
+// must not be refused as an unknown column.
+func TestHandler_CreateRowAcceptsNumericColumnsAsAControlKey(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, createRowsPath,
+		[]byte(`{"rate_idr":"1300000","numeric_columns":["rate_idr"]}`), keyHeader())
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	fields := g.writer.creates[0].fields
+	if _, named := fields[numericColumnsKey]; named {
+		t.Error("numeric_columns is a hint, not a column — it must be stripped from the fields")
+	}
+	got, ok := fields["rate_idr"].(float64)
+	if !ok {
+		t.Fatalf("fields[rate_idr] = %#v, want a float64", fields["rate_idr"])
+	}
+	if got != 1300000 {
+		t.Errorf("fields[rate_idr] = %v, want 1300000", got)
+	}
+}
+
+func TestHandler_CreateRowReportsANonWritableSheetAsForbidden(t *testing.T) {
+	g := newRig()
+	g.writer.createErr = &sheet.NotWritableError{SheetID: g.sheets.ref.ID.String(), Slug: "prices"}
+
+	rec := g.send(t, http.MethodPost, createRowsPath, []byte(`{"name":"ada"}`), keyHeader())
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_ReplaceRowReturnsTheRowAndItsETag(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPut, rowPath, []byte(`{"name":"ada"}`), keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"id":"42","name":"ada"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got, want := rec.Header().Get("ETag"), `"rowtag"`; got != want {
+		t.Errorf("ETag = %q, want %q", got, want)
+	}
+	if len(g.writer.replaces) != 1 {
+		t.Fatalf("ReplaceRow calls = %d, want 1", len(g.writer.replaces))
+	}
+	if got := g.writer.replaces[0].rowID; got != "42" {
+		t.Errorf("row id = %q, want 42 from the path", got)
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+}
+
+func TestHandler_ReplaceRowReportsAnIDMismatchAsUnprocessable(t *testing.T) {
+	g := newRig()
+	g.writer.replaceErr = &sheet.IDMismatchError{PathID: "42", BodyID: "43"}
+
+	rec := g.send(t, http.MethodPut, rowPath, []byte(`{"id":"43"}`), keyHeader())
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetIDMismatch) {
+		t.Errorf("body = %s, want it to name %s so a client can branch on it", got, apperror.CodeSheetIDMismatch)
+	}
+}
+
+func TestHandler_ReplaceRowReportsAnUnknownIDAsNotFound(t *testing.T) {
+	g := newRig()
+	g.writer.replaceErr = &sheet.RowNotFoundError{ID: "42"}
+
+	rec := g.send(t, http.MethodPut, rowPath, []byte(`{"name":"ada"}`), keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_CreateAndReplaceRowRejectABodyTheyCannotRead(t *testing.T) {
+	cases := map[string]string{
+		"empty":             ``,
+		"not an object":     `["a"]`,
+		"nested value":      `{"name":{"a":1}}`,
+		"hint not an array": `{"name":"a","numeric_columns":"name"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				method string
+				path   string
+			}{
+				{method: http.MethodPost, path: createRowsPath},
+				{method: http.MethodPut, path: rowPath},
+			} {
+				g := newRig()
+
+				rec := g.send(t, tc.method, tc.path, []byte(body), keyHeader())
+
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("%s status = %d, want 400; body=%s", tc.method, rec.Code, rec.Body.String())
+				}
+				if len(g.writer.creates) != 0 || len(g.writer.replaces) != 0 {
+					t.Errorf("%s ran on a body the handler could not read", tc.method)
+				}
+			}
+		})
 	}
 }

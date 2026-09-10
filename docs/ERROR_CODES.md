@@ -156,6 +156,7 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT024` | `apperror.CodeSheetInvalidRange`        | Sheet Invalid Cell Range   |
 | `SHT025` | `apperror.CodeSheetNothingToFix`        | Sheet Nothing To Fix       |
 | `SHT026` | `apperror.CodeSheetColumnNotEmpty`      | Sheet Column Not Empty     |
+| `SHT027` | `apperror.CodeSheetIDMismatch`          | Sheet Row ID Mismatch      |
 
 ## KEY — API keys
 

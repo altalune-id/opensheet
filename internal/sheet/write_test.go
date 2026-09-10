@@ -706,23 +706,49 @@ func TestWriteWorkflow_PatchRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *te
 		"the Google read, the Google write and the projection write share one transaction")
 }
 
-func TestWriteWorkflow_PatchRow_WritesATombstoneThroughToTheProjection(t *testing.T) {
+// SECURITY: the projection filters tombstones out of the payload, so a patchable deleted_at would let a
+// client with sheets:write make a row vanish from the tab read by patching a field. The guard compares
+// column indexes, not folded names, so a "Deleted At" header cannot slip a delete through as a field.
+func TestWriteWorkflow_PatchRow_RefusesToWriteTheDeletedAtColumn(t *testing.T) {
+	t.Parallel()
+	for _, header := range []string{"deleted_at", "Deleted At"} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
+
+			_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"})
+			require.Error(t, err)
+			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
+			for _, r := range h.google.recorded() {
+				assert.NotEqual(t, http.MethodPut, r.method, "delete must not be reachable as a field write")
+			}
+		})
+	}
+}
+
+func TestWriteWorkflow_PatchRow_KeepsATombstoneItDidNotWrite(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
-	h.google.setTable(http.StatusOK, `{"values":[["id","name","deleted_at"],["1","ada",""]]}`)
+	deletedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	h.google.setTable(http.StatusOK, `{"values":[["id","name","deleted_at"],["1","ada","2026-01-02T03:04:05Z"]]}`)
 	h.rows.Seed(key, []sheet.ProjectedRow{
-		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}, DeletedAt: &deletedAt},
 	})
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"deleted_at": "2026-09-10T04:11:09Z"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
 	require.NoError(t, err)
-	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada"}, row, "deleted_at is stripped from the served row")
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row, "deleted_at is stripped from the served row")
+	assert.Contains(t, h.google.lastOf(t, http.MethodPut).body, "2026-01-02T03:04:05Z",
+		"the tombstone cell is merged back in, never blanked by a patch that did not name it")
 
 	live, err := h.rows.ListLive(t.Context(), key)
 	require.NoError(t, err)
-	assert.Empty(t, live, "a marker in the deleted_at column tombstones the projected row")
+	assert.Empty(t, live, "the patched row stays tombstoned in the projection")
 
 	snap, found, err := h.snaps.Get(t.Context(), key)
 	require.NoError(t, err)
@@ -813,4 +839,358 @@ func TestWriteWorkflow_PatchRow_RefusesADuplicateDeletedAtColumn(t *testing.T) {
 		assert.NotEqual(t, http.MethodPut, r.method,
 			"an unaddressable deleted_at column cannot be projected, so the patch is refused before the write")
 	}
+}
+
+const (
+	idNameNoteTable = `{"values":[["id","name","note"],["1","ada","keep"]]}`
+	tombstonedTable = `{"values":[["id","name","deleted_at"],["1","ada",""],["z","zed","2026-01-02T03:04:05Z"]]}`
+	softDeleteTable = `{"values":[["id","name","deleted_at"],["1","ada",""]]}`
+)
+
+func (h *writeHarness) seedContract(sh *sheet.Sheet) {
+	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: true})
+}
+
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet
+// cannot be probed for existence through timing or error shape.
+func TestWriteWorkflow_CreateRowRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", false)
+	h.seedContract(sh)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
+	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "no request may reach Google for a non-writable sheet")
+}
+
+// SECURITY: as above — the same gate, in the same position, on the replace route.
+func TestWriteWorkflow_ReplaceRowRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", false)
+	h.seedContract(sh)
+
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
+	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "no request may reach Google for a non-writable sheet")
+}
+
+func TestWriteWorkflow_CreateRow_GeneratesAnIDAndAppendsInHeaderOrder(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	require.NoError(t, err)
+	assert.Len(t, row.ID, 21, "an id the body omits is a generated 21-character nanoid")
+	assert.Equal(t, gsheet.Row{"id": row.ID, "name": "cyd"}, row.Data)
+	assert.NotEmpty(t, row.ETag, "a created row carries the tag a conditional read revalidates against")
+
+	req := h.google.lastOf(t, http.MethodPost)
+	assert.Contains(t, req.url, "valueInputOption=RAW")
+	assert.Contains(t, req.body, `["`+row.ID+`","cyd"]`, "cells are built in header order")
+	assert.Zero(t, h.unex.Load(), "a clean create reports no incident")
+}
+
+func TestWriteWorkflow_CreateRow_HonoursASuppliedIDAndWritesOmittedColumnsEmpty(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setTable(http.StatusOK, idNameNoteTable)
+
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "my-own", "name": "zed"})
+	require.NoError(t, err)
+	assert.Equal(t, "my-own", row.ID, "a supplied id is honoured verbatim")
+	assert.Equal(t, gsheet.Row{"id": "my-own", "name": "zed", "note": ""}, row.Data)
+	assert.Contains(t, h.google.lastOf(t, http.MethodPost).body, `["my-own","zed",""]`,
+		"a column the body omits is written empty, as rowOf keys it")
+}
+
+func TestWriteWorkflow_CreateRow_RefusesAnIDTheTabAlreadyHolds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		table string
+		id    string
+	}{
+		{name: "live row", table: idNameTable, id: "1"},
+		{name: "tombstoned row", table: tombstonedTable, id: "z"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.google.setTable(http.StatusOK, tc.table)
+
+			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": tc.id, "name": "cyd"})
+			require.Error(t, err)
+			assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+			for _, r := range h.google.recorded() {
+				assert.NotEqual(t, http.MethodPost, r.method,
+					"the duplicate check reads the tab, so a tombstoned id is refused before the append")
+			}
+		})
+	}
+}
+
+func TestWriteWorkflow_CreateRow_RefusesTheDeletedAtColumn(t *testing.T) {
+	t.Parallel()
+	for _, header := range []string{"deleted_at", "Deleted At"} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
+
+			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd", header: "2026-09-10T04:11:09Z"})
+			require.Error(t, err)
+			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
+			for _, r := range h.google.recorded() {
+				assert.NotEqual(t, http.MethodPost, r.method, "a row cannot be created already deleted")
+			}
+		})
+	}
+}
+
+func TestWriteWorkflow_CreateRow_RefusesAnUnknownColumn(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"nope": "x"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsUnknownColumnError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus(),
+		"SHT014 carries no status override, so an unknown column is 400 here as it is on a patch")
+	for _, r := range h.google.recorded() {
+		assert.NotEqual(t, http.MethodPost, r.method, "an unknown key is never silently dropped")
+	}
+}
+
+func TestWriteWorkflow_CreateRow_RefusesABlankSuppliedID(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "  ", "name": "cyd"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsInvalidRowError(err), "got %T: %v", err, err)
+	for _, r := range h.google.recorded() {
+		assert.NotEqual(t, http.MethodPost, r.method,
+			"a blank id would break the tab contract on the next refresh")
+	}
+}
+
+// The zero-refetch assertion is the whole point: a test that permits a refetch would pass on the
+// purge-and-refetch behaviour keyed create replaces, and would prove nothing about the append position.
+func TestWriteWorkflow_CreateRow_ReadYourWriteWithNoRefetch(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	require.NoError(t, err)
+	afterWrite := h.google.callCount()
+
+	got, err := h.rf.RowByID(t.Context(), sh, row.ID)
+	require.NoError(t, err)
+	assert.Equal(t, row.Data, got.Data, "the created row must be readable by its id")
+	assert.Equal(t, row.ETag, got.ETag, "a written row and a read row must tag the same bytes identically")
+	assert.Equal(t, afterWrite, h.google.callCount(),
+		"the read must be answered from the projection, never from a refetch")
+
+	live, lErr := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, lErr)
+	require.Len(t, live, 3)
+	assert.Equal(t, 2, live[2].RowIndex,
+		"row_index is the append's start row less two, not a position a refetch discovered")
+	assert.Zero(t, h.unex.Load(), "a clean write-through reports no incident")
+}
+
+func TestWriteWorkflow_CreateRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), h.units.runs.Load(),
+		"the Google read, the append and the projection write share one transaction")
+}
+
+// The clear-versus-preserve pair is the only thing distinguishing PUT from PATCH.
+func TestWriteWorkflow_ReplaceRow_ClearsAnOmittedColumnWhereAPatchLeavesItAlone(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, idNameNoteTable)
+
+	replaced, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2", "note": ""}, replaced.Data,
+		"a known column absent from the body is cleared")
+	put := h.google.lastOf(t, http.MethodPut)
+	assert.Contains(t, put.url, "valueInputOption=RAW")
+	assert.Contains(t, decodedURL(t, put.url), "'Rates'!A2:C2", "the row keeps its position")
+	assert.Contains(t, put.body, `["1","ada2",""]`)
+
+	patched := newWriteHarness(t)
+	patchSheet, _ := patched.seed(t, "Rates", true)
+	patched.google.setTable(http.StatusOK, idNameNoteTable)
+
+	row, err := patched.wf.PatchRow(t.Context(), patchSheet, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2", "note": "keep"}, row,
+		"the same body through PATCH leaves the omitted column untouched")
+}
+
+// A body id equal to the path id is permitted, and mergeRow's id guard refused exactly that.
+func TestWriteWorkflow_ReplaceRow_AcceptsABodyIDEqualToThePathID(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "1", "name": "ada2"})
+	require.NoError(t, err)
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row.Data)
+	assert.Contains(t, h.google.lastOf(t, http.MethodPut).body, `["1","ada2"]`)
+}
+
+func TestWriteWorkflow_ReplaceRow_RefusesABodyIDThatRenamesTheRow(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "2", "name": "ada2"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsIDMismatchError(err), "got %T: %v", err, err)
+	ae := appErrorOf(t, err)
+	assert.Equal(t, apperror.CodeSheetIDMismatch, ae.Code())
+	assert.Equal(t, http.StatusUnprocessableEntity, ae.HTTPStatus())
+	for _, r := range h.google.recorded() {
+		assert.NotEqual(t, http.MethodPut, r.method, "renaming a row is a delete plus a create, not a replace")
+	}
+}
+
+func TestWriteWorkflow_ReplaceRow_RefusesTheDeletedAtColumn(t *testing.T) {
+	t.Parallel()
+	for _, header := range []string{"deleted_at", "Deleted At"} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.seedContract(sh)
+			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
+
+			_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"})
+			require.Error(t, err)
+			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
+			for _, r := range h.google.recorded() {
+				assert.NotEqual(t, http.MethodPut, r.method, "delete must not be reachable as a field write")
+			}
+		})
+	}
+}
+
+func TestWriteWorkflow_ReplaceRow_RefusesAnAbsentOrTombstonedRow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		table string
+		id    string
+	}{
+		{name: "unknown id", table: idNameTable, id: "99"},
+		{name: "tombstoned id", table: tombstonedTable, id: "z"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.seedContract(sh)
+			h.google.setTable(http.StatusOK, tc.table)
+
+			_, err := h.wf.ReplaceRow(t.Context(), sh, tc.id, map[string]any{"name": "nobody"})
+			require.Error(t, err)
+			assert.True(t, sheet.IsRowNotFoundError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusNotFound, appErrorOf(t, err).HTTPStatus())
+			for _, r := range h.google.recorded() {
+				assert.NotEqual(t, http.MethodPut, r.method, "a replace never creates and never resurrects")
+			}
+		})
+	}
+}
+
+func TestWriteWorkflow_ReplaceRow_RefusesADriftedContractWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: false, Reason: "duplicate id"})
+
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsContractViolationError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "a sheet whose rows cannot be addressed by id is refused before any read")
+}
+
+func TestWriteWorkflow_ReplaceRow_KeepsTheSoftDeleteColumnEmptyOnALiveRow(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, softDeleteTable)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+	})
+
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row.Data, "deleted_at is stripped from the served row")
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, live, 1, "clearing an empty tombstone cell cannot delete the row")
+	assert.Equal(t, "ada2", live[0].Data["name"])
+}
+
+func TestWriteWorkflow_ReplaceRow_ReadYourWriteWithNoRefetch(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.google.setTable(http.StatusOK, idNameNoteTable)
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada", "note": "keep"}},
+	})
+
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	afterWrite := h.google.callCount()
+
+	got, err := h.rf.RowByID(t.Context(), sh, "1")
+	require.NoError(t, err)
+	assert.Equal(t, row.Data, got.Data, "the replaced row must come back with its cleared column")
+	assert.Equal(t, row.ETag, got.ETag, "the replace must hand back the tag a read of the same row computes")
+	assert.Equal(t, afterWrite, h.google.callCount(), "the read must be answered from the projection")
 }

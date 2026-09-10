@@ -111,3 +111,35 @@ func TestContractViolationError_MapsTo409(t *testing.T) {
 		t.Errorf("HTTPStatus() = %d, want %d", got, http.StatusConflict)
 	}
 }
+
+func TestIDMismatchError(t *testing.T) {
+	e := &IDMismatchError{PathID: "row-1", BodyID: "row-2"}
+	msg := e.Error()
+	if !strings.Contains(msg, "row-1") || !strings.Contains(msg, "row-2") {
+		t.Errorf("Error() = %q, want it to carry both ids", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetIDMismatch)
+
+	if !IsIDMismatchError(e) {
+		t.Error("IsIDMismatchError = false, want true")
+	}
+	if !IsIDMismatchError(fmt.Errorf("wrap: %w", e)) {
+		t.Error("IsIDMismatchError did not unwrap")
+	}
+	if IsIDMismatchError(errors.New("plain")) {
+		t.Error("IsIDMismatchError matched a plain error")
+	}
+	if IsIDMismatchError(nil) {
+		t.Error("IsIDMismatchError matched nil")
+	}
+}
+
+func TestIDMismatchError_MapsTo422(t *testing.T) {
+	app := (&IDMismatchError{PathID: "row-1", BodyID: "row-2"}).ToAppError()
+	if got := app.Code(); got != "SHT027" {
+		t.Errorf("Code() = %q, want %q", got, "SHT027")
+	}
+	if got := app.HTTPStatus(); got != http.StatusUnprocessableEntity {
+		t.Errorf("HTTPStatus() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+}

@@ -13,6 +13,7 @@ var httpStatusOverrides = map[string]int{
 	CodeCredentialReauthNeeded:   http.StatusFailedDependency,
 	CodeCredentialInUse:          http.StatusConflict,
 	CodeSheetIdempotencyMismatch: http.StatusUnprocessableEntity,
+	CodeSheetIDMismatch:          http.StatusUnprocessableEntity,
 }
 
 // HTTPStatus maps the error to an HTTP status, preferring a per-code override over its gRPC code.

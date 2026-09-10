@@ -18,9 +18,19 @@ import (
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/gwerr"
+	"altalune.id/opensheet/nanoid"
 )
 
-const idColumn = "id"
+const (
+	idColumn = "id"
+	rowIDLen = 21
+	noRowIdx = -1
+)
+
+type rowColumns struct {
+	id  int
+	del int
+}
 
 // WriteWorkflow mutates a writable sheet's rows and keeps its snapshot and projection in step.
 type WriteWorkflow struct {
@@ -69,10 +79,17 @@ func NewWriteWorkflow(
 	}
 }
 
-type patchOutcome struct {
+type writeOutcome struct {
 	row       gsheet.Row
+	id        string
 	liveRows  int
 	projected bool
+}
+
+type rowUpdate struct {
+	situation string
+	liveOnly  bool
+	build     func(headers, row []string, cols rowColumns) ([]any, error)
 }
 
 type appendResult struct {
@@ -169,25 +186,27 @@ func (w *WriteWorkflow) PatchRow(ctx context.Context, sh *Sheet, id string, patc
 	span.SetAttributes(attribute.String("sheet.tab", tgt.tab))
 
 	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
-	out, err := w.applyPatch(ctx, sh, tgt, key, id, patch)
+	plan := rowUpdate{
+		situation: "sheet.PatchRow",
+		build: func(headers, row []string, cols rowColumns) ([]any, error) {
+			return mergeRow(headers, row, cols, patch, tgt.tab)
+		},
+	}
+	out, err := w.applyUpdate(ctx, sh, tgt, key, id, plan)
 	if err != nil {
 		return nil, recordSpanError(span, err)
 	}
 	span.SetAttributes(attribute.Bool("sheet.projected", out.projected))
-	if !out.projected {
-		w.purge(ctx, sh)
-		return out.row, nil
-	}
-	w.rebuild(ctx, sh, key, out.liveRows)
+	w.settle(ctx, sh, key, out)
 	return out.row, nil
 }
 
 // NOTE: the sheet's write lock is held across the Google read and the Google write — the opposite of the refresh rule — because Values.Update takes no If-Match, so a check-then-write is only sound while writes to one sheet are serialized.
-func (w *WriteWorkflow) applyPatch(
-	ctx context.Context, sh *Sheet, tgt writeTarget, key SnapshotKey, id string, patch map[string]any,
-) (patchOutcome, error) {
+func (w *WriteWorkflow) applyUpdate(
+	ctx context.Context, sh *Sheet, tgt writeTarget, key SnapshotKey, id string, plan rowUpdate,
+) (writeOutcome, error) {
 	var (
-		out       patchOutcome
+		out       writeOutcome
 		google    error
 		situation string
 	)
@@ -198,52 +217,66 @@ func (w *WriteWorkflow) applyPatch(
 		// NOTE: a fresh read, never the snapshot: merging into a stale cached row would silently discard a concurrent edit.
 		tbl, tErr := tgt.writer.Table(ctx, tgt.src.GoogleFileID, tgt.tab)
 		if tErr != nil {
-			google, situation = tErr, "sheet.PatchRow: read table"
+			google, situation = tErr, plan.situation+": read table"
 			return tErr
 		}
-		idCol, iErr := idColumnOf(tbl.Headers, tgt.tab)
-		if iErr != nil {
-			return iErr
+		cols, cErr := rowColumnsOf(tbl.Headers, tgt.tab)
+		if cErr != nil {
+			return cErr
 		}
-		delCol, dErr := deletedAtColumnOf(tbl.Headers, tgt.tab)
-		if dErr != nil {
-			return dErr
-		}
-		rowIdx, rErr := rowIndexOf(tbl.Rows, idCol, id)
+		rowIdx, rErr := rowIndexOf(tbl.Rows, cols.id, id)
 		if rErr != nil {
 			return rErr
 		}
-		cells, mErr := mergeRow(tbl.Headers, tbl.Rows[rowIdx], idCol, patch, tgt.tab)
-		if mErr != nil {
-			return mErr
+		if plan.liveOnly && isTombstoneCell(cellAt(tbl.Rows[rowIdx], cols.del)) {
+			return &RowNotFoundError{ID: id}
+		}
+		cells, bErr := plan.build(tbl.Headers, tbl.Rows[rowIdx], cols)
+		if bErr != nil {
+			return bErr
 		}
 
 		// NOTE: Google trims empty rows only at the tail, so rows[i] is always sheet row i+2 — one for the header row, one for 1-based indexing.
 		if uErr := tgt.writer.UpdateRow(ctx, tgt.src.GoogleFileID, tgt.tab, rowIdx+2, cells); uErr != nil {
-			google, situation = uErr, "sheet.PatchRow: update row"
+			google, situation = uErr, plan.situation+": update row"
 			return uErr
 		}
-		row := patchedRow(id, rowIdx, tbl.Headers, cells, delCol)
-		out.row = row.Data
-		out.liveRows = liveRowCount(tbl, delCol, rowIdx, row.DeletedAt == nil)
+		row := writtenProjection(id, rowIdx, tbl.Headers, cells, cols.del)
+		out.row, out.id = row.Data, id
+		out.liveRows = liveRowCount(tbl, cols.del, rowIdx, row.DeletedAt == nil)
 		if pErr := w.rows.UpsertRow(txCtx, key, row); pErr != nil {
 			return pErr
 		}
 		out.projected = true
 		return nil
 	})
+	return w.outcome(ctx, sh, tgt, key, plan.situation, out, google, situation, runErr)
+}
+
+func (w *WriteWorkflow) outcome(
+	ctx context.Context, sh *Sheet, tgt writeTarget, key SnapshotKey,
+	operation string, out writeOutcome, google error, situation string, runErr error,
+) (writeOutcome, error) {
 	if google != nil {
-		return patchOutcome{}, w.fail(ctx, situation, google, sh, tgt.src)
+		return writeOutcome{}, w.fail(ctx, situation, google, sh, tgt.src)
 	}
 	if runErr != nil {
 		if out.row == nil {
-			return patchOutcome{}, w.passthrough(ctx, "sheet.PatchRow: patch row", runErr, sh)
+			return writeOutcome{}, w.passthrough(ctx, operation+": write row", runErr, sh)
 		}
 		// NOTE: Google already holds the row, so a write-through that failed after it degrades to the purge behaviour rather than reporting a write that happened as a failure.
-		_ = w.unexpected(ctx, "sheet.PatchRow: write through", runErr, "sheet_id", sh.ID, "tab", key.Tab)
-		return patchOutcome{row: out.row}, nil
+		_ = w.unexpected(ctx, operation+": write through", runErr, "sheet_id", sh.ID, "tab", key.Tab)
+		return writeOutcome{row: out.row, id: out.id}, nil
 	}
 	return out, nil
+}
+
+func (w *WriteWorkflow) settle(ctx context.Context, sh *Sheet, key SnapshotKey, out writeOutcome) {
+	if !out.projected {
+		w.purge(ctx, sh)
+		return
+	}
+	w.rebuild(ctx, sh, key, out.liveRows)
 }
 
 // NOTE: the payload is marshalled in Go, never aggregated in SQL — jsonb normalizes escapes and reorders object keys, so a SQL-side rebuild would change the ETag for rows nobody edited.
@@ -414,22 +447,59 @@ func rowIndexOf(rows [][]string, idCol int, id string) (int, error) {
 	return match, nil
 }
 
-func mergeRow(headers, row []string, idCol int, patch map[string]any, tab string) ([]any, error) {
-	patched := make(map[int]any, len(patch))
-	for _, name := range slices.Sorted(maps.Keys(patch)) {
-		col, err := columnOf(headers, name, tab)
-		if err != nil {
-			return nil, err
-		}
-		if col == idCol {
-			return nil, &ReadOnlyColumnError{Column: name}
-		}
-		patched[col] = patch[name]
+func mergeRow(headers, row []string, cols rowColumns, patch map[string]any, tab string) ([]any, error) {
+	patched, err := cols.resolve(headers, patch, tab, refuseID)
+	if err != nil {
+		return nil, err
 	}
+	return fillCells(headers, row, patched), nil
+}
 
+func replaceRowCells(headers []string, cols rowColumns, fields map[string]any, id, tab string) ([]any, error) {
+	replaced, err := cols.resolve(headers, fields, tab, idMustMatch(id))
+	if err != nil {
+		return nil, err
+	}
+	replaced[cols.id] = id
+	return fillCells(headers, nil, replaced), nil
+}
+
+func createRowCells(
+	headers []string, cols rowColumns, fields map[string]any, tab string,
+) (cells []any, id string, err error) {
+	created, rErr := cols.resolve(headers, fields, tab, acceptID)
+	if rErr != nil {
+		return nil, "", rErr
+	}
+	id, iErr := createRowID(created, cols.id)
+	if iErr != nil {
+		return nil, "", iErr
+	}
+	created[cols.id] = id
+	return fillCells(headers, nil, created), id, nil
+}
+
+func createRowID(created map[int]any, idCol int) (string, error) {
+	supplied, ok := created[idCol]
+	if !ok {
+		id, err := nanoid.New(rowIDLen)
+		if err != nil {
+			return "", fmt.Errorf("sheet.write: generate a row id: %w", err)
+		}
+		return id, nil
+	}
+	id := cellText(supplied)
+	if strings.TrimSpace(id) == "" {
+		return "", &InvalidRowError{Reason: "the id must not be blank"}
+	}
+	return id, nil
+}
+
+// NOTE: a nil row clears every known column the fields omit, which is what separates a whole-row replace from a patch.
+func fillCells(headers, row []string, fields map[int]any) []any {
 	cells := make([]any, len(headers))
 	for i := range headers {
-		if value, ok := patched[i]; ok {
+		if value, ok := fields[i]; ok {
 			cells[i] = value
 			continue
 		}
@@ -439,7 +509,60 @@ func mergeRow(headers, row []string, idCol int, patch map[string]any, tab string
 		}
 		cells[i] = ""
 	}
-	return cells, nil
+	return cells
+}
+
+func rowColumnsOf(headers []string, tab string) (rowColumns, error) {
+	idCol, err := idColumnOf(headers, tab)
+	if err != nil {
+		return rowColumns{}, err
+	}
+	delCol, err := deletedAtColumnOf(headers, tab)
+	if err != nil {
+		return rowColumns{}, err
+	}
+	return rowColumns{id: idCol, del: delCol}, nil
+}
+
+// SECURITY: deleted_at is refused by column index rather than by folded name, so a header spelled "Deleted At" cannot carry a delete in as a field write and hide the row from the tab read.
+func (c rowColumns) resolve(
+	headers []string, fields map[string]any, tab string, onID func(name string, value any) error,
+) (map[int]any, error) {
+	out := make(map[int]any, len(fields))
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		col, err := columnOf(headers, name, tab)
+		if err != nil {
+			return nil, err
+		}
+		if col == c.del {
+			return nil, &ReadOnlyColumnError{Column: name}
+		}
+		if col == c.id {
+			if idErr := onID(name, fields[name]); idErr != nil {
+				return nil, idErr
+			}
+		}
+		out[col] = fields[name]
+	}
+	return out, nil
+}
+
+func refuseID(name string, _ any) error {
+	return &ReadOnlyColumnError{Column: name}
+}
+
+func acceptID(_ string, _ any) error {
+	return nil
+}
+
+func idMustMatch(id string) func(string, any) error {
+	return func(_ string, value any) error {
+		body := cellText(value)
+		if body == id {
+			return nil
+		}
+		return &IDMismatchError{PathID: id, BodyID: body}
+	}
 }
 
 func columnOf(headers []string, name, tab string) (int, error) {
@@ -465,7 +588,7 @@ func rowOf(headers []string, cells []any) gsheet.Row {
 	return out
 }
 
-func patchedRow(id string, rowIndex int, headers []string, cells []any, delCol int) ProjectedRow {
+func writtenProjection(id string, rowIndex int, headers []string, cells []any, delCol int) ProjectedRow {
 	return ProjectedRow{
 		RowID:     id,
 		RowIndex:  rowIndex,

@@ -99,6 +99,7 @@ const (
 	CodeSheetInvalidRange        = "SHT024"
 	CodeSheetNothingToFix        = "SHT025"
 	CodeSheetColumnNotEmpty      = "SHT026"
+	CodeSheetIDMismatch          = "SHT027"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

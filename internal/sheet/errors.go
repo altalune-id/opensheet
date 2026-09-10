@@ -760,3 +760,32 @@ func IsColumnNotEmptyError(err error) bool {
 	_, ok := errors.AsType[*ColumnNotEmptyError](err)
 	return ok
 }
+
+// IDMismatchError signals a whole-row replace whose body names a different id than its path does.
+type IDMismatchError struct {
+	PathID string
+	BodyID string
+}
+
+func (e *IDMismatchError) Error() string {
+	return fmt.Sprintf("sheet: row: body id %q does not match path id %q", e.BodyID, e.PathID)
+}
+
+// ToAppError maps IDMismatchError to an InvalidArgument envelope its own status override lifts to 422.
+func (e *IDMismatchError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetIDMismatch,
+		"A row cannot be renamed, so the body's id must match the path's id or be omitted",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetIDMismatch,
+			Meta: map[string]string{"path_id": e.PathID, "body_id": e.BodyID},
+		},
+	)
+}
+
+// IsIDMismatchError reports whether err's tree contains an *IDMismatchError.
+func IsIDMismatchError(err error) bool {
+	_, ok := errors.AsType[*IDMismatchError](err)
+	return ok
+}

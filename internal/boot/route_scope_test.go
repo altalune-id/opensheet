@@ -116,6 +116,8 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/keys/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, pbase + "/keys/" + id + "/delete", url.Values{}},
 		{http.MethodPost, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet/rows", nil},
+		{http.MethodPut, dbase + "/sheets/probe-sheet/rows/" + id, nil},
 		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
 		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
 		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},

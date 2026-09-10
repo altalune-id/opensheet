@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/sheet"
 )
 
 const maxWriteBodyBytes = 1 << 20
@@ -110,6 +111,65 @@ func (h *handler) patchRow(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, r, http.StatusOK, row)
 }
 
+func (h *handler) createRow(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as rows does. allowRead is deliberately not reused: it bypasses
+	// authorization for a public sheet, which on a write route would make every public sheet anonymously writable.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	body, err := readBody(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	fields, err := parsePatch(body)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	row, err := h.writer.CreateRow(r.Context(), sc.sheet, fields)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.writeRow(w, r, http.StatusCreated, row)
+}
+
+func (h *handler) replaceRow(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as createRow does, and for the same reason.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	body, err := readBody(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	fields, err := parsePatch(body)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	row, err := h.writer.ReplaceRow(r.Context(), sc.sheet, r.PathValue("id"), fields)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.writeRow(w, r, http.StatusOK, row)
+}
+
 func (h *handler) listTabs(w http.ResponseWriter, r *http.Request) {
 	// SECURITY: resolve then authorize, as rows does.
 	r, sc, err := h.resolveProject(r)
@@ -169,6 +229,13 @@ func (h *handler) createTab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSON(w, r, http.StatusCreated, createTabResponse{Created: title})
+}
+
+func (h *handler) writeRow(w http.ResponseWriter, r *http.Request, status int, row sheet.WrittenRow) {
+	if row.ETag != "" {
+		w.Header().Set("ETag", strconv.Quote(row.ETag))
+	}
+	h.writeJSON(w, r, status, row.Data)
 }
 
 func (h *handler) writeJSON(w http.ResponseWriter, r *http.Request, status int, payload any) {

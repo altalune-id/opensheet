@@ -33,9 +33,9 @@ func TestRowOf_KeysARowLikeTheProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, projected, 1)
 
-	idCol, err := idColumnOf(tbl.Headers, "Sheet1")
+	cols, err := rowColumnsOf(tbl.Headers, "Sheet1")
 	require.NoError(t, err)
-	cells, err := mergeRow(tbl.Headers, tbl.Rows[0], idCol, map[string]any{"name": "Ada"}, "Sheet1")
+	cells, err := mergeRow(tbl.Headers, tbl.Rows[0], cols, map[string]any{"name": "Ada"}, "Sheet1")
 	require.NoError(t, err)
 	patched := rowOf(tbl.Headers, cells)
 
