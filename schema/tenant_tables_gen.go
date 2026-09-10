@@ -11,6 +11,7 @@ var TenantTableSuffixes = []string{
 	"memberships",
 	"orgs",
 	"projects",
+	"sheet_rows",
 	"sheet_snapshots",
 	"sheet_write_attempts",
 	"sheets",

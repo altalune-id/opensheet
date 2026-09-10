@@ -483,3 +483,80 @@ func TestSQLiteStore_RequiresTenantScope(t *testing.T) {
 		t.Errorf("Delete err = %v, want tenant.MissingError", err)
 	}
 }
+
+func TestSQLiteStore_SaveRoundTripsTheProjectionColumns(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := f.ctx()
+
+	validatedAt := time.Now().UTC()
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+		Slug: "projection", Visibility: sheet.VisibilityKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sh.ContractOK {
+		t.Fatal("New must default ContractOK to true")
+	}
+	sh.Generation = 7
+	sh.ValidatedAt = &validatedAt
+	sh.ContractReason = "checked"
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Generation != 7 {
+		t.Errorf("Generation = %d, want 7: sqliteSheetRow needs a matching alias field", got.Generation)
+	}
+	if got.ValidatedAt == nil {
+		t.Fatal("ValidatedAt = nil, want the saved timestamp")
+	}
+	if !got.ValidatedAt.Equal(validatedAt) {
+		t.Errorf("ValidatedAt = %v, want %v", got.ValidatedAt, validatedAt)
+	}
+	if !got.ContractOK {
+		t.Error("ContractOK = false, want true")
+	}
+	if got.ContractReason != "checked" {
+		t.Errorf("ContractReason = %q, want %q", got.ContractReason, "checked")
+	}
+}
+
+func TestSQLiteStore_UpdateDoesNotResetGeneration(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := f.ctx()
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Generation = 7
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	sh.Generation = 0
+	sh.Retab("Harga")
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("re-Save: %v", err)
+	}
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Tab != "Harga" {
+		t.Errorf("Tab = %q, want %q: the upsert must still apply the metadata edit", got.Tab, "Harga")
+	}
+	if got.Generation != 7 {
+		t.Errorf("Generation = %d, want 7: generation must not be in MutableColumns", got.Generation)
+	}
+}

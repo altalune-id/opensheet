@@ -44,6 +44,11 @@ type pgSheetRow struct {
 	Writable      bool      `alias:"sheets.writable"`
 	CreatedAt     time.Time `alias:"sheets.created_at"`
 	UpdatedAt     time.Time `alias:"sheets.updated_at"`
+
+	Generation     int64      `alias:"sheets.generation"`
+	ValidatedAt    *time.Time `alias:"sheets.validated_at"`
+	ContractOK     bool       `alias:"sheets.contract_ok"`
+	ContractReason string     `alias:"sheets.contract_reason"`
 }
 
 func (r *pgSheetRow) toSheet() *Sheet {
@@ -59,7 +64,27 @@ func (r *pgSheetRow) toSheet() *Sheet {
 		Writable:      r.Writable,
 		CreatedAt:     r.CreatedAt.UTC(),
 		UpdatedAt:     r.UpdatedAt.UTC(),
+
+		Generation:     r.Generation,
+		ValidatedAt:    utcOrNil(r.ValidatedAt),
+		ContractOK:     r.ContractOK,
+		ContractReason: r.ContractReason,
 	}
+}
+
+func utcOrNil(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
+
+func pgNullableTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UTC()
 }
 
 func (s pgTxn) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {

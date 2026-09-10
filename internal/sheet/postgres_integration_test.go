@@ -438,3 +438,50 @@ func TestPostgres_Sheet_RequiresTenantScope(t *testing.T) {
 	assert.True(t, tenant.IsMissingError(err))
 	assert.True(t, tenant.IsMissingError(f.store.Delete(t.Context(), sh.ID)))
 }
+
+func TestPostgres_Sheet_SaveRoundTripsTheProjectionColumns(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+
+	validatedAt := time.Now().UTC().Truncate(time.Microsecond)
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+		Slug: "projection", Visibility: sheet.VisibilityKey,
+	})
+	require.NoError(t, err)
+	require.True(t, sh.ContractOK, "New must default contract_ok to true")
+	sh.Generation = 7
+	sh.ValidatedAt = &validatedAt
+	sh.ContractReason = "checked"
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 7, got.Generation, "generation must have a matching alias field on pgSheetRow")
+	require.NotNil(t, got.ValidatedAt, "validated_at must have a matching alias field on pgSheetRow")
+	assert.True(t, got.ValidatedAt.Equal(validatedAt), "ValidatedAt = %v, want %v", got.ValidatedAt, validatedAt)
+	assert.True(t, got.ContractOK)
+	assert.Equal(t, "checked", got.ContractReason)
+}
+
+func TestPostgres_Sheet_UpdateDoesNotResetGeneration(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	require.NoError(t, err)
+	sh.Generation = 7
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	sh.Generation = 0
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Harga", got.Tab, "the upsert must still apply the metadata edit")
+	assert.EqualValues(t, 7, got.Generation, "generation must not be in MutableColumns")
+}

@@ -38,6 +38,11 @@ type sqliteSheetRow struct {
 	Writable      int64  `alias:"sheets.writable"`
 	CreatedAt     string `alias:"sheets.created_at"`
 	UpdatedAt     string `alias:"sheets.updated_at"`
+
+	Generation     int64   `alias:"sheets.generation"`
+	ValidatedAt    *string `alias:"sheets.validated_at"`
+	ContractOK     int64   `alias:"sheets.contract_ok"`
+	ContractReason string  `alias:"sheets.contract_reason"`
 }
 
 func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
@@ -65,6 +70,10 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sheet.sqlite: parse updated_at: %w", err)
 	}
+	validatedAt, err := parseSQLiteTimePtr(r.ValidatedAt)
+	if err != nil {
+		return nil, err
+	}
 	return &Sheet{
 		ID:            id,
 		OrgID:         oid,
@@ -77,7 +86,24 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 		Writable:      r.Writable != 0,
 		CreatedAt:     createdAt.UTC(),
 		UpdatedAt:     updatedAt.UTC(),
+
+		Generation:     r.Generation,
+		ValidatedAt:    validatedAt,
+		ContractOK:     r.ContractOK != 0,
+		ContractReason: r.ContractReason,
 	}, nil
+}
+
+func parseSQLiteTimePtr(raw *string) (*time.Time, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil //nolint:nilnil // absent nullable timestamp
+	}
+	t, err := time.Parse(time.RFC3339Nano, *raw)
+	if err != nil {
+		return nil, fmt.Errorf("sheet.sqlite: parse validated_at: %w", err)
+	}
+	u := t.UTC()
+	return &u, nil
 }
 
 func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
@@ -87,6 +113,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 	secs := secsFromTTL(sh.CacheTTL)
 	writable := boolToInt(sh.Writable)
 	updatedAt := sqliteent.SQLiteTime(sh.UpdatedAt)
+	contractOK := boolToInt(sh.ContractOK)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sh.ID.String(),
@@ -100,6 +127,10 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			writable,
 			sqliteent.SQLiteTime(sh.CreatedAt),
 			updatedAt,
+			sh.Generation,
+			sqliteNullableTime(sh.ValidatedAt),
+			contractOK,
+			sh.ContractReason,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(
@@ -213,6 +244,13 @@ func (s *sqliteStore) queryOne(ctx context.Context, where sqlite.BoolExpression,
 		return nil, fmt.Errorf("sheet.sqlite.queryOne: %w", err)
 	}
 	return row.toSheet()
+}
+
+func sqliteNullableTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return sqliteent.SQLiteTime(*t)
 }
 
 func boolToInt(b bool) int64 {

@@ -43,6 +43,11 @@ type Sheet struct {
 	Writable      bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+
+	Generation     int64
+	ValidatedAt    *time.Time
+	ContractOK     bool
+	ContractReason string
 }
 
 // NewParams is the input to New.
@@ -102,6 +107,7 @@ func New(p NewParams) (*Sheet, error) {
 		Writable:      p.Writable,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		ContractOK:    true,
 	}, nil
 }
 

@@ -35,6 +35,14 @@ index opensheet_sessions_user_idx
 CREATE INDEX opensheet_sessions_user_idx
   ON opensheet_sessions (user_id)
 
+index opensheet_sheet_rows_org_project_idx
+CREATE INDEX opensheet_sheet_rows_org_project_idx
+  ON opensheet_sheet_rows (org_id, project_id)
+
+index opensheet_sheet_rows_page_idx
+CREATE INDEX opensheet_sheet_rows_page_idx
+  ON opensheet_sheet_rows (sheet_id, tab, row_index)
+
 index opensheet_sheet_snapshots_expires_idx
 CREATE INDEX opensheet_sheet_snapshots_expires_idx
   ON opensheet_sheet_snapshots (expires_at)
@@ -190,6 +198,21 @@ CREATE TABLE opensheet_sessions (
   created_at  TEXT NOT NULL
 )
 
+table opensheet_sheet_rows
+CREATE TABLE opensheet_sheet_rows (
+  sheet_id            TEXT NOT NULL REFERENCES opensheet_sheets(id) ON DELETE CASCADE,
+  -- The RESOLVED tab name, never '', mirroring sheet_snapshots: an empty sheets.tab means
+  -- "first tab", so keying on sheet_id alone would keep serving a renamed tab's rows.
+  tab                 TEXT NOT NULL,
+  row_id              TEXT NOT NULL,
+  row_index           INTEGER NOT NULL CHECK (row_index >= 0),
+  data                TEXT NOT NULL,
+  deleted_at          TEXT,
+  org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (sheet_id, tab, row_id)
+)
+
 table opensheet_sheet_snapshots
 CREATE TABLE opensheet_sheet_snapshots (
   sheet_id            TEXT NOT NULL REFERENCES opensheet_sheets(id) ON DELETE CASCADE,
@@ -237,7 +260,7 @@ CREATE TABLE opensheet_sheets (
   cache_ttl_secs      INTEGER NOT NULL DEFAULT 0 CHECK (cache_ttl_secs >= 0 AND cache_ttl_secs <= 86400),
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL,
-  writable            INTEGER NOT NULL DEFAULT 0,
+  writable            INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0, validated_at TEXT, contract_ok INTEGER NOT NULL DEFAULT 1, contract_reason TEXT NOT NULL DEFAULT '',
   UNIQUE (project_id, slug)
 )
 
