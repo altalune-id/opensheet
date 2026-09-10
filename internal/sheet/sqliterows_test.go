@@ -355,17 +355,24 @@ func TestSQLiteRowStore_Stats_IsScopedToOneTab(t *testing.T) {
 	store := newSQLiteRowStore(t, f)
 	sh := seedSQLiteSheet(t, f, "prices", "Rates")
 
-	for tab, rows := range map[string][]sheet.ProjectedRow{
-		"Rates": {{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
-		"Renamed": {
+	// NOTE: sequential with explicit generations — ranging a map made the expected generation depend on iteration order.
+	for _, step := range []struct {
+		tab  string
+		gen  int64
+		rows []sheet.ProjectedRow
+	}{
+		{"Rates", 0, []sheet.ProjectedRow{
+			{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}},
+		}},
+		{"Renamed", 1, []sheet.ProjectedRow{
 			{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}},
 			{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b"}},
-		},
+		}},
 	} {
-		ok, err := store.Replace(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: tab},
-			int64(len(rows)-1), rows, sheet.ContractState{OK: true})
+		ok, err := store.Replace(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: step.tab},
+			step.gen, step.rows, sheet.ContractState{OK: true})
 		require.NoError(t, err)
-		require.True(t, ok)
+		require.True(t, ok, "Replace(%q, gen=%d) must apply", step.tab, step.gen)
 	}
 
 	got, err := store.Stats(f.ctx(), sh.ID, "Rates")
