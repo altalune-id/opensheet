@@ -21,3 +21,11 @@ func NewRowStore(cfg db.DBConfig, pool db.Pool, pc *tenant.PgConn) RowStore {
 	}
 	return newSQLiteRowStore(pool.W, cfg.TablePrefix)
 }
+
+// NewUnitOfWork dispatches to the driver-specific UnitOfWork implementation.
+func NewUnitOfWork(cfg db.DBConfig, pool db.Pool, pc *tenant.PgConn) UnitOfWork {
+	if cfg.Driver == db.DriverPostgres {
+		return newPgUnitOfWork(pc)
+	}
+	return newSQLiteUnitOfWork(pool.W)
+}

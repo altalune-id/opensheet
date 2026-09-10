@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -148,9 +149,26 @@ func (f *fakeWriteSheets) factory() gsheet.WriterFactory {
 	}
 }
 
+func (f *fakeWriteSheets) readFactory() gsheet.Factory {
+	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
+		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(f.url))
+	}
+}
+
+// directUnits is the UnitOfWork the unit tests run under: the fakes hold no transaction, so it only passes the context through and counts the runs.
+type directUnits struct {
+	runs atomic.Int64
+}
+
+func (u *directUnits) Run(ctx context.Context, fn func(ctx context.Context) error) error {
+	u.runs.Add(1)
+	return fn(ctx)
+}
+
 type writeHarness struct {
 	snaps    *fakes.SheetSnapshots
 	rows     *fakes.SheetRows
+	units    *directUnits
 	attempts sheet.IdempotencyStore
 	srcs     *fakes.SheetSources
 	toks     *fakes.SheetTokenSources
@@ -158,13 +176,31 @@ type writeHarness struct {
 	google   *fakeWriteSheets
 	unex     *atomic.Int64
 	wf       *sheet.WriteWorkflow
+	rf       *sheet.ReadWorkflow
+}
+
+type writeOpts struct {
+	defaultTTL      time.Duration
+	maxPayloadBytes int64
 }
 
 func newWriteHarness(t *testing.T) *writeHarness {
 	t.Helper()
+	return newWriteHarnessWith(t, writeOpts{})
+}
+
+func newWriteHarnessWith(t *testing.T, opts writeOpts) *writeHarness {
+	t.Helper()
+	if opts.defaultTTL == 0 {
+		opts.defaultTTL = time.Minute
+	}
+	if opts.maxPayloadBytes == 0 {
+		opts.maxPayloadBytes = 1 << 20
+	}
 	h := &writeHarness{
 		snaps:    fakes.NewSheetSnapshots(),
 		rows:     fakes.NewSheetRows(),
+		units:    &directUnits{},
 		attempts: sheet.NewMemoryIdempotencyStore(),
 		srcs:     fakes.NewSheetSources(),
 		toks:     fakes.NewSheetTokenSources(),
@@ -177,9 +213,14 @@ func newWriteHarness(t *testing.T) *writeHarness {
 		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.wf = sheet.NewWriteWorkflow(
-		h.snaps, h.rows, h.attempts, h.srcs, h.toks, h.reauth, h.google.factory(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
+		h.snaps, h.rows, h.units, h.attempts, h.srcs, h.toks, h.reauth, h.google.factory(),
+		opts.defaultTTL, opts.maxPayloadBytes, log, unexpected,
+	)
+	h.rf = sheet.NewReadWorkflow(
+		h.snaps, h.rows, h.srcs, h.toks, h.reauth, h.google.readFactory(),
+		fakeCaps{public: true}, opts.defaultTTL, opts.maxPayloadBytes, log, unexpected,
 	)
 	return h
 }
@@ -463,6 +504,10 @@ func TestWriteWorkflow_PatchRowReadsFreshRatherThanTheSnapshot(t *testing.T) {
 	sh, _ := h.seed(t, "Rates", true)
 	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
 	h.snaps.Seed(key, sheet.Snapshot{ETag: "etag", Payload: []byte(`[{"id":"9","name":"stale"}]`)})
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
 
 	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
 	require.NoError(t, err)
@@ -471,9 +516,10 @@ func TestWriteWorkflow_PatchRowReadsFreshRatherThanTheSnapshot(t *testing.T) {
 	assert.Contains(t, decodedURL(t, got.url), "/v4/spreadsheets/FILE/values/'Rates'",
 		"the row must come from Google, never from the cache")
 
-	_, found, gErr := h.snaps.Get(t.Context(), key)
+	snap, found, gErr := h.snaps.Get(t.Context(), key)
 	require.NoError(t, gErr)
-	assert.False(t, found, "the patch purges the snapshot it deliberately ignored")
+	require.True(t, found, "the patch rebuilds the snapshot it deliberately ignored")
+	assert.NotContains(t, string(snap.Payload), "stale", "the seeded payload must not survive the write")
 }
 
 func TestWriteWorkflow_PatchRowRejectsAnEmptyPatch(t *testing.T) {
@@ -603,4 +649,162 @@ func TestWriteWorkflow_PatchRowKeysTheResponseLikeTheReadPath(t *testing.T) {
 	names, _ := gsheet.NormalizeHeaders([]string{"id", "", "name", "name"})
 	assert.Equal(t, []string{"id", "col_2", "name", "name_2"}, names)
 	assert.Equal(t, gsheet.Row{"id": "1", "col_2": "x", "name": "ada2", "name_2": "dup"}, row)
+}
+
+// The zero-refetch assertion is the whole point: a test that permits a refetch would pass on the
+// purge-only behaviour this replaces.
+func TestWriteWorkflow_PatchRow_ReadYourWriteWithNoRefetch(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	require.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	assert.Equal(t, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada2"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	}, live, "the patched row must be readable from the projection")
+
+	afterWrite := h.google.callCount()
+	got, err := h.rf.Rows(t.Context(), sh)
+	require.NoError(t, err)
+	assert.Equal(t, []gsheet.Row{
+		{"id": "1", "name": "ada2"},
+		{"id": "2", "name": "bob"},
+	}, got.Values, "the whole-tab read must carry the patched value")
+	assert.Equal(t, afterWrite, h.google.callCount(),
+		"the read must be answered from the rebuilt snapshot, never from a refetch")
+	assert.Equal(t, etagOf(t, `[{"id":"1","name":"ada2"},{"id":"2","name":"bob"}]`), got.ETag,
+		"the rebuilt ETag must be what a fresh fetch of the same rows would hash")
+	assert.Zero(t, h.unex.Load(), "a clean write-through reports no incident")
+}
+
+// NOTE: LockSheet is enroll-or-own, so a patch that does not run inside one transaction takes no lock at all.
+func TestWriteWorkflow_PatchRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), h.units.runs.Load(),
+		"the Google read, the Google write and the projection write share one transaction")
+}
+
+func TestWriteWorkflow_PatchRow_WritesATombstoneThroughToTheProjection(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.google.setTable(http.StatusOK, `{"values":[["id","name","deleted_at"],["1","ada",""]]}`)
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+	})
+
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"deleted_at": "2026-09-10T04:11:09Z"})
+	require.NoError(t, err)
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada"}, row, "deleted_at is stripped from the served row")
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	assert.Empty(t, live, "a marker in the deleted_at column tombstones the projected row")
+
+	snap, found, err := h.snaps.Get(t.Context(), key)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.JSONEq(t, `[]`, string(snap.Payload), "the rebuilt payload holds live rows only")
+}
+
+func TestWriteWorkflow_PatchRow_ARebuildOverTheLimitPurgesInsteadOfStoring(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarnessWith(t, writeOpts{maxPayloadBytes: 8})
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.snaps.Seed(key, sheet.Snapshot{ETag: "etag", Payload: []byte(`[]`)})
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err, "the row is already in the sheet; an oversized rebuild cannot un-write it")
+	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
+
+	_, found, err := h.snaps.Get(t.Context(), key)
+	require.NoError(t, err)
+	assert.False(t, found, "a rebuild over the limit purges the snapshot so the next read refetches")
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, live, 2)
+	assert.Equal(t, "ada2", live[0].Data["name"], "the projection keeps the write the snapshot could not hold")
+	assert.Zero(t, h.unex.Load(), "the payload limit is an expected outcome, not an incident")
+}
+
+func TestWriteWorkflow_PatchRow_AFailedSnapshotPutLeavesTheProjectionAlone(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+	h.snaps.PutErr = stubError("cache down")
+
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, live, 2)
+	assert.Equal(t, "ada2", live[0].Data["name"],
+		"the projection is the read-your-write surface, so a snapshot failure must not purge it")
+	assert.Equal(t, int64(1), h.unex.Load(), "the Put failure is reported as an incident")
+}
+
+func TestWriteWorkflow_PatchRow_APartialProjectionPurgesRatherThanCachingATruncatedBody(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.snaps.Seed(key, sheet.Snapshot{ETag: "etag", Payload: []byte(`[]`)})
+
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	require.NoError(t, err)
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, live, 1, "the write-through still lands")
+
+	_, found, err := h.snaps.Get(t.Context(), key)
+	require.NoError(t, err)
+	assert.False(t, found,
+		"the tab holds two rows and the projection one, so the rebuild must purge rather than cache a truncated body")
+	assert.Zero(t, h.unex.Load())
+}
+
+func TestWriteWorkflow_PatchRow_RefusesADuplicateDeletedAtColumn(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setTable(http.StatusOK, `{"values":[["id","deleted_at","Deleted At"],["1","",""]]}`)
+
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"id": "x"})
+	require.Error(t, err)
+	assert.True(t, sheet.IsDuplicateColumnError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+	for _, r := range h.google.recorded() {
+		assert.NotEqual(t, http.MethodPut, r.method,
+			"an unaddressable deleted_at column cannot be projected, so the patch is refused before the write")
+	}
 }

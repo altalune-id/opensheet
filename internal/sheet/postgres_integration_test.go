@@ -45,6 +45,7 @@ type pgFixture struct {
 	rows      sheet.RowStore
 	appDB     *sql.DB
 	ownerDB   *sql.DB
+	appDSN    string
 	prefix    string
 	a         orgTree
 	b         orgTree
@@ -95,8 +96,9 @@ func newPgFixture(t *testing.T) *pgFixture {
 		require.NoError(t, err)
 	}
 
+	f.appDSN = pgtest.DSNWithUser(t, h.DSN, appRole, "pw")
 	appDB, err := db.Open(t.Context(), db.DBConfig{
-		Driver: db.DriverPostgres, DSN: pgtest.DSNWithUser(t, h.DSN, appRole, "pw"), MaxOpenConns: 1,
+		Driver: db.DriverPostgres, DSN: f.appDSN, MaxOpenConns: 1,
 	}, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = appDB.Close() })
@@ -126,6 +128,20 @@ func newPgFixture(t *testing.T) *pgFixture {
 	t.Cleanup(func() { _ = attemptsDB.Close() })
 	f.attempts = sheet.NewIdempotencyStore(dbCfg, tenant.NewPgConn(attemptsDB))
 	return f
+}
+
+// concurrent hands back a row store and unit of work on their own pool, because appDB caps at one connection and a test of the sheet's write lock needs real overlap rather than pool-level serialization.
+func (f *pgFixture) concurrent(t *testing.T, conns int) (sheet.RowStore, sheet.UnitOfWork) {
+	t.Helper()
+	sqlDB, err := db.Open(t.Context(), db.DBConfig{
+		Driver: db.DriverPostgres, DSN: f.appDSN, MaxOpenConns: conns,
+	}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	cfg := db.DBConfig{Driver: db.DriverPostgres, Schema: "public", TablePrefix: f.prefix}
+	pool := db.Pool{W: sqlDB, R: sqlDB}
+	pc := tenant.NewPgConn(sqlDB)
+	return sheet.NewRowStore(cfg, pool, pc), sheet.NewUnitOfWork(cfg, pool, pc)
 }
 
 // NOTE: pgtest reuses TEST_PG_DSN when set, so role and table names must be unique per run.

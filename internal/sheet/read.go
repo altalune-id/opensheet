@@ -330,7 +330,7 @@ func (w *ReadWorkflow) rowsOf(
 
 func (w *ReadWorkflow) cache(ctx context.Context, sh *Sheet, key SnapshotKey, out Rows) {
 	snap := Snapshot{ETag: out.ETag, FetchedAt: out.FetchedAt, Payload: out.Payload}
-	if err := w.snaps.Put(ctx, key, snap, w.ttl(sh)); err != nil {
+	if err := w.snaps.Put(ctx, key, snap, ttlOf(sh, w.defaultTTL)); err != nil {
 		_ = w.unexpected(ctx, "sheet.Rows: snapshot put", err, "sheet_id", sh.ID, "tab", key.Tab)
 	}
 }
@@ -365,19 +365,19 @@ func (w *ReadWorkflow) fromSnapshot(ctx context.Context, sh *Sheet, snap Snapsho
 	}, nil
 }
 
-func (w *ReadWorkflow) ttl(sh *Sheet) time.Duration {
-	if sh.CacheTTL != DefaultCacheTTL {
-		return sh.CacheTTL
-	}
-	return w.defaultTTL
-}
-
 // NOTE: a Google or credential failure already carries a wire code and is an expected outcome the surfaces map, so it passes through instead of being reported as an incident.
 func (w *ReadWorkflow) passthrough(ctx context.Context, situation string, err error, sh *Sheet) error {
 	if _, ok := apperror.AsAppError(err); ok {
 		return err
 	}
 	return w.unexpected(ctx, situation, err, "sheet_id", sh.ID, "spreadsheet_id", sh.SpreadsheetID)
+}
+
+func ttlOf(sh *Sheet, defaultTTL time.Duration) time.Duration {
+	if sh.CacheTTL != DefaultCacheTTL {
+		return sh.CacheTTL
+	}
+	return defaultTTL
 }
 
 func etagOf(payload []byte) string {
@@ -420,10 +420,10 @@ func projectRows(tbl gsheet.Table, tab string, fetchedAt time.Time) ([]Projected
 
 // NOTE: an unparseable marker still means deleted, so the fetch time stands in rather than resurrecting the row.
 func tombstoneAt(cell string, fetchedAt time.Time) *time.Time {
-	cell = strings.TrimSpace(cell)
-	if cell == "" {
+	if !isTombstoneCell(cell) {
 		return nil
 	}
+	cell = strings.TrimSpace(cell)
 	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
 		if at, err := time.Parse(layout, cell); err == nil {
 			utc := at.UTC()
@@ -431,6 +431,10 @@ func tombstoneAt(cell string, fetchedAt time.Time) *time.Time {
 		}
 	}
 	return &fetchedAt
+}
+
+func isTombstoneCell(cell string) bool {
+	return strings.TrimSpace(cell) != ""
 }
 
 func liveValues(rows []ProjectedRow) []gsheet.Row {

@@ -174,6 +174,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	spreadsheetStore := spreadsheet.NewStore(cfg.DB, pool, pgConn)
 	sheetStore := sheet.NewStore(cfg.DB, pool, pgConn)
 	sheetRows := sheet.NewRowStore(cfg.DB, pool, pgConn)
+	sheetUnits := sheet.NewUnitOfWork(cfg.DB, pool, pgConn)
 	sheetAttempts := sheet.NewIdempotencyStore(cfg.DB, pgConn)
 	apiKeyStore := apikey.NewStore(cfg.DB, pool, pgConn)
 
@@ -222,11 +223,14 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	writeWorkflow := sheet.NewWriteWorkflow(
 		snaps,
 		sheetRows,
+		sheetUnits,
 		sheetAttempts,
 		spreadsheetsForSheet{svc: spreadsheets},
 		tokensForSheetWrite{svc: credentials},
 		credentialsForSheet{svc: credentials},
 		writers,
+		cfg.Cache.DefaultTTL,
+		cfg.Sheets.MaxPayloadBytes,
 		log,
 		reporter.Unexpected,
 	)
