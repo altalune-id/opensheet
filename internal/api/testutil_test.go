@@ -42,6 +42,9 @@ import (
 
 const tabsBody = `{"properties":{"title":"Prices"},"sheets":[{"properties":{"title":"Q1"}},{"properties":{"title":"Q2"}}]}`
 
+// NOTE: publish now reads the tab, so sheet.Create needs a body that satisfies the table contract.
+const valuesBody = `{"values":[["id","name"],["a","ada"]]}`
+
 type stubAuthenticator struct {
 	principal session.Principal
 	err       error
@@ -116,7 +119,10 @@ func newHarnessOpts(t *testing.T, p session.Principal, aerr error) *harness {
 	credSvc := credential.NewService(creds, log, reporter.Unexpected, sl)
 	sprdSvc := spreadsheet.NewService(sprds, log, reporter.Unexpected, stubTokenSources{}, googleFactory(t),
 		stubTokenSources{}, googleWriterFactory(t))
-	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps, sheet.NewMemoryIdempotencyStore())
+	publishWorkflow := sheet.NewPublishWorkflow(anySheetSource{}, stubTokenSources{}, fakes.NewSheetReauthers(),
+		googleFactory(t), log, reporter.Unexpected)
+	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps,
+		sheet.NewMemoryIdempotencyStore(), publishWorkflow)
 	keySheets := fakes.NewAPIKeySheets()
 	keySvc := apikey.NewService(keys, log, reporter.Unexpected, keySheets)
 
@@ -169,12 +175,24 @@ func testSealer(t *testing.T) sealer.Sealer {
 	return s
 }
 
+type anySheetSource struct{}
+
+func (anySheetSource) SourceFor(_ context.Context, spreadsheetID uuid.UUID) (sheet.Source, error) {
+	return sheet.Source{GoogleFileID: "FILE", CredentialID: spreadsheetID}, nil
+}
+
 func googleFactory(t *testing.T) gsheet.Factory {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v4/spreadsheets/{file}/values/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, valuesBody)
+	})
+	mux.HandleFunc("/v4/spreadsheets/{file}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, tabsBody)
-	}))
+	})
+	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
 		return gsheet.New(ctx, ts, gworkspace.WithBaseURL(srv.URL))

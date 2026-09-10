@@ -3,6 +3,7 @@ package sheet
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -29,6 +30,7 @@ type Service struct {
 	caps       Capabilities
 	snaps      SnapshotStore
 	attempts   IdempotencyStore
+	publish    *PublishWorkflow
 }
 
 // NewService binds the service to its dependencies.
@@ -39,6 +41,7 @@ func NewService(
 	caps Capabilities,
 	snaps SnapshotStore,
 	attempts IdempotencyStore,
+	publish *PublishWorkflow,
 ) *Service {
 	return &Service{
 		store:      store,
@@ -47,6 +50,7 @@ func NewService(
 		caps:       caps,
 		snaps:      snaps,
 		attempts:   attempts,
+		publish:    publish,
 	}
 }
 
@@ -97,6 +101,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 		return nil, s.unexpected(ctx, "sheet.Create: bySlug", err,
 			"org_id", tc.OrgID, "project_id", tc.ProjectID, "slug", req.Slug)
 	}
+
+	// SECURITY: publish fails closed — a Google failure creates nothing, so the id contract cannot be skipped under load.
+	state, _, err := s.publish.Validate(ctx, req.SpreadsheetID, req.Tab)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	validatedAt := time.Now().UTC()
+	sh.ValidatedAt = &validatedAt
+	sh.ContractOK = state.OK
+	sh.ContractReason = state.Reason
 
 	if err := s.store.Save(ctx, sh); err != nil {
 		if IsAlreadyExistsError(err) {

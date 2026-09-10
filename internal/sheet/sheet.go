@@ -162,7 +162,7 @@ func validateSlug(slug string) error {
 // NOTE: each of these would collide with a fixed segment of the data-plane route shape.
 func reservedSlug(slug string) bool {
 	switch slug {
-	case "cache", "rows", "tabs", "api", "health", "healthz", "readyz", "static", "robots.txt":
+	case "cache", "rows", "tabs", "capabilities", "api", "health", "healthz", "readyz", "static", "robots.txt":
 		return true
 	}
 	return false

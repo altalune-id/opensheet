@@ -55,7 +55,7 @@ func TestNew_Slug(t *testing.T) {
 }
 
 func TestNew_RejectsReservedSlugs(t *testing.T) {
-	for _, slug := range []string{"cache", "rows", "tabs", "api", "health", "healthz", "readyz", "static", "robots.txt"} {
+	for _, slug := range []string{"cache", "rows", "tabs", "capabilities", "api", "health", "healthz", "readyz", "static", "robots.txt"} {
 		t.Run(slug, func(t *testing.T) {
 			_, err := New(NewParams{OrgID: uuid.New(), ProjectID: uuid.New(), SpreadsheetID: uuid.New(), Tab: "", Slug: slug, Visibility: VisibilityKey, CacheTTL: 0})
 			if !IsInvalidSlugError(err) {

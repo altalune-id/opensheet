@@ -2,8 +2,12 @@ package handlers_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -45,6 +49,37 @@ const (
 		`"private_key":"-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----\n",` +
 		`"client_email":"sa@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}`
 )
+
+//nolint:gochecknoglobals // one RSA key per test binary; generating one per fixture would cost ~100ms each.
+var testSAKey = sync.OnceValues(func() (string, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", err
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), nil
+})
+
+// NOTE: the serviceAccount const's key does not parse, so a credential sealed with it cannot mint a token — publish reads the tab and needs one that can.
+func testServiceAccount(t *testing.T, tokenURL string) string {
+	t.Helper()
+	key, err := testSAKey()
+	require.NoError(t, err)
+	raw, err := json.Marshal(map[string]string{
+		"type":           "service_account",
+		"project_id":     "p",
+		"private_key_id": "k",
+		"private_key":    key,
+		"client_email":   "sa@p.iam.gserviceaccount.com",
+		"client_id":      "1",
+		"token_uri":      tokenURL,
+	})
+	require.NoError(t, err)
+	return string(raw)
+}
 
 // sheetsFixture adds the four opensheet domain services to handlerFixture, all on in-memory fakes.
 type sheetsFixture struct {
@@ -120,10 +155,12 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 
 	snaps := fakes.NewSheetSnapshots()
 	sheetStore := fakes.NewSheet()
-	sheets := sheet.NewService(sheetStore, discardLogger(), passthroughUnexpected(),
-		publicCaps(caps.PublicSheets), snaps, sheet.NewMemoryIdempotencyStore())
-
 	sources := fakes.NewSheetSources()
+	publish := sheet.NewPublishWorkflow(sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
+		discardLogger(), passthroughUnexpected())
+	sheets := sheet.NewService(sheetStore, discardLogger(), passthroughUnexpected(),
+		publicCaps(caps.PublicSheets), snaps, sheet.NewMemoryIdempotencyStore(), publish)
+
 	read := sheet.NewReadWorkflow(snaps, sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
 		publicCaps(caps.PublicSheets), 30*time.Second, 1<<20, discardLogger(), passthroughUnexpected())
 
@@ -216,7 +253,7 @@ func (f *sheetsFixture) do(t *testing.T, method, target, body string) *httptest.
 func (f *sheetsFixture) seedCredential(t *testing.T, kind credential.Kind, name string) *credential.Credential {
 	t.Helper()
 	id := uuid.Must(uuid.NewV7())
-	secret := []byte(serviceAccount)
+	secret := []byte(testServiceAccount(t, f.Google.tokenURL))
 	if kind == credential.KindGoogleOAuth {
 		secret = []byte("1//refresh-token")
 	}
@@ -259,7 +296,7 @@ type fakeSheetsAPI struct {
 func newFakeSheetsAPI(t *testing.T) *fakeSheetsAPI {
 	t.Helper()
 	f := &fakeSheetsAPI{
-		rowsBody:   `{"values":[["name","qty"],["apple","3"]]}`,
+		rowsBody:   `{"values":[["id","name","qty"],["r1","apple","3"]]}`,
 		rowsStatus: http.StatusOK,
 		metaStatus: http.StatusOK,
 		tabs:       []string{"First", "Second"},
@@ -829,10 +866,11 @@ func TestSheetHandler_PublishDefaultsToNotWritable(t *testing.T) {
 func TestSheetHandler_PreviewRendersRowsAndHeaderWarnings(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
-	f.Google.setRows(`{"values":[["name","","name"],["apple","3","pear"]]}`)
 	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	sp := f.seedSpreadsheet(t, c.ID)
 	sh := f.seedSheet(t, sp.ID, "q1", sheet.VisibilityKey)
+	// NOTE: the drifted header row lands after the publish, which validates the table contract and would reject it.
+	f.Google.setRows(`{"values":[["name","","name"],["apple","3","pear"]]}`)
 
 	rec := f.do(t, http.MethodGet, f.path("/sheets/"+sh.ID.String()+"/preview"), "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

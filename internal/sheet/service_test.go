@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
+
+// NOTE: publish now reads the tab, so every Create in this file needs a body that satisfies the table contract.
+const idRowBody = `{"values":[["id","name"],["a","ada"]]}`
 
 type fakeCaps struct{ public bool }
 
@@ -40,6 +44,18 @@ func newSvcAttempts(
 	publicEnabled bool,
 ) (*sheet.Service, *int) {
 	t.Helper()
+	svc, _, calls := newSvcGoogle(t, store, snaps, attempts, publicEnabled)
+	return svc, calls
+}
+
+func newSvcGoogle(
+	t *testing.T,
+	store sheet.Store,
+	snaps sheet.SnapshotStore,
+	attempts sheet.IdempotencyStore,
+	publicEnabled bool,
+) (*sheet.Service, *fakeSheets, *int) {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
@@ -47,7 +63,14 @@ func newSvcAttempts(
 		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
-	return sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}, snaps, attempts), &calls
+	google := newFakeSheets(t)
+	google.setRows(http.StatusOK, idRowBody)
+	publish := sheet.NewPublishWorkflow(
+		anySheetSource{}, fakes.NewSheetTokenSources(), fakes.NewSheetReauthers(), google.factory(),
+		log, unexpected,
+	)
+	svc := sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}, snaps, attempts, publish)
+	return svc, google, &calls
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
@@ -274,6 +297,61 @@ func TestService_Create(t *testing.T) {
 		}
 		if *unexCalls != 0 {
 			t.Errorf("a unique violation must not route through unexpected()")
+		}
+	})
+}
+
+func TestService_Create_ValidatesTheTableContract(t *testing.T) {
+	t.Run("stamps the contract state on the new sheet", func(t *testing.T) {
+		svc, _, unexCalls := newSvcGoogle(t, fakes.NewSheet(), fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)
+		ctx, _ := tenantCtx(t)
+
+		got, err := svc.Create(ctx, sheet.CreateRequest{SpreadsheetID: uuid.New(), Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey})
+		if err != nil {
+			t.Fatalf("Create err = %v", err)
+		}
+		if got.ValidatedAt == nil {
+			t.Error("ValidatedAt = nil, want the instant the contract was checked")
+		}
+		if !got.ContractOK || got.ContractReason != "" {
+			t.Errorf("ContractOK/ContractReason = %v/%q, want true/empty", got.ContractOK, got.ContractReason)
+		}
+		if *unexCalls != 0 {
+			t.Errorf("unexpected() calls = %d, want 0", *unexCalls)
+		}
+	})
+	t.Run("rejects a tab with no id column and creates nothing", func(t *testing.T) {
+		store := fakes.NewSheet()
+		svc, google, _ := newSvcGoogle(t, store, fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)
+		google.setRows(http.StatusOK, `{"values":[["name"],["ada"]]}`)
+		ctx, _ := tenantCtx(t)
+
+		_, err := svc.Create(ctx, sheet.CreateRequest{SpreadsheetID: uuid.New(), Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey})
+		if !sheet.IsNoIDColumnError(err) {
+			t.Fatalf("Create err = %v (%T), want *sheet.NoIDColumnError", err, err)
+		}
+		items, lErr := svc.List(ctx)
+		if lErr != nil {
+			t.Fatalf("List err = %v", lErr)
+		}
+		if len(items) != 0 {
+			t.Errorf("List = %d sheets, want 0 — a rejected publish must create nothing", len(items))
+		}
+	})
+	t.Run("fails closed when Google is unreachable", func(t *testing.T) {
+		svc, google, _ := newSvcGoogle(t, fakes.NewSheet(), fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)
+		google.setRows(http.StatusServiceUnavailable, `{"error":{"code":503,"message":"backend error"}}`)
+		ctx, _ := tenantCtx(t)
+
+		if _, err := svc.Create(ctx, sheet.CreateRequest{SpreadsheetID: uuid.New(), Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey}); err == nil {
+			t.Fatal("Create err = nil, want the Google failure to reject the publish")
+		}
+		items, lErr := svc.List(ctx)
+		if lErr != nil {
+			t.Fatalf("List err = %v", lErr)
+		}
+		if len(items) != 0 {
+			t.Errorf("List = %d sheets, want 0 — publish fails closed", len(items))
 		}
 	})
 }
