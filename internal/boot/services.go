@@ -173,6 +173,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	credentialStore := credential.NewStore(cfg.DB, pool, pgConn)
 	spreadsheetStore := spreadsheet.NewStore(cfg.DB, pool, pgConn)
 	sheetStore := sheet.NewStore(cfg.DB, pool, pgConn)
+	sheetRows := sheet.NewRowStore(cfg.DB, pool, pgConn)
 	sheetAttempts := sheet.NewIdempotencyStore(cfg.DB, pgConn)
 	apiKeyStore := apikey.NewStore(cfg.DB, pool, pgConn)
 
@@ -207,6 +208,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 
 	readWorkflow := sheet.NewReadWorkflow(
 		snaps,
+		sheetRows,
 		spreadsheetsForSheet{svc: spreadsheets},
 		tokensForSheetRead{svc: credentials},
 		credentialsForSheet{svc: credentials},

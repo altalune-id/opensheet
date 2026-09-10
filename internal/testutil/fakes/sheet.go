@@ -2,6 +2,7 @@ package fakes
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -288,4 +289,171 @@ func (f *SheetReauthers) MarkReauthNeeded(_ context.Context, credentialID uuid.U
 	f.marked = append(f.marked, credentialID)
 	f.mu.Unlock()
 	return f.Err
+}
+
+// SheetRows is an in-memory sheet.RowStore, generation-guarded like the drivers are.
+type SheetRows struct {
+	mu       sync.Mutex
+	data     map[sheet.SnapshotKey][]sheet.ProjectedRow
+	gens     map[uuid.UUID]int64
+	states   map[uuid.UUID]sheet.ContractState
+	replaces int
+
+	ReplaceErr      error
+	MarkContractErr error
+	ListLiveErr     error
+}
+
+// NewSheetRows returns an empty in-memory sheet.RowStore.
+func NewSheetRows() *SheetRows {
+	return &SheetRows{
+		data:   map[sheet.SnapshotKey][]sheet.ProjectedRow{},
+		gens:   map[uuid.UUID]int64{},
+		states: map[uuid.UUID]sheet.ContractState{},
+	}
+}
+
+var _ sheet.RowStore = (*SheetRows)(nil)
+
+// Seed stores rows under k without touching the generation.
+func (f *SheetRows) Seed(k sheet.SnapshotKey, rows []sheet.ProjectedRow) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.data[k] = cloneProjected(rows)
+}
+
+// Bump advances a sheet's generation, standing in for a write that landed mid-fetch.
+func (f *SheetRows) Bump(sheetID uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gens[sheetID]++
+}
+
+// Generation reports a sheet's current generation.
+func (f *SheetRows) Generation(sheetID uuid.UUID) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gens[sheetID]
+}
+
+// Projected reports every row held under k, tombstones included.
+func (f *SheetRows) Projected(k sheet.SnapshotKey) []sheet.ProjectedRow {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return cloneProjected(f.data[k])
+}
+
+// Contract reports the contract state last persisted for a sheet.
+func (f *SheetRows) Contract(sheetID uuid.UUID) sheet.ContractState {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.states[sheetID]
+}
+
+// ReplaceCount reports how many Replace calls were applied.
+func (f *SheetRows) ReplaceCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.replaces
+}
+
+func (f *SheetRows) LockSheet(_ context.Context, sheetID uuid.UUID) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gens[sheetID], nil
+}
+
+func (f *SheetRows) Replace(
+	_ context.Context, k sheet.SnapshotKey, gen int64, rows []sheet.ProjectedRow, contract sheet.ContractState,
+) (bool, error) {
+	if f.ReplaceErr != nil {
+		return false, f.ReplaceErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gens[k.SheetID] != gen {
+		return false, nil
+	}
+	f.data[k] = cloneProjected(rows)
+	f.gens[k.SheetID]++
+	f.states[k.SheetID] = contract
+	f.replaces++
+	return true, nil
+}
+
+func (f *SheetRows) MarkContract(
+	_ context.Context, sheetID uuid.UUID, gen int64, contract sheet.ContractState,
+) (bool, error) {
+	if f.MarkContractErr != nil {
+		return false, f.MarkContractErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gens[sheetID] != gen {
+		return false, nil
+	}
+	f.states[sheetID] = contract
+	return true, nil
+}
+
+func (f *SheetRows) UpsertRow(_ context.Context, k sheet.SnapshotKey, row sheet.ProjectedRow) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.data[k]
+	for i := range kept {
+		if kept[i].RowID != row.RowID {
+			continue
+		}
+		kept[i] = cloneRow(row)
+		f.gens[k.SheetID]++
+		return nil
+	}
+	f.data[k] = append(kept, cloneRow(row))
+	f.gens[k.SheetID]++
+	return nil
+}
+
+func (f *SheetRows) ListLive(_ context.Context, k sheet.SnapshotKey) ([]sheet.ProjectedRow, error) {
+	if f.ListLiveErr != nil {
+		return nil, f.ListLiveErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]sheet.ProjectedRow, 0, len(f.data[k]))
+	for _, row := range f.data[k] {
+		if row.DeletedAt != nil {
+			continue
+		}
+		out = append(out, cloneRow(row))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RowIndex < out[j].RowIndex })
+	return out, nil
+}
+
+func (f *SheetRows) PurgeSheet(_ context.Context, sheetID uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k := range f.data {
+		if k.SheetID == sheetID {
+			delete(f.data, k)
+		}
+	}
+	return nil
+}
+
+func cloneProjected(rows []sheet.ProjectedRow) []sheet.ProjectedRow {
+	out := make([]sheet.ProjectedRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, cloneRow(row))
+	}
+	return out
+}
+
+func cloneRow(row sheet.ProjectedRow) sheet.ProjectedRow {
+	row.Data = maps.Clone(row.Data)
+	if row.DeletedAt != nil {
+		at := *row.DeletedAt
+		row.DeletedAt = &at
+	}
+	return row
 }

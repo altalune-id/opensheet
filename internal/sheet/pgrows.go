@@ -94,6 +94,30 @@ func (s *postgresRowStore) Replace(
 	return true, s.endTx(tx, owned, nil)
 }
 
+func (s *postgresRowStore) MarkContract(
+	ctx context.Context, sheetID uuid.UUID, gen int64, contract ContractState,
+) (bool, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return false, err
+	}
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	current, err := s.lockGeneration(ctx, tx, tc, sheetID)
+	if err != nil {
+		return false, s.endTx(tx, owned, err)
+	}
+	if current != gen {
+		return false, s.endTx(tx, owned, nil)
+	}
+	if err := s.markContract(ctx, tx, tc, sheetID, contract); err != nil {
+		return false, s.endTx(tx, owned, err)
+	}
+	return true, s.endTx(tx, owned, nil)
+}
+
 func (s *postgresRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error {
 	tc, err := tenant.From(ctx)
 	if err != nil {
@@ -258,6 +282,24 @@ func (s *postgresRowStore) commitRefresh(
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {
 		return fmt.Errorf("sheet.rows.postgres: commit refresh: %w", err)
+	}
+	return nil
+}
+
+// NOTE: generation is left alone — the projected rows did not change, so a concurrent refresh has nothing to discard.
+func (s *postgresRowStore) markContract(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
+) error {
+	stmt := s.sheets.UPDATE(s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason).
+		SET(
+			postgres.TimestampzT(time.Now().UTC()),
+			postgres.Bool(contract.OK),
+			postgres.String(contract.Reason),
+		).
+		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
+			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.postgres: mark contract: %w", err)
 	}
 	return nil
 }

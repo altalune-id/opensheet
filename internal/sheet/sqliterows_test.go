@@ -277,3 +277,47 @@ func TestSQLiteRowStore_RequiresTenantScope(t *testing.T) {
 
 	assert.True(t, tenant.IsMissingError(store.PurgeSheet(t.Context(), k.SheetID)))
 }
+
+func TestSQLiteRowStore_MarkContract_PersistsDriftWithoutTouchingTheRows(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	rows := []sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}}
+	ok, err := store.Replace(f.ctx(), k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = store.MarkContract(f.ctx(), sh.ID, 1, sheet.ContractState{OK: false, Reason: "no id column"})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.False(t, got.ContractOK)
+	assert.Equal(t, "no id column", got.ContractReason)
+	assert.EqualValues(t, 1, got.Generation, "the projected rows did not change, so the generation must not move")
+	require.NotNil(t, got.ValidatedAt)
+
+	live, err := store.ListLive(f.ctx(), k)
+	require.NoError(t, err)
+	assert.Equal(t, rows, live, "MarkContract must leave the projected rows alone")
+}
+
+func TestSQLiteRowStore_MarkContract_DiscardsWhenGenerationMoved(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+
+	bumpSQLiteGeneration(t, f, sh.ID)
+
+	ok, err := store.MarkContract(f.ctx(), sh.ID, 0, sheet.ContractState{OK: false, Reason: "a finding from an older fetch"})
+	require.NoError(t, err)
+	require.False(t, ok, "a finding whose generation moved must not overwrite a newer verdict")
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.True(t, got.ContractOK)
+	assert.Empty(t, got.ContractReason)
+}

@@ -344,3 +344,47 @@ func TestPgRowStore_DeletingTheSheetCascades(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "deleting the sheet must cascade to its projected rows")
 }
+
+func TestPgRowStore_MarkContract_PersistsDriftWithoutTouchingTheRows(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	rows := []sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}}
+	ok, err := f.rows.Replace(ctx, k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	ok, err = f.rows.MarkContract(ctx, sh.ID, 1, sheet.ContractState{OK: false, Reason: "no id column"})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.False(t, got.ContractOK)
+	assert.Equal(t, "no id column", got.ContractReason)
+	assert.EqualValues(t, 1, got.Generation, "the projected rows did not change, so the generation must not move")
+	require.NotNil(t, got.ValidatedAt)
+
+	live, err := f.rows.ListLive(ctx, k)
+	require.NoError(t, err)
+	assert.Equal(t, rows, live, "MarkContract must leave the projected rows alone")
+}
+
+func TestPgRowStore_MarkContract_DiscardsWhenGenerationMoved(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+
+	pgBumpGeneration(t, f, sh.ID)
+
+	ok, err := f.rows.MarkContract(ctx, sh.ID, 0, sheet.ContractState{OK: false, Reason: "a finding from an older fetch"})
+	require.NoError(t, err)
+	require.False(t, ok, "a finding whose generation moved must not overwrite a newer verdict")
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.True(t, got.ContractOK)
+	assert.Empty(t, got.ContractReason)
+}

@@ -161,7 +161,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 	sheets := sheet.NewService(sheetStore, discardLogger(), passthroughUnexpected(),
 		publicCaps(caps.PublicSheets), snaps, sheet.NewMemoryIdempotencyStore(), publish)
 
-	read := sheet.NewReadWorkflow(snaps, sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
+	read := sheet.NewReadWorkflow(snaps, fakes.NewSheetRows(), sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
 		publicCaps(caps.PublicSheets), 30*time.Second, 1<<20, discardLogger(), passthroughUnexpected())
 
 	keyStore := fakes.NewAPIKey()

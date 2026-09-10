@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -28,8 +29,8 @@ import (
 )
 
 const (
-	twoRowBody   = `{"values":[["name","qty"],["apple","3"],["pear","5"]]}`
-	twoRowJSON   = `[{"name":"apple","qty":"3"},{"name":"pear","qty":"5"}]`
+	twoRowBody   = `{"values":[["id","name","qty"],["a","apple","3"],["b","pear","5"]]}`
+	twoRowJSON   = `[{"id":"a","name":"apple","qty":"3"},{"id":"b","name":"pear","qty":"5"}]`
 	firstTabBody = `{"properties":{"title":"Doc"},"sheets":[{"properties":{"title":"First"}},{"properties":{"title":"Second"}}]}`
 )
 
@@ -120,6 +121,7 @@ func (f *fakeSheets) factory() gsheet.Factory {
 
 type readHarness struct {
 	snaps  *fakes.SheetSnapshots
+	rows   *fakes.SheetRows
 	srcs   *fakes.SheetSources
 	toks   *fakes.SheetTokenSources
 	reauth *fakes.SheetReauthers
@@ -144,6 +146,7 @@ func newReadHarness(t *testing.T, opts harnessOpts) *readHarness {
 	}
 	h := &readHarness{
 		snaps:  fakes.NewSheetSnapshots(),
+		rows:   fakes.NewSheetRows(),
 		srcs:   fakes.NewSheetSources(),
 		toks:   fakes.NewSheetTokenSources(),
 		reauth: fakes.NewSheetReauthers(),
@@ -156,7 +159,7 @@ func newReadHarness(t *testing.T, opts harnessOpts) *readHarness {
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
 	h.wf = sheet.NewReadWorkflow(
-		h.snaps, h.srcs, h.toks, h.reauth, h.google.factory(),
+		h.snaps, h.rows, h.srcs, h.toks, h.reauth, h.google.factory(),
 		fakeCaps{public: opts.publicEnabled},
 		opts.defaultTTL, opts.maxPayloadBytes,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
@@ -865,5 +868,163 @@ func TestReadWorkflow_NullSnapshotPayloadDecodesToNoRows(t *testing.T) {
 	}
 	if len(got.Values) != 0 {
 		t.Errorf("Values = %#v, want none", got.Values)
+	}
+}
+
+func TestReadWorkflow_Load_ProjectsRows(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	got, err := h.wf.Rows(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("Rows err = %v", err)
+	}
+	if string(got.Payload) != twoRowJSON {
+		t.Errorf("Payload = %s, want %s", got.Payload, twoRowJSON)
+	}
+
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}
+	want := []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "apple", "qty": "3"}},
+		{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "pear", "qty": "5"}},
+	}
+	if projected := h.rows.Projected(key); !reflect.DeepEqual(projected, want) {
+		t.Errorf("projection = %#v, want %#v", projected, want)
+	}
+	if state := h.rows.Contract(sh.ID); !state.OK || state.Reason != "" {
+		t.Errorf("contract = %+v, want a satisfied contract", state)
+	}
+	if gen := h.rows.Generation(sh.ID); gen != 1 {
+		t.Errorf("generation = %d, want 1 after one refresh", gen)
+	}
+}
+
+func TestReadWorkflow_Load_ProjectsTombstonesButServesLiveRowsOnly(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	h.google.setRows(http.StatusOK,
+		`{"values":[["id","name","deleted_at"],["a","ada",""],["b","bo","2026-09-01T10:00:00Z"],[],["c","cyd",""]]}`)
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	got, err := h.wf.Rows(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("Rows err = %v", err)
+	}
+	const wantPayload = `[{"id":"a","name":"ada"},{"id":"c","name":"cyd"}]`
+	if string(got.Payload) != wantPayload {
+		t.Errorf("Payload = %s, want live rows only with deleted_at stripped: %s", got.Payload, wantPayload)
+	}
+
+	deletedAt := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	want := []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "bo"}, DeletedAt: &deletedAt},
+		{RowID: "c", RowIndex: 3, Data: gsheet.Row{"id": "c", "name": "cyd"}},
+	}
+	projected := h.rows.Projected(sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"})
+	if !reflect.DeepEqual(projected, want) {
+		t.Errorf("projection = %#v, want the tombstone kept and the blank row's index consumed: %#v", projected, want)
+	}
+}
+
+func TestReadWorkflow_Load_DiscardedRefreshServesTheCommittedSnapshot(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}
+
+	const committedJSON = `[{"id":"a","name":"quince","qty":"9"}]`
+	committed := []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "quince", "qty": "9"}},
+	}
+	h.rows.Seed(key, committed)
+	fetchedAt := time.Now().UTC().Add(-time.Hour)
+	h.snaps.Seed(key, sheet.Snapshot{
+		ETag:      etagOf(t, committedJSON),
+		FetchedAt: fetchedAt,
+		ExpiresAt: time.Now().UTC().Add(-time.Minute),
+		Payload:   []byte(committedJSON),
+	})
+	// a write lands while this refresh is fetching, so the captured generation no longer matches
+	h.rows.Bump(sh.ID)
+
+	got, err := h.wf.Rows(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("Rows err = %v, want the committed picture served", err)
+	}
+	if string(got.Payload) != committedJSON {
+		t.Errorf("Payload = %s, want the committed snapshot %s, not this fetch", got.Payload, committedJSON)
+	}
+	if got.ETag != etagOf(t, committedJSON) {
+		t.Errorf("ETag = %q, want the committed snapshot's", got.ETag)
+	}
+	if len(got.Values) != 1 || got.Values[0]["name"] != "quince" {
+		t.Errorf("Values = %#v, want the committed rows", got.Values)
+	}
+	if !got.FetchedAt.Equal(fetchedAt) {
+		t.Errorf("FetchedAt = %v, want the committed snapshot's %v", got.FetchedAt, fetchedAt)
+	}
+	if h.rows.ReplaceCount() != 0 {
+		t.Error("the discarded refresh was applied to the projection")
+	}
+	if projected := h.rows.Projected(key); !reflect.DeepEqual(projected, committed) {
+		t.Errorf("projection = %#v, want the committed rows untouched", projected)
+	}
+}
+
+func TestReadWorkflow_Load_DriftServesStaleNot409(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}
+	h.snaps.Seed(key, sheet.Snapshot{
+		ETag:      "good-etag",
+		FetchedAt: time.Now().UTC().Add(-time.Hour),
+		ExpiresAt: time.Now().UTC().Add(-time.Minute),
+		Payload:   []byte(`[{"id":"a","name":"apple","qty":"3"}]`),
+	})
+	// the id column was deleted from the tab after it was published
+	h.google.setRows(http.StatusOK, `{"values":[["name","qty"],["apple","3"]]}`)
+
+	got, err := h.wf.Rows(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("Rows err = %v, want the previous rows served stale rather than a conflict", err)
+	}
+	if !got.Stale || !got.Cached {
+		t.Errorf("Cached/Stale = %v/%v, want true/true", got.Cached, got.Stale)
+	}
+	if got.ETag != "good-etag" {
+		t.Errorf("ETag = %q, want the last good snapshot's", got.ETag)
+	}
+	if len(got.Values) != 1 || got.Values[0]["id"] != "a" {
+		t.Errorf("Values = %#v, want the previous rows", got.Values)
+	}
+	state := h.rows.Contract(sh.ID)
+	if state.OK || state.Reason == "" {
+		t.Errorf("contract = %+v, want the drift persisted with a reason", state)
+	}
+	if h.rows.ReplaceCount() != 0 {
+		t.Error("a drifted refresh replaced the projected rows")
+	}
+	if h.snaps.PutCount() != 0 {
+		t.Error("a drifted refresh overwrote the last good snapshot")
+	}
+}
+
+func TestReadWorkflow_Load_DriftWithNothingCachedStillServesTheTab(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	h.google.setRows(http.StatusOK, `{"values":[["name","qty"],["apple","3"]]}`)
+
+	got, err := h.wf.Rows(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("Rows err = %v, want a whole-tab read to survive a missing id column", err)
+	}
+	if got.Stale || len(got.Values) != 1 || got.Values[0]["name"] != "apple" {
+		t.Errorf("Stale = %v, Values = %#v, want the fetched rows", got.Stale, got.Values)
+	}
+	state := h.rows.Contract(sh.ID)
+	if state.OK || state.Reason == "" {
+		t.Errorf("contract = %+v, want the drift persisted with a reason", state)
+	}
+	if h.rows.ReplaceCount() != 0 {
+		t.Error("a drifted refresh replaced the projected rows")
 	}
 }

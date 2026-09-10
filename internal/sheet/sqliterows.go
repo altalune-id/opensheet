@@ -99,6 +99,34 @@ func (s *sqliteRowStore) Replace(
 	return applied, nil
 }
 
+func (s *sqliteRowStore) MarkContract(
+	ctx context.Context, sheetID uuid.UUID, gen int64, contract ContractState,
+) (bool, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return false, err
+	}
+	applied := false
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		current, gErr := s.generation(ctx, tx, tc, sheetID)
+		if gErr != nil {
+			return gErr
+		}
+		if current != gen {
+			return nil
+		}
+		if mErr := s.markContract(ctx, tx, tc, sheetID, contract); mErr != nil {
+			return mErr
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return applied, nil
+}
+
 func (s *sqliteRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error {
 	tc, err := tenant.From(ctx)
 	if err != nil {
@@ -244,6 +272,24 @@ func (s *sqliteRowStore) commitRefresh(
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {
 		return fmt.Errorf("sheet.rows.sqlite: commit refresh: %w", err)
+	}
+	return nil
+}
+
+// NOTE: generation is left alone — the projected rows did not change, so a concurrent refresh has nothing to discard.
+func (s *sqliteRowStore) markContract(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
+) error {
+	stmt := s.sheets.UPDATE(s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason).
+		SET(
+			sqlite.String(sqliteent.SQLiteTime(time.Now())),
+			sqlite.Int(boolToInt(contract.OK)),
+			sqlite.String(contract.Reason),
+		).
+		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: mark contract: %w", err)
 	}
 	return nil
 }

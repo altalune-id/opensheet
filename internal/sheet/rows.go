@@ -31,6 +31,8 @@ type RowStore interface {
 	LockSheet(ctx context.Context, sheetID uuid.UUID) (int64, error)
 	// Replace swaps every row for one (sheet, tab) and bumps the generation, iff gen still matches.
 	Replace(ctx context.Context, k SnapshotKey, gen int64, rows []ProjectedRow, contract ContractState) (bool, error)
+	// MarkContract persists what a refresh learned about the contract, leaving the projected rows alone, iff gen still matches.
+	MarkContract(ctx context.Context, sheetID uuid.UUID, gen int64, contract ContractState) (bool, error)
 	// UpsertRow writes one row and bumps the generation, enrolling in the caller's transaction.
 	UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error
 	// ListLive returns the live rows for one (sheet, tab) in row_index order.
