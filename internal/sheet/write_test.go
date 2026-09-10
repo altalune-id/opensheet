@@ -282,7 +282,7 @@ func TestWriteWorkflow_PatchRowRefusesANonWritableSheetWithoutCallingGoogle(t *t
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", false)
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
 	assert.Zero(t, h.google.callCount(), "no request may reach Google for a non-writable sheet")
@@ -452,7 +452,7 @@ func TestWriteWorkflow_PatchRowLocatesTheRowByItsIDColumn(t *testing.T) {
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "2", map[string]any{"name": "bob2"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "2", map[string]any{"name": "bob2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "2", "name": "bob2"}, row)
 
@@ -482,7 +482,7 @@ func TestWriteWorkflow_PatchRowIndexArithmeticSurvivesAnInteriorBlankRow(t *test
 			sh, _ := h.seed(t, "Rates", true)
 			h.google.setTable(http.StatusOK, blankRowTable)
 
-			_, err := h.wf.PatchRow(t.Context(), sh, tc.id, map[string]any{"name": "next"})
+			_, err := h.wf.PatchRow(t.Context(), sh, tc.id, map[string]any{"name": "next"}, "")
 			require.NoError(t, err)
 
 			req := h.google.lastOf(t, http.MethodPut)
@@ -500,7 +500,7 @@ func TestWriteWorkflow_PatchRowRefusesToPatchTheInteriorBlankRowItSkipped(t *tes
 	sh, _ := h.seed(t, "Rates", true)
 	h.google.setTable(http.StatusOK, blankRowTable)
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "", map[string]any{"name": "next"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "", map[string]any{"name": "next"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsRowNotFoundError(err), "a blank slot carries no id and is not addressable: %v", err)
 }
@@ -516,7 +516,7 @@ func TestWriteWorkflow_PatchRowReadsFreshRatherThanTheSnapshot(t *testing.T) {
 		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
 	})
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 
 	got := h.google.lastOf(t, http.MethodGet)
@@ -534,7 +534,7 @@ func TestWriteWorkflow_PatchRowRejectsAnEmptyPatch(t *testing.T) {
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", nil)
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", nil, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsInvalidRowError(err), "got %v", err)
 	assert.Zero(t, h.google.callCount())
@@ -614,7 +614,7 @@ func TestWriteWorkflow_PatchRowErrors(t *testing.T) {
 			sh, _ := h.seed(t, "Rates", true)
 			h.google.setTable(http.StatusOK, tc.table)
 
-			_, err := h.wf.PatchRow(t.Context(), sh, tc.id, tc.patch)
+			_, err := h.wf.PatchRow(t.Context(), sh, tc.id, tc.patch, "")
 			require.Error(t, err)
 			assert.True(t, tc.is(err), "got %v", err)
 			assert.Equal(t, tc.wantStatus, appErrorOf(t, err).HTTPStatus())
@@ -631,7 +631,7 @@ func TestWriteWorkflow_PatchRowStringifiesNonStringPatchValues(t *testing.T) {
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": 1250000})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": 1250000}, "")
 	require.NoError(t, err)
 	assert.Equal(t, "1250000", row["name"])
 	assert.NotContains(t, h.google.lastOf(t, http.MethodPut).body, `"1250000"`,
@@ -650,7 +650,7 @@ func TestWriteWorkflow_PatchRowKeysTheResponseLikeTheReadPath(t *testing.T) {
 	sh, _ := h.seed(t, "Rates", true)
 	h.google.setTable(http.StatusOK, `{"values":[["id","","name","name"],["1","x","ada","dup"]]}`)
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 
 	names, _ := gsheet.NormalizeHeaders([]string{"id", "", "name", "name"})
@@ -670,7 +670,7 @@ func TestWriteWorkflow_PatchRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
 	})
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	require.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
 
@@ -701,7 +701,7 @@ func TestWriteWorkflow_PatchRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *te
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), h.units.runs.Load(),
 		"the Google read, the Google write and the projection write share one transaction")
@@ -719,7 +719,7 @@ func TestWriteWorkflow_PatchRow_RefusesToWriteTheDeletedAtColumn(t *testing.T) {
 			sh, _ := h.seed(t, "Rates", true)
 			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
 
-			_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"})
+			_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"}, "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
@@ -741,7 +741,7 @@ func TestWriteWorkflow_PatchRow_KeepsATombstoneItDidNotWrite(t *testing.T) {
 		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}, DeletedAt: &deletedAt},
 	})
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row, "deleted_at is stripped from the served row")
 	assert.Contains(t, h.google.lastOf(t, http.MethodPut).body, "2026-01-02T03:04:05Z",
@@ -768,7 +768,7 @@ func TestWriteWorkflow_PatchRow_ARebuildOverTheLimitPurgesInsteadOfStoring(t *te
 		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
 	})
 
-	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err, "the row is already in the sheet; an oversized rebuild cannot un-write it")
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
 
@@ -794,7 +794,7 @@ func TestWriteWorkflow_PatchRow_AFailedSnapshotPutLeavesTheProjectionAlone(t *te
 	})
 	h.snaps.PutErr = stubError("cache down")
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 
 	live, err := h.rows.ListLive(t.Context(), key)
@@ -812,7 +812,7 @@ func TestWriteWorkflow_PatchRow_APartialProjectionPurgesRatherThanCachingATrunca
 	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
 	h.snaps.Seed(key, sheet.Snapshot{ETag: "etag", Payload: []byte(`[]`)})
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 
 	live, err := h.rows.ListLive(t.Context(), key)
@@ -832,7 +832,7 @@ func TestWriteWorkflow_PatchRow_RefusesADuplicateDeletedAtColumn(t *testing.T) {
 	sh, _ := h.seed(t, "Rates", true)
 	h.google.setTable(http.StatusOK, `{"values":[["id","deleted_at","Deleted At"],["1","",""]]}`)
 
-	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"id": "x"})
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"id": "x"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsDuplicateColumnError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -860,7 +860,7 @@ func TestWriteWorkflow_CreateRowRefusesANonWritableSheetWithoutCallingGoogle(t *
 	sh, _ := h.seed(t, "Rates", false)
 	h.seedContract(sh)
 
-	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
 	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
@@ -874,7 +874,7 @@ func TestWriteWorkflow_ReplaceRowRefusesANonWritableSheetWithoutCallingGoogle(t 
 	sh, _ := h.seed(t, "Rates", false)
 	h.seedContract(sh)
 
-	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
 	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
@@ -886,7 +886,7 @@ func TestWriteWorkflow_CreateRow_GeneratesAnIDAndAppendsInHeaderOrder(t *testing
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "", "")
 	require.NoError(t, err)
 	assert.Len(t, row.ID, 21, "an id the body omits is a generated 21-character nanoid")
 	assert.Equal(t, gsheet.Row{"id": row.ID, "name": "cyd"}, row.Data)
@@ -904,7 +904,7 @@ func TestWriteWorkflow_CreateRow_HonoursASuppliedIDAndWritesOmittedColumnsEmpty(
 	sh, _ := h.seed(t, "Rates", true)
 	h.google.setTable(http.StatusOK, idNameNoteTable)
 
-	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "my-own", "name": "zed"})
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "my-own", "name": "zed"}, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "my-own", row.ID, "a supplied id is honoured verbatim")
 	assert.Equal(t, gsheet.Row{"id": "my-own", "name": "zed", "note": ""}, row.Data)
@@ -929,7 +929,7 @@ func TestWriteWorkflow_CreateRow_RefusesAnIDTheTabAlreadyHolds(t *testing.T) {
 			sh, _ := h.seed(t, "Rates", true)
 			h.google.setTable(http.StatusOK, tc.table)
 
-			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": tc.id, "name": "cyd"})
+			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": tc.id, "name": "cyd"}, "", "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -950,7 +950,7 @@ func TestWriteWorkflow_CreateRow_RefusesTheDeletedAtColumn(t *testing.T) {
 			sh, _ := h.seed(t, "Rates", true)
 			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
 
-			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd", header: "2026-09-10T04:11:09Z"})
+			_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd", header: "2026-09-10T04:11:09Z"}, "", "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
@@ -966,7 +966,7 @@ func TestWriteWorkflow_CreateRow_RefusesAnUnknownColumn(t *testing.T) {
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"nope": "x"})
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"nope": "x"}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsUnknownColumnError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus(),
@@ -981,7 +981,7 @@ func TestWriteWorkflow_CreateRow_RefusesABlankSuppliedID(t *testing.T) {
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "  ", "name": "cyd"})
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"id": "  ", "name": "cyd"}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsInvalidRowError(err), "got %T: %v", err, err)
 	for _, r := range h.google.recorded() {
@@ -1003,7 +1003,7 @@ func TestWriteWorkflow_CreateRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
 	})
 
-	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "", "")
 	require.NoError(t, err)
 	afterWrite := h.google.callCount()
 
@@ -1027,7 +1027,7 @@ func TestWriteWorkflow_CreateRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *t
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"})
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), h.units.runs.Load(),
 		"the Google read, the append and the projection write share one transaction")
@@ -1041,7 +1041,7 @@ func TestWriteWorkflow_ReplaceRow_ClearsAnOmittedColumnWhereAPatchLeavesItAlone(
 	h.seedContract(sh)
 	h.google.setTable(http.StatusOK, idNameNoteTable)
 
-	replaced, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	replaced, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2", "note": ""}, replaced.Data,
 		"a known column absent from the body is cleared")
@@ -1054,7 +1054,7 @@ func TestWriteWorkflow_ReplaceRow_ClearsAnOmittedColumnWhereAPatchLeavesItAlone(
 	patchSheet, _ := patched.seed(t, "Rates", true)
 	patched.google.setTable(http.StatusOK, idNameNoteTable)
 
-	row, err := patched.wf.PatchRow(t.Context(), patchSheet, "1", map[string]any{"name": "ada2"})
+	row, err := patched.wf.PatchRow(t.Context(), patchSheet, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2", "note": "keep"}, row,
 		"the same body through PATCH leaves the omitted column untouched")
@@ -1067,7 +1067,7 @@ func TestWriteWorkflow_ReplaceRow_AcceptsABodyIDEqualToThePathID(t *testing.T) {
 	sh, _ := h.seed(t, "Rates", true)
 	h.seedContract(sh)
 
-	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "1", "name": "ada2"})
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "1", "name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row.Data)
 	assert.Contains(t, h.google.lastOf(t, http.MethodPut).body, `["1","ada2"]`)
@@ -1079,7 +1079,7 @@ func TestWriteWorkflow_ReplaceRow_RefusesABodyIDThatRenamesTheRow(t *testing.T) 
 	sh, _ := h.seed(t, "Rates", true)
 	h.seedContract(sh)
 
-	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "2", "name": "ada2"})
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"id": "2", "name": "ada2"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsIDMismatchError(err), "got %T: %v", err, err)
 	ae := appErrorOf(t, err)
@@ -1100,7 +1100,7 @@ func TestWriteWorkflow_ReplaceRow_RefusesTheDeletedAtColumn(t *testing.T) {
 			h.seedContract(sh)
 			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
 
-			_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"})
+			_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{header: "2026-09-10T04:11:09Z"}, "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
@@ -1129,7 +1129,7 @@ func TestWriteWorkflow_ReplaceRow_RefusesAnAbsentOrTombstonedRow(t *testing.T) {
 			h.seedContract(sh)
 			h.google.setTable(http.StatusOK, tc.table)
 
-			_, err := h.wf.ReplaceRow(t.Context(), sh, tc.id, map[string]any{"name": "nobody"})
+			_, err := h.wf.ReplaceRow(t.Context(), sh, tc.id, map[string]any{"name": "nobody"}, "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsRowNotFoundError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusNotFound, appErrorOf(t, err).HTTPStatus())
@@ -1146,7 +1146,7 @@ func TestWriteWorkflow_ReplaceRow_RefusesADriftedContractWithoutCallingGoogle(t 
 	sh, _ := h.seed(t, "Rates", true)
 	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: false, Reason: "duplicate id"})
 
-	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsContractViolationError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -1164,7 +1164,7 @@ func TestWriteWorkflow_ReplaceRow_KeepsTheSoftDeleteColumnEmptyOnALiveRow(t *tes
 		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
 	})
 
-	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row.Data, "deleted_at is stripped from the served row")
 
@@ -1185,7 +1185,7 @@ func TestWriteWorkflow_ReplaceRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada", "note": "keep"}},
 	})
 
-	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	afterWrite := h.google.callCount()
 
@@ -1222,7 +1222,7 @@ func TestWriteWorkflow_CreateRowsRefusesANonWritableSheetWithoutCallingGoogle(t 
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", false)
 
-	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{{"name": "cyd"}})
+	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{{"name": "cyd"}}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
 	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
@@ -1245,7 +1245,7 @@ func TestWriteWorkflow_CreateRows_AppendsEveryRowInOneCallAndProjectsSequentialI
 		{"name": "cyd"},
 		{"id": "mine", "name": "dee"},
 		{"name": "eve"},
-	})
+	}, "", "")
 	require.NoError(t, err)
 	require.Len(t, ids, 3)
 	assert.Equal(t, "mine", ids[1], "the ids come back in request order")
@@ -1293,7 +1293,7 @@ func TestBatchCreate_InvalidLastRowWritesNothing(t *testing.T) {
 		{"name": "cyd"},
 		{"name": "dee"},
 		{"nope": "eve"},
-	})
+	}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsUnknownColumnError(err), "got %T: %v", err, err)
 
@@ -1310,7 +1310,7 @@ func TestWriteWorkflow_CreateRows_RefusesADuplicateIDWithinTheBatch(t *testing.T
 	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
 		{"id": "same", "name": "cyd"},
 		{"id": "same", "name": "dee"},
-	})
+	}, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -1337,7 +1337,7 @@ func TestWriteWorkflow_CreateRows_RefusesAnIDTheTabAlreadyHolds(t *testing.T) {
 			_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
 				{"name": "cyd"},
 				{"id": tc.id, "name": "dee"},
-			})
+			}, "", "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -1359,7 +1359,7 @@ func TestWriteWorkflow_CreateRows_RefusesTheDeletedAtColumn(t *testing.T) {
 			_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
 				{"name": "cyd"},
 				{"name": "dee", header: "2026-09-10T04:11:09Z"},
-			})
+			}, "", "")
 			require.Error(t, err)
 			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
@@ -1389,7 +1389,7 @@ func TestWriteWorkflow_CreateRows_RefusesAnUnknownColumnAndABlankSuppliedID(t *t
 			h := newWriteHarness(t)
 			sh, _ := h.seed(t, "Rates", true)
 
-			_, err := h.wf.CreateRows(t.Context(), sh, tc.batch)
+			_, err := h.wf.CreateRows(t.Context(), sh, tc.batch, "", "")
 			require.Error(t, err)
 			assert.True(t, tc.is(err), "got %T: %v", err, err)
 			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
@@ -1408,7 +1408,7 @@ func TestWriteWorkflow_CreateRows_WritesOmittedColumnsEmpty(t *testing.T) {
 	ids, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
 		{"id": "one", "name": "cyd"},
 		{"id": "two", "note": "kept"},
-	})
+	}, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"one", "two"}, ids)
 	body := h.google.lastOf(t, http.MethodPost).body
@@ -1421,7 +1421,7 @@ func TestWriteWorkflow_CreateRows_RefusesAnEmptyBatchAndOneOverTheRowLimit(t *te
 	h := newWriteHarness(t)
 	sh, _ := h.seed(t, "Rates", true)
 
-	_, err := h.wf.CreateRows(t.Context(), sh, nil)
+	_, err := h.wf.CreateRows(t.Context(), sh, nil, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsInvalidRowError(err), "got %T: %v", err, err)
 
@@ -1429,7 +1429,7 @@ func TestWriteWorkflow_CreateRows_RefusesAnEmptyBatchAndOneOverTheRowLimit(t *te
 	for i := range over {
 		over[i] = map[string]any{"name": "cyd"}
 	}
-	_, err = h.wf.CreateRows(t.Context(), sh, over)
+	_, err = h.wf.CreateRows(t.Context(), sh, over, "", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsBatchTooLargeError(err), "got %T: %v", err, err)
 	ae := appErrorOf(t, err)
@@ -1446,7 +1446,7 @@ func TestWriteWorkflow_CreateRows_RunsTheLockAndTheProjectionInOneUnitOfWork(t *
 
 	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
 		{"name": "cyd"}, {"name": "dee"}, {"name": "eve"},
-	})
+	}, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), h.units.runs.Load(),
 		"the Google read, the one append and every projection write share one transaction")
@@ -1483,7 +1483,7 @@ func TestWriteWorkflow_SoftDeleteRowRefusesANonWritableSheetWithoutCallingGoogle
 	sh.SoftDelete = true
 	h.seedContract(sh)
 
-	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
 	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
@@ -1504,7 +1504,7 @@ func TestWriteWorkflow_SoftDeleteRow_WritesAnRFC3339TombstoneAndDropsTheRowFromT
 	})
 	before := h.rows.Generation(sh.ID)
 
-	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1", ""))
 
 	req := h.google.lastOf(t, http.MethodPut)
 	assert.Contains(t, req.url, "valueInputOption=RAW", "a tombstone is a cell value like any other, so it is written RAW")
@@ -1550,14 +1550,14 @@ func TestWriteWorkflow_SoftDeleteRow_IsIdempotentAndWritesOnce(t *testing.T) {
 		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
 	})
 
-	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1", ""))
 	afterFirst := h.google.callCount()
 	require.Equal(t, 1, updateCount(h.google))
 	first := h.rows.Projected(key)
 	require.Len(t, first, 1)
 	require.NotNil(t, first[0].DeletedAt)
 
-	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"), "a delete of a tombstoned row is 204, not an error")
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1", ""), "a delete of a tombstoned row is 204, not an error")
 	assert.Equal(t, 1, updateCount(h.google), "the second delete must be answered from the projection")
 	assert.Equal(t, afterFirst, h.google.callCount(), "an already-tombstoned row costs no Google call at all")
 
@@ -1575,7 +1575,7 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesAnUnknownID(t *testing.T) {
 	h.seedContract(sh)
 	h.google.setTable(http.StatusOK, softDeleteTable)
 
-	err := h.wf.SoftDeleteRow(t.Context(), sh, "99")
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "99", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsRowNotFoundError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusNotFound, appErrorOf(t, err).HTTPStatus())
@@ -1590,7 +1590,7 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesATabWithNoDeletedAtColumnWithoutCall
 	sh, _ := h.seed(t, "Rates", true)
 	h.seedContract(sh)
 
-	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsSoftDeleteUnsupportedError(err), "got %T: %v", err, err)
 	ae := appErrorOf(t, err)
@@ -1609,7 +1609,7 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesADeletedAtColumnDroppedSinceTheLastR
 	h.seedContract(sh)
 	h.google.setTable(http.StatusOK, idNameTable)
 
-	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsSoftDeleteUnsupportedError(err), "got %T: %v", err, err)
 	assert.Zero(t, updateCount(h.google), "the refusal precedes the write")
@@ -1622,7 +1622,7 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesADriftedContractWithoutCallingGoogle
 	sh.SoftDelete = true
 	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: false, Reason: "duplicate id"})
 
-	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1", "")
 	require.Error(t, err)
 	assert.True(t, sheet.IsContractViolationError(err), "got %T: %v", err, err)
 	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
@@ -1638,7 +1638,7 @@ func TestWriteWorkflow_SoftDeleteRow_RunsTheLockAndTheProjectionInOneUnitOfWork(
 	h.seedContract(sh)
 	h.google.setTable(http.StatusOK, softDeleteTable)
 
-	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1", ""))
 	assert.Equal(t, int64(1), h.units.runs.Load(),
 		"the Google read, the Google write and the projection write share one transaction")
 }
@@ -1657,7 +1657,7 @@ func TestWriteWorkflow_SoftDeleteRow_RemovesTheRowFromBothReadsWithNoRefetch(t *
 		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
 	})
 
-	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1", ""))
 	afterWrite := h.google.callCount()
 
 	got, err := h.rf.Rows(t.Context(), sh)
@@ -1667,4 +1667,179 @@ func TestWriteWorkflow_SoftDeleteRow_RemovesTheRowFromBothReadsWithNoRefetch(t *
 	_, err = h.rf.RowByID(t.Context(), sh, "1")
 	assert.True(t, sheet.IsRowNotFoundError(err), "a tombstoned row reads back as not found: %v", err)
 	assert.Equal(t, afterWrite, h.google.callCount(), "both reads must be answered from the rebuilt snapshot")
+}
+
+const tombstonedFirstTable = `{"values":[["id","name","deleted_at"],["1","ada","2026-01-02T03:04:05Z"]]}`
+
+func quotedTag(tag string) string {
+	return `"` + tag + `"`
+}
+
+func TestWriteWorkflow_PatchRow_ProceedsOnAMatchingIfMatch(t *testing.T) {
+	t.Parallel()
+	for _, header := range []string{quotedTag(etagOf(t, `{"id":"1","name":"ada"}`)), "*",
+		`"aaaa", ` + quotedTag(etagOf(t, `{"id":"1","name":"ada"}`))} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.seedContract(sh)
+
+			row, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"}, header)
+			require.NoError(t, err)
+			assert.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
+			assert.Equal(t, 1, updateCount(h.google))
+		})
+	}
+}
+
+// The tag is compared against the tab read taken inside the lock, so a stale tag refuses the write
+// before Values.Update is called — Google has no conditional write of its own.
+func TestWriteWorkflow_PatchRow_RefusesAStaleIfMatchWithoutWriting(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	_, err := h.wf.PatchRow(t.Context(), sh, "1", map[string]any{"name": "ada2"},
+		quotedTag(etagOf(t, `{"id":"1","name":"stale"}`)))
+	require.Error(t, err)
+	assert.True(t, sheet.IsPreconditionFailedError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusPreconditionFailed, appErrorOf(t, err).HTTPStatus())
+	assert.Equal(t, apperror.CodeSheetPreconditionFailed, appErrorOf(t, err).Code())
+	assert.Zero(t, updateCount(h.google), "a refused precondition must not reach Values.Update")
+}
+
+func TestWriteWorkflow_ReplaceRow_RefusesAStaleIfMatchWithoutWriting(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	_, err := h.wf.ReplaceRow(t.Context(), sh, "1", map[string]any{"name": "ada2"},
+		quotedTag(etagOf(t, `{"id":"1","name":"stale"}`)))
+	require.Error(t, err)
+	assert.True(t, sheet.IsPreconditionFailedError(err), "got %T: %v", err, err)
+	assert.Zero(t, updateCount(h.google))
+}
+
+func TestWriteWorkflow_SoftDeleteRow_RefusesAStaleIfMatchOnALiveRow(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, softDeleteTable)
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1", quotedTag(etagOf(t, `{"id":"1","name":"stale"}`)))
+	require.Error(t, err)
+	assert.True(t, sheet.IsPreconditionFailedError(err), "got %T: %v", err, err)
+	assert.Zero(t, updateCount(h.google))
+}
+
+// A tombstoned row's hash differs from any tag a client still holds, so evaluating the precondition
+// would 412 exactly the retry idempotency exists to answer 204. Idempotency wins, on both paths.
+func TestWriteWorkflow_SoftDeleteRow_AnswersATombstonedRowBeforeEvaluatingIfMatch(t *testing.T) {
+	t.Parallel()
+	deletedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cases := []struct {
+		name      string
+		projected []sheet.ProjectedRow
+	}{
+		{
+			name: "answered from the projection",
+			projected: []sheet.ProjectedRow{
+				{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}, DeletedAt: &deletedAt},
+			},
+		},
+		{name: "answered from the fresh read inside the lock", projected: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			sh.SoftDelete = true
+			h.seedContract(sh)
+			h.google.setTable(http.StatusOK, tombstonedFirstTable)
+			key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+			h.rows.Seed(key, tc.projected)
+
+			require.NoError(t,
+				h.wf.SoftDeleteRow(t.Context(), sh, "1", quotedTag(etagOf(t, `{"id":"1","name":"held-before-the-delete"}`))),
+				"a delete of a tombstoned row is 204 whatever tag it carries")
+			assert.Zero(t, updateCount(h.google), "the tombstone stands, so nothing is rewritten")
+		})
+	}
+}
+
+// Without the key a retried create with a server-generated id silently duplicates the row.
+func TestWriteWorkflow_CreateRow_ReplaysAKeyedRetryRatherThanDuplicating(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	first, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "key-1", "hash-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount(h.google))
+
+	second, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "key-1", "hash-1")
+	require.NoError(t, err)
+	assert.Equal(t, first, second, "the retry replays the first attempt's row, id and tag")
+	assert.Equal(t, 1, appendCount(h.google), "a replayed create must not reach Google a second time")
+	assert.Zero(t, h.unex.Load())
+}
+
+func TestWriteWorkflow_CreateRow_RefusesADifferentBodyUnderTheSameKey(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "key-1", "hash-1")
+	require.NoError(t, err)
+
+	_, err = h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "dee"}, "key-1", "hash-2")
+	require.Error(t, err)
+	assert.True(t, sheet.IsIdempotencyMismatchError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, appErrorOf(t, err).HTTPStatus())
+	assert.Equal(t, 1, appendCount(h.google))
+}
+
+// A reservation left held by a failed append would answer every later retry with a stale error.
+func TestWriteWorkflow_CreateRow_ReleasesTheKeyWhenTheAppendFails(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	h.google.setAppend(http.StatusInternalServerError, `{"error":{"code":500}}`)
+
+	_, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "key-1", "hash-1")
+	require.Error(t, err)
+
+	h.google.setAppend(http.StatusOK, appendedOne)
+	row, err := h.wf.CreateRow(t.Context(), sh, map[string]any{"name": "cyd"}, "key-1", "hash-1")
+	require.NoError(t, err, "the released key must be claimable by a genuine retry")
+	assert.Equal(t, gsheet.Row{"id": row.ID, "name": "cyd"}, row.Data)
+}
+
+func TestWriteWorkflow_CreateRows_ReplaysAKeyedRetryRatherThanDuplicating(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	h.google.setAppend(http.StatusOK, appendedThree)
+	batch := []map[string]any{{"id": "a", "name": "cyd"}, {"id": "b", "name": "dee"}, {"id": "c", "name": "eve"}}
+
+	first, err := h.wf.CreateRows(t.Context(), sh, batch, "key-1", "hash-1")
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b", "c"}, first)
+	require.Equal(t, 1, appendCount(h.google))
+
+	second, err := h.wf.CreateRows(t.Context(), sh, batch, "key-1", "hash-1")
+	require.NoError(t, err)
+	assert.Equal(t, first, second, "the retry replays the batch's ids in request order")
+	assert.Equal(t, 1, appendCount(h.google), "a replayed batch must not reach Google a second time")
+	assert.Zero(t, h.unex.Load())
 }

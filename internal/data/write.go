@@ -22,6 +22,7 @@ const maxWriteBodyBytes = 1 << 20
 
 const (
 	idempotencyHeader = "Idempotency-Key"
+	ifMatchHeader     = "If-Match"
 	numericColumnsKey = "numeric_columns"
 )
 
@@ -76,13 +77,12 @@ func (h *handler) appendRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	hash, err := cellsHash(cells)
+	hash, err := requestHash(cells)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	n, err := h.writer.Append(r.Context(), sc.sheet, cells,
-		strings.TrimSpace(r.Header.Get(idempotencyHeader)), hash)
+	n, err := h.writer.Append(r.Context(), sc.sheet, cells, idempotencyKeyOf(r), hash)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -111,7 +111,7 @@ func (h *handler) patchRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	row, err := h.writer.PatchRow(r.Context(), sc.sheet, r.PathValue("id"), patch)
+	row, err := h.writer.PatchRow(r.Context(), sc.sheet, r.PathValue("id"), patch, ifMatchOf(r))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -141,7 +141,12 @@ func (h *handler) createRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	row, err := h.writer.CreateRow(r.Context(), sc.sheet, fields)
+	hash, err := requestHash(fields)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	row, err := h.writer.CreateRow(r.Context(), sc.sheet, fields, idempotencyKeyOf(r), hash)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -170,7 +175,12 @@ func (h *handler) createRows(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	ids, err := h.writer.CreateRows(r.Context(), sc.sheet, rows)
+	hash, err := requestHash(rows)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	ids, err := h.writer.CreateRows(r.Context(), sc.sheet, rows, idempotencyKeyOf(r), hash)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -199,7 +209,7 @@ func (h *handler) replaceRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	row, err := h.writer.ReplaceRow(r.Context(), sc.sheet, r.PathValue("id"), fields)
+	row, err := h.writer.ReplaceRow(r.Context(), sc.sheet, r.PathValue("id"), fields, ifMatchOf(r))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -219,7 +229,7 @@ func (h *handler) deleteRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, aErr)
 		return
 	}
-	if dErr := h.writer.SoftDeleteRow(r.Context(), sc.sheet, r.PathValue("id")); dErr != nil {
+	if dErr := h.writer.SoftDeleteRow(r.Context(), sc.sheet, r.PathValue("id"), ifMatchOf(r)); dErr != nil {
 		h.fail(w, r, dErr)
 		return
 	}
@@ -326,10 +336,18 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-// NOTE: the cells, not the raw bytes — a retry that re-serializes its body, or sends the bare-array
+func idempotencyKeyOf(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get(idempotencyHeader))
+}
+
+func ifMatchOf(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get(ifMatchHeader))
+}
+
+// NOTE: the parsed body, not the raw bytes — a retry that re-serializes its body, or sends the bare-array
 // shape, must replay rather than read as a different body and be refused 422.
-func cellsHash(cells []any) (string, error) {
-	canonical, err := json.Marshal(cells)
+func requestHash(body any) (string, error) {
+	canonical, err := json.Marshal(body)
 	if err != nil {
 		return "", err
 	}

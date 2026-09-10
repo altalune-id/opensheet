@@ -102,6 +102,7 @@ const (
 	CodeSheetIDMismatch            = "SHT027"
 	CodeSheetBatchTooLarge         = "SHT028"
 	CodeSheetSoftDeleteUnsupported = "SHT029"
+	CodeSheetPreconditionFailed    = "SHT030"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

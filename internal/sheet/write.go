@@ -90,10 +90,11 @@ type writeOutcome struct {
 }
 
 type rowUpdate struct {
-	situation string
-	liveOnly  bool
-	settled   func(row []string, cols rowColumns) bool
-	build     func(headers, row []string, cols rowColumns) ([]any, error)
+	situation    string
+	liveOnly     bool
+	settled      func(row []string, cols rowColumns) bool
+	precondition func(headers, row []string) error
+	build        func(headers, row []string, cols rowColumns) ([]any, error)
 }
 
 type appendResult struct {
@@ -129,45 +130,36 @@ func (w *WriteWorkflow) Append(ctx context.Context, sh *Sheet, cells []any, idem
 	}
 	span.SetAttributes(attribute.String("sheet.tab", tgt.tab))
 
-	var key IdempotencyKey
-	reserved := false
-	if idemKey != "" {
-		key = IdempotencyKey{SheetID: sh.ID, Tab: tgt.tab, Key: idemKey}
-		claimed, prior, rErr := w.attempts.Reserve(ctx, key, bodyHash, IdempotencyTTL)
-		if rErr != nil {
-			return 0, recordSpanError(span, w.unexpected(ctx, "sheet.Append: reserve attempt", rErr,
-				"sheet_id", sh.ID, "tab", tgt.tab, "idempotency_key", idemKey))
+	held, err := w.reserve(ctx, sh, tgt.tab, idemKey, bodyHash, "sheet.Append")
+	if err != nil {
+		return 0, recordSpanError(span, err)
+	}
+	if held.replayed {
+		var prior appendResult
+		if pErr := w.prior(ctx, sh, held, bodyHash, "sheet.Append", &prior); pErr != nil {
+			return 0, recordSpanError(span, pErr)
 		}
-		if !claimed {
-			n, pErr := w.replay(ctx, sh, prior, idemKey, bodyHash)
-			if pErr != nil {
-				return 0, recordSpanError(span, pErr)
-			}
-			span.SetAttributes(attribute.Bool("sheet.replayed", true))
-			w.log.DebugContext(ctx, "sheet: replaying a completed write attempt",
-				"sheet_id", sh.ID, "tab", tgt.tab, "idempotency_key", idemKey)
-			return n, nil
-		}
-		reserved = true
+		span.SetAttributes(attribute.Bool("sheet.replayed", true))
+		w.log.DebugContext(ctx, "sheet: replaying a completed write attempt",
+			"sheet_id", sh.ID, "tab", tgt.tab, "idempotency_key", idemKey)
+		return prior.Appended, nil
 	}
 
 	res, err := tgt.writer.Append(ctx, tgt.src.GoogleFileID, tgt.tab, cells)
 	if err != nil {
-		if reserved {
-			w.release(ctx, sh, key)
-		}
+		w.releaseHeld(ctx, sh, held)
 		return 0, recordSpanError(span, w.fail(ctx, "sheet.Append: append row", err, sh, tgt.src))
 	}
-	if reserved {
-		w.complete(ctx, sh, key, res.Rows)
-	}
+	w.completeHeld(ctx, sh, held, appendResult{Appended: res.Rows})
 	// NOTE: 2b's keyed create supersedes this purge — it is header-aware, and takes the row_index from res.StartRow rather than refetching.
 	w.purge(ctx, sh)
 	return res.Rows, nil
 }
 
 // PatchRow overwrites the patched columns of the row sh's id column matches to id, and returns the row as written.
-func (w *WriteWorkflow) PatchRow(ctx context.Context, sh *Sheet, id string, patch map[string]any) (gsheet.Row, error) {
+func (w *WriteWorkflow) PatchRow(
+	ctx context.Context, sh *Sheet, id string, patch map[string]any, ifMatch string,
+) (gsheet.Row, error) {
 	ctx, span := tracer.Start(ctx, "sheet.PatchRow",
 		trace.WithAttributes(
 			attribute.String("sheet.id", sh.ID.String()),
@@ -191,7 +183,8 @@ func (w *WriteWorkflow) PatchRow(ctx context.Context, sh *Sheet, id string, patc
 
 	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
 	plan := rowUpdate{
-		situation: "sheet.PatchRow",
+		situation:    "sheet.PatchRow",
+		precondition: matchRowTag(ifMatch, id),
 		build: func(headers, row []string, cols rowColumns) ([]any, error) {
 			return mergeRow(headers, row, cols, patch, tgt.tab)
 		},
@@ -238,6 +231,12 @@ func (w *WriteWorkflow) applyUpdate(
 		// NOTE: the fresh read is what decides a delete already applied, so a retry the projection could not answer costs no second write and keeps the first tombstone's instant.
 		if plan.settled != nil && plan.settled(tbl.Rows[rowIdx], cols) {
 			return nil
+		}
+		// NOTE: inside the lock and against the fresh read, because Values.Update takes no If-Match — outside it a check-then-write proves nothing.
+		if plan.precondition != nil {
+			if mErr := plan.precondition(tbl.Headers, tbl.Rows[rowIdx]); mErr != nil {
+				return mErr
+			}
 		}
 		cells, bErr := plan.build(tbl.Headers, tbl.Rows[rowIdx], cols)
 		if bErr != nil {
@@ -345,40 +344,75 @@ func (w *WriteWorkflow) target(ctx context.Context, sh *Sheet) (writeTarget, err
 	return writeTarget{writer: writer, src: src, tab: tab}, nil
 }
 
-func (w *WriteWorkflow) replay(ctx context.Context, sh *Sheet, prior Attempt, idemKey, bodyHash string) (int, error) {
-	if prior.BodyHash != bodyHash {
-		return 0, &IdempotencyMismatchError{Key: idemKey}
-	}
-	// NOTE: never a fabricated success — we do not know whether Google applied the earlier attempt's row.
-	if !prior.Done {
-		return 0, &WriteInFlightError{Key: idemKey}
-	}
-	var out appendResult
-	if err := json.Unmarshal(prior.Payload, &out); err != nil {
-		return 0, w.unexpected(ctx, "sheet.Append: decode prior attempt", err,
-			"sheet_id", sh.ID, "idempotency_key", idemKey)
-	}
-	return out.Appended, nil
+type reservation struct {
+	key      IdempotencyKey
+	attempt  Attempt
+	held     bool
+	replayed bool
 }
 
-func (w *WriteWorkflow) complete(ctx context.Context, sh *Sheet, key IdempotencyKey, appended int) {
-	payload, err := json.Marshal(appendResult{Appended: appended})
+// NOTE: Reserve is a lock taken before the upstream call, so two simultaneous retries cannot both write; an empty key opts out and the write is unguarded.
+func (w *WriteWorkflow) reserve(
+	ctx context.Context, sh *Sheet, tab, idemKey, bodyHash, situation string,
+) (reservation, error) {
+	if idemKey == "" {
+		return reservation{}, nil
+	}
+	held := reservation{key: IdempotencyKey{SheetID: sh.ID, Tab: tab, Key: idemKey}}
+	claimed, prior, err := w.attempts.Reserve(ctx, held.key, bodyHash, IdempotencyTTL)
 	if err != nil {
-		_ = w.unexpected(ctx, "sheet.Append: serialize attempt", err,
-			"sheet_id", sh.ID, "idempotency_key", key.Key)
+		return reservation{}, w.unexpected(ctx, situation+": reserve attempt", err,
+			"sheet_id", sh.ID, "tab", tab, "idempotency_key", idemKey)
+	}
+	if !claimed {
+		held.attempt, held.replayed = prior, true
+		return held, nil
+	}
+	held.held = true
+	return held, nil
+}
+
+func (w *WriteWorkflow) prior(
+	ctx context.Context, sh *Sheet, held reservation, bodyHash, situation string, out any,
+) error {
+	if held.attempt.BodyHash != bodyHash {
+		return &IdempotencyMismatchError{Key: held.key.Key}
+	}
+	// NOTE: never a fabricated success — we do not know whether Google applied the earlier attempt's row.
+	if !held.attempt.Done {
+		return &WriteInFlightError{Key: held.key.Key}
+	}
+	if err := json.Unmarshal(held.attempt.Payload, out); err != nil {
+		return w.unexpected(ctx, situation+": decode prior attempt", err,
+			"sheet_id", sh.ID, "idempotency_key", held.key.Key)
+	}
+	return nil
+}
+
+func (w *WriteWorkflow) completeHeld(ctx context.Context, sh *Sheet, held reservation, result any) {
+	if !held.held {
 		return
 	}
-	if err := w.attempts.Complete(ctx, key, payload, IdempotencyTTL); err != nil {
-		_ = w.unexpected(ctx, "sheet.Append: complete attempt", err,
-			"sheet_id", sh.ID, "idempotency_key", key.Key)
+	payload, err := json.Marshal(result)
+	if err != nil {
+		_ = w.unexpected(ctx, "sheet.write: serialize attempt", err,
+			"sheet_id", sh.ID, "idempotency_key", held.key.Key)
+		return
+	}
+	if err := w.attempts.Complete(ctx, held.key, payload, IdempotencyTTL); err != nil {
+		_ = w.unexpected(ctx, "sheet.write: complete attempt", err,
+			"sheet_id", sh.ID, "idempotency_key", held.key.Key)
 	}
 }
 
 // NOTE: releasing lets a genuine retry claim the key again rather than being answered forever with a stale error.
-func (w *WriteWorkflow) release(ctx context.Context, sh *Sheet, key IdempotencyKey) {
-	if err := w.attempts.Release(ctx, key); err != nil {
-		_ = w.unexpected(ctx, "sheet.Append: release attempt", err,
-			"sheet_id", sh.ID, "idempotency_key", key.Key)
+func (w *WriteWorkflow) releaseHeld(ctx context.Context, sh *Sheet, held reservation) {
+	if !held.held {
+		return
+	}
+	if err := w.attempts.Release(ctx, held.key); err != nil {
+		_ = w.unexpected(ctx, "sheet.write: release attempt", err,
+			"sheet_id", sh.ID, "idempotency_key", held.key.Key)
 	}
 }
 
@@ -579,6 +613,36 @@ func idMustMatch(id string) func(string, any) error {
 		}
 		return &IDMismatchError{PathID: id, BodyID: body}
 	}
+}
+
+// NOTE: an absent header is last-write-wins by design, so a simple client is unaffected.
+func matchRowTag(ifMatch, id string) func(headers, row []string) error {
+	if strings.TrimSpace(ifMatch) == "" {
+		return nil
+	}
+	return func(headers, row []string) error {
+		tag, err := rowTagOf(headers, row)
+		if err != nil {
+			return err
+		}
+		if MatchesETag(ifMatch, tag) {
+			return nil
+		}
+		return &PreconditionFailedError{ID: id, ETag: tag}
+	}
+}
+
+// NOTE: rowOf over the fresh cells, so the tag compared here is the one a row read or a row write handed the client.
+func rowTagOf(headers, cells []string) (string, error) {
+	values := make([]any, len(headers))
+	for i := range headers {
+		values[i] = cellAt(cells, i)
+	}
+	raw, err := marshalRowData(rowOf(headers, values))
+	if err != nil {
+		return "", err
+	}
+	return etagOf([]byte(raw)), nil
 }
 
 func columnOf(headers []string, name, tab string) (int, error) {

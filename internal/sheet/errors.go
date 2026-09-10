@@ -848,3 +848,32 @@ func IsSoftDeleteUnsupportedError(err error) bool {
 	_, ok := errors.AsType[*SoftDeleteUnsupportedError](err)
 	return ok
 }
+
+// PreconditionFailedError signals a conditional write whose If-Match tag does not name the row as it stands.
+type PreconditionFailedError struct {
+	ID   string
+	ETag string
+}
+
+func (e *PreconditionFailedError) Error() string {
+	return fmt.Sprintf("sheet: row %q: the if-match tag does not match %q", e.ID, e.ETag)
+}
+
+// ToAppError maps PreconditionFailedError to a FailedPrecondition envelope its own status override lifts to 412.
+func (e *PreconditionFailedError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetPreconditionFailed,
+		"The row changed since you read it, so the write was refused: read it again and retry with the new tag",
+		codes.FailedPrecondition,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetPreconditionFailed,
+			Meta: map[string]string{"row_id": e.ID, "etag": e.ETag},
+		},
+	)
+}
+
+// IsPreconditionFailedError reports whether err's tree contains a *PreconditionFailedError.
+func IsPreconditionFailedError(err error) bool {
+	_, ok := errors.AsType[*PreconditionFailedError](err)
+	return ok
+}

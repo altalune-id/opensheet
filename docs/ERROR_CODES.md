@@ -159,6 +159,7 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT027` | `apperror.CodeSheetIDMismatch`            | Sheet Row ID Mismatch         |
 | `SHT028` | `apperror.CodeSheetBatchTooLarge`         | Sheet Batch Too Large         |
 | `SHT029` | `apperror.CodeSheetSoftDeleteUnsupported` | Sheet Soft Delete Unsupported |
+| `SHT030` | `apperror.CodeSheetPreconditionFailed`    | Sheet Precondition Failed     |
 
 ## KEY — API keys
 

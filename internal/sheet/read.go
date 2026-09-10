@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -383,6 +384,21 @@ func ttlOf(sh *Sheet, defaultTTL time.Duration) time.Duration {
 func etagOf(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])[:etagHexLen]
+}
+
+// MatchesETag reports whether an If-Match or If-None-Match header names etag.
+func MatchesETag(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	quoted := strconv.Quote(etag)
+	for tag := range strings.SplitSeq(header, ",") {
+		tag = strings.TrimSpace(tag)
+		if tag == "*" || strings.TrimPrefix(tag, "W/") == quoted {
+			return true
+		}
+	}
+	return false
 }
 
 // NOTE: row_index is the row's position in the fetched tab, so an interior blank row consumes its index rather than compacting the ones below it.

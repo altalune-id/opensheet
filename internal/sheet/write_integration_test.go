@@ -216,7 +216,7 @@ func TestWriteWorkflow_PatchRow_ConcurrentWritesSerialize(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = h.wf.PatchRow(ctx, sh, "1", patches[i])
+			_, errs[i] = h.wf.PatchRow(ctx, sh, "1", patches[i], "")
 		}()
 	}
 	wg.Wait()
@@ -259,7 +259,7 @@ func TestWriteWorkflow_PatchRow_ReadYourWriteOnTheRealProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	row, err := h.wf.PatchRow(ctx, sh, "1", map[string]any{"name": "ada2"})
+	row, err := h.wf.PatchRow(ctx, sh, "1", map[string]any{"name": "ada2"}, "")
 	require.NoError(t, err)
 	require.Equal(t, gsheet.Row{"id": "1", "name": "ada2"}, row)
 	gets, _ := google.counts()
@@ -280,4 +280,58 @@ func TestWriteWorkflow_PatchRow_ReadYourWriteOnTheRealProjection(t *testing.T) {
 	assert.JSONEq(t, `[{"id":"1","name":"ada2"},{"id":"2","name":"bob"}]`, string(snap.Payload))
 	assert.Equal(t, etagOf(t, `[{"id":"1","name":"ada2"},{"id":"2","name":"bob"}]`), snap.ETag)
 	assert.Zero(t, h.unex.Load())
+}
+
+// The comparison must happen inside the per-sheet lock: Google has no conditional write, so two writers
+// holding the same tag would both pass an unserialized check and both write, losing one effect. On its
+// own pool — appDB caps at one connection, which would serialize the pair at the pool and pass vacuously.
+func TestWriteWorkflow_PatchRow_IfMatchRefusesTheLoserUnderRealConcurrency(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedWritableSheet(t, f, f.a, "rates", "Rates")
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	google := newLiveSheet(t, [][]string{{"id", "name", "qty"}, {"1", "ada", "3"}}, 100*time.Millisecond)
+	h := newPgWriteHarness(t, f, sh, google)
+
+	ok, err := h.rows.Replace(ctx, key, 0, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada", "qty": "3"}},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	tag := `"` + etagOf(t, `{"id":"1","name":"ada","qty":"3"}`) + `"`
+	patches := []map[string]any{{"name": "grace"}, {"qty": "9"}}
+	errs := make([]error, len(patches))
+	var wg sync.WaitGroup
+	for i := range patches {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = h.wf.PatchRow(ctx, sh, "1", patches[i], tag)
+		}()
+	}
+	wg.Wait()
+
+	won, refused := 0, 0
+	for i, e := range errs {
+		if e == nil {
+			won++
+			continue
+		}
+		require.True(t, sheet.IsPreconditionFailedError(e), "patch %d failed with %T: %v", i, e, e)
+		require.Equal(t, http.StatusPreconditionFailed, appErrorOf(t, e).HTTPStatus())
+		refused++
+	}
+	assert.Equal(t, 1, won, "exactly one writer may win the tag")
+	assert.Equal(t, 1, refused, "the loser must be refused, never silently applied")
+
+	_, puts := google.counts()
+	assert.Equal(t, 1, puts, "the refused writer must not reach Values.Update")
+
+	live, err := h.rows.ListLive(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, "1", live[0].RowID)
+	assert.Zero(t, h.unex.Load(), "a refused precondition is a client error, not an incident")
 }

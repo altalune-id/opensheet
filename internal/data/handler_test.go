@@ -112,22 +112,29 @@ type patchCall struct {
 	sheetID uuid.UUID
 	rowID   string
 	patch   map[string]any
+	ifMatch string
 }
 
 type rowWriteCall struct {
-	sheetID uuid.UUID
-	rowID   string
-	fields  map[string]any
+	sheetID  uuid.UUID
+	rowID    string
+	fields   map[string]any
+	ifMatch  string
+	idemKey  string
+	bodyHash string
 }
 
 type batchCall struct {
-	sheetID uuid.UUID
-	rows    []map[string]any
+	sheetID  uuid.UUID
+	rows     []map[string]any
+	idemKey  string
+	bodyHash string
 }
 
 type deleteCall struct {
 	sheetID uuid.UUID
 	rowID   string
+	ifMatch string
 }
 
 type fakeWriter struct {
@@ -157,24 +164,32 @@ func (f *fakeWriter) Append(_ context.Context, sh *sheet.Sheet, cells []any, ide
 	return f.appended, nil
 }
 
-func (f *fakeWriter) PatchRow(_ context.Context, sh *sheet.Sheet, id string, patch map[string]any) (gsheet.Row, error) {
-	f.patches = append(f.patches, patchCall{sheetID: sh.ID, rowID: id, patch: patch})
+func (f *fakeWriter) PatchRow(
+	_ context.Context, sh *sheet.Sheet, id string, patch map[string]any, ifMatch string,
+) (gsheet.Row, error) {
+	f.patches = append(f.patches, patchCall{sheetID: sh.ID, rowID: id, patch: patch, ifMatch: ifMatch})
 	if f.patchErr != nil {
 		return nil, f.patchErr
 	}
 	return f.row, nil
 }
 
-func (f *fakeWriter) CreateRow(_ context.Context, sh *sheet.Sheet, fields map[string]any) (sheet.WrittenRow, error) {
-	f.creates = append(f.creates, rowWriteCall{sheetID: sh.ID, fields: fields})
+func (f *fakeWriter) CreateRow(
+	_ context.Context, sh *sheet.Sheet, fields map[string]any, idemKey, bodyHash string,
+) (sheet.WrittenRow, error) {
+	f.creates = append(f.creates, rowWriteCall{
+		sheetID: sh.ID, fields: fields, idemKey: idemKey, bodyHash: bodyHash,
+	})
 	if f.createErr != nil {
 		return sheet.WrittenRow{}, f.createErr
 	}
 	return f.written, nil
 }
 
-func (f *fakeWriter) CreateRows(_ context.Context, sh *sheet.Sheet, rows []map[string]any) ([]string, error) {
-	f.batches = append(f.batches, batchCall{sheetID: sh.ID, rows: rows})
+func (f *fakeWriter) CreateRows(
+	_ context.Context, sh *sheet.Sheet, rows []map[string]any, idemKey, bodyHash string,
+) ([]string, error) {
+	f.batches = append(f.batches, batchCall{sheetID: sh.ID, rows: rows, idemKey: idemKey, bodyHash: bodyHash})
 	if f.createsErr != nil {
 		return nil, f.createsErr
 	}
@@ -182,17 +197,17 @@ func (f *fakeWriter) CreateRows(_ context.Context, sh *sheet.Sheet, rows []map[s
 }
 
 func (f *fakeWriter) ReplaceRow(
-	_ context.Context, sh *sheet.Sheet, id string, fields map[string]any,
+	_ context.Context, sh *sheet.Sheet, id string, fields map[string]any, ifMatch string,
 ) (sheet.WrittenRow, error) {
-	f.replaces = append(f.replaces, rowWriteCall{sheetID: sh.ID, rowID: id, fields: fields})
+	f.replaces = append(f.replaces, rowWriteCall{sheetID: sh.ID, rowID: id, fields: fields, ifMatch: ifMatch})
 	if f.replaceErr != nil {
 		return sheet.WrittenRow{}, f.replaceErr
 	}
 	return f.written, nil
 }
 
-func (f *fakeWriter) SoftDeleteRow(_ context.Context, sh *sheet.Sheet, id string) error {
-	f.deletes = append(f.deletes, deleteCall{sheetID: sh.ID, rowID: id})
+func (f *fakeWriter) SoftDeleteRow(_ context.Context, sh *sheet.Sheet, id, ifMatch string) error {
+	f.deletes = append(f.deletes, deleteCall{sheetID: sh.ID, rowID: id, ifMatch: ifMatch})
 	return f.deleteErr
 }
 
@@ -2043,5 +2058,117 @@ func TestHandler_DeleteRowReportsAMissingDeletedAtColumnAsUnprocessable(t *testi
 	}
 	if !strings.Contains(body, "deleted_at") {
 		t.Errorf("body = %s, want it to name the remedy: add a deleted_at column", body)
+	}
+}
+
+func TestHandler_ForwardsIfMatchToEveryConditionalWrite(t *testing.T) {
+	const tag = `"rowtag"`
+	cases := map[string]struct {
+		method string
+		path   string
+		body   []byte
+		got    func(g *rig) string
+	}{
+		"patch": {
+			method: http.MethodPatch, path: rowPath, body: []byte(`{"name":"ada"}`),
+			got: func(g *rig) string { return g.writer.patches[0].ifMatch },
+		},
+		"replace": {
+			method: http.MethodPut, path: rowPath, body: []byte(`{"name":"ada"}`),
+			got: func(g *rig) string { return g.writer.replaces[0].ifMatch },
+		},
+		"delete": {
+			method: http.MethodDelete, path: rowPath,
+			got: func(g *rig) string { return g.writer.deletes[0].ifMatch },
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+			header := keyHeader()
+			header.Set("If-Match", tag)
+
+			rec := g.send(t, tc.method, tc.path, tc.body, header)
+
+			if rec.Code >= http.StatusBadRequest {
+				t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := tc.got(g); got != tag {
+				t.Errorf("If-Match reached the workflow as %q, want %q", got, tag)
+			}
+		})
+	}
+}
+
+func TestHandler_ForwardsIdempotencyKeyAndABodyFingerprintToCreateAndBatch(t *testing.T) {
+	cases := map[string]struct {
+		path string
+		body []byte
+		call func(g *rig) (idemKey, bodyHash string)
+	}{
+		"create": {
+			path: createRowsPath, body: []byte(`{"name":"ada"}`),
+			call: func(g *rig) (string, string) {
+				return g.writer.creates[0].idemKey, g.writer.creates[0].bodyHash
+			},
+		},
+		"batch": {
+			path: batchRowsPath, body: []byte(`{"rows":[{"name":"ada"}]}`),
+			call: func(g *rig) (string, string) {
+				return g.writer.batches[0].idemKey, g.writer.batches[0].bodyHash
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+			header := keyHeader()
+			header.Set("Idempotency-Key", " once ")
+
+			rec := g.send(t, http.MethodPost, tc.path, tc.body, header)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+			}
+			idemKey, bodyHash := tc.call(g)
+			if idemKey != "once" {
+				t.Errorf("idempotency key = %q, want the trimmed header value", idemKey)
+			}
+			if len(bodyHash) != 64 {
+				t.Errorf("body hash = %q, want a sha256 hex digest", bodyHash)
+			}
+		})
+	}
+}
+
+// NOTE: the fingerprint is taken over the parsed body, so a retry that re-serializes its JSON replays
+// rather than reading as a different body and being refused 422.
+func TestHandler_FingerprintsTheParsedBodyRatherThanItsBytes(t *testing.T) {
+	g := newRig()
+	header := keyHeader()
+	header.Set("Idempotency-Key", "once")
+
+	g.send(t, http.MethodPost, createRowsPath, []byte(`{"name":"ada","note":"x"}`), header)
+	g.send(t, http.MethodPost, createRowsPath, []byte("{\n  \"note\": \"x\",\n  \"name\": \"ada\"\n}"), header)
+
+	if len(g.writer.creates) != 2 {
+		t.Fatalf("CreateRow calls = %d, want 2", len(g.writer.creates))
+	}
+	if g.writer.creates[0].bodyHash != g.writer.creates[1].bodyHash {
+		t.Error("the same fields serialized differently must fingerprint identically")
+	}
+}
+
+func TestHandler_ReportsAFailedRowPreconditionAs412(t *testing.T) {
+	g := newRig()
+	g.writer.patchErr = &sheet.PreconditionFailedError{ID: "42", ETag: "current"}
+
+	rec := g.send(t, http.MethodPatch, rowPath, []byte(`{"name":"ada"}`), keyHeader())
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want 412; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), apperror.CodeSheetPreconditionFailed) {
+		t.Errorf("body = %s, want the %s code", rec.Body.String(), apperror.CodeSheetPreconditionFailed)
 	}
 }

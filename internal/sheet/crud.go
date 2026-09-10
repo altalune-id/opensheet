@@ -114,8 +114,20 @@ type WrittenRow struct {
 	ETag string
 }
 
+type createResult struct {
+	ID   string     `json:"id"`
+	Data gsheet.Row `json:"data"`
+	ETag string     `json:"etag"`
+}
+
+type batchResult struct {
+	IDs []string `json:"ids"`
+}
+
 // CreateRow appends one row keyed by header, generating an id when the body names none, and returns the row as written.
-func (w *WriteWorkflow) CreateRow(ctx context.Context, sh *Sheet, fields map[string]any) (WrittenRow, error) {
+func (w *WriteWorkflow) CreateRow(
+	ctx context.Context, sh *Sheet, fields map[string]any, idemKey, bodyHash string,
+) (WrittenRow, error) {
 	ctx, span := tracer.Start(ctx, "sheet.CreateRow",
 		trace.WithAttributes(
 			attribute.String("sheet.id", sh.ID.String()),
@@ -134,9 +146,26 @@ func (w *WriteWorkflow) CreateRow(ctx context.Context, sh *Sheet, fields map[str
 	}
 	span.SetAttributes(attribute.String("sheet.tab", tgt.tab))
 
+	// NOTE: a create with a server-generated id is not idempotent by construction, so a retried request duplicates the row unless the key answers it.
+	held, err := w.reserve(ctx, sh, tgt.tab, idemKey, bodyHash, "sheet.CreateRow")
+	if err != nil {
+		return WrittenRow{}, recordSpanError(span, err)
+	}
+	if held.replayed {
+		var prior createResult
+		if pErr := w.prior(ctx, sh, held, bodyHash, "sheet.CreateRow", &prior); pErr != nil {
+			return WrittenRow{}, recordSpanError(span, pErr)
+		}
+		span.SetAttributes(attribute.Bool("sheet.replayed", true))
+		w.log.DebugContext(ctx, "sheet: replaying a completed write attempt",
+			"sheet_id", sh.ID, "tab", tgt.tab, "idempotency_key", idemKey)
+		return WrittenRow(prior), nil
+	}
+
 	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
 	out, err := w.applyCreate(ctx, sh, tgt, key, fields)
 	if err != nil {
+		w.releaseHeld(ctx, sh, held)
 		return WrittenRow{}, recordSpanError(span, err)
 	}
 	span.SetAttributes(attribute.Bool("sheet.projected", out.projected))
@@ -145,11 +174,14 @@ func (w *WriteWorkflow) CreateRow(ctx context.Context, sh *Sheet, fields map[str
 	if err != nil {
 		return WrittenRow{}, recordSpanError(span, err)
 	}
+	w.completeHeld(ctx, sh, held, createResult(written))
 	return written, nil
 }
 
 // ReplaceRow overwrites every known column of the row id addresses, clearing those the body omits, and returns the row as written.
-func (w *WriteWorkflow) ReplaceRow(ctx context.Context, sh *Sheet, id string, fields map[string]any) (WrittenRow, error) {
+func (w *WriteWorkflow) ReplaceRow(
+	ctx context.Context, sh *Sheet, id string, fields map[string]any, ifMatch string,
+) (WrittenRow, error) {
 	ctx, span := tracer.Start(ctx, "sheet.ReplaceRow",
 		trace.WithAttributes(
 			attribute.String("sheet.id", sh.ID.String()),
@@ -177,8 +209,9 @@ func (w *WriteWorkflow) ReplaceRow(ctx context.Context, sh *Sheet, id string, fi
 
 	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
 	plan := rowUpdate{
-		situation: "sheet.ReplaceRow",
-		liveOnly:  true,
+		situation:    "sheet.ReplaceRow",
+		liveOnly:     true,
+		precondition: matchRowTag(ifMatch, id),
 		build: func(headers, _ []string, cols rowColumns) ([]any, error) {
 			return replaceRowCells(headers, cols, fields, id, tgt.tab)
 		},
@@ -244,7 +277,9 @@ func (w *WriteWorkflow) applyCreate(
 }
 
 // CreateRows appends every row of a batch in one request, refusing the whole batch when any row is invalid, and returns the ids in request order.
-func (w *WriteWorkflow) CreateRows(ctx context.Context, sh *Sheet, batch []map[string]any) ([]string, error) {
+func (w *WriteWorkflow) CreateRows(
+	ctx context.Context, sh *Sheet, batch []map[string]any, idemKey, bodyHash string,
+) ([]string, error) {
 	ctx, span := tracer.Start(ctx, "sheet.CreateRows",
 		trace.WithAttributes(
 			attribute.String("sheet.id", sh.ID.String()),
@@ -270,13 +305,30 @@ func (w *WriteWorkflow) CreateRows(ctx context.Context, sh *Sheet, batch []map[s
 	}
 	span.SetAttributes(attribute.String("sheet.tab", tgt.tab))
 
+	held, err := w.reserve(ctx, sh, tgt.tab, idemKey, bodyHash, "sheet.CreateRows")
+	if err != nil {
+		return nil, recordSpanError(span, err)
+	}
+	if held.replayed {
+		var prior batchResult
+		if pErr := w.prior(ctx, sh, held, bodyHash, "sheet.CreateRows", &prior); pErr != nil {
+			return nil, recordSpanError(span, pErr)
+		}
+		span.SetAttributes(attribute.Bool("sheet.replayed", true))
+		w.log.DebugContext(ctx, "sheet: replaying a completed write attempt",
+			"sheet_id", sh.ID, "tab", tgt.tab, "idempotency_key", idemKey)
+		return prior.IDs, nil
+	}
+
 	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
 	out, err := w.applyBatchCreate(ctx, sh, tgt, key, batch)
 	if err != nil {
+		w.releaseHeld(ctx, sh, held)
 		return nil, recordSpanError(span, err)
 	}
 	span.SetAttributes(attribute.Bool("sheet.projected", out.projected))
 	w.settle(ctx, sh, key, out)
+	w.completeHeld(ctx, sh, held, batchResult{IDs: out.ids})
 	return out.ids, nil
 }
 
@@ -332,7 +384,7 @@ func (w *WriteWorkflow) applyBatchCreate(
 }
 
 // SoftDeleteRow tombstones the row id addresses, reporting success for a row already tombstoned.
-func (w *WriteWorkflow) SoftDeleteRow(ctx context.Context, sh *Sheet, id string) error {
+func (w *WriteWorkflow) SoftDeleteRow(ctx context.Context, sh *Sheet, id, ifMatch string) error {
 	ctx, span := tracer.Start(ctx, "sheet.SoftDeleteRow",
 		trace.WithAttributes(
 			attribute.String("sheet.id", sh.ID.String()),
@@ -379,6 +431,7 @@ func (w *WriteWorkflow) SoftDeleteRow(ctx context.Context, sh *Sheet, id string)
 		settled: func(row []string, cols rowColumns) bool {
 			return isTombstoneCell(cellAt(row, cols.del))
 		},
+		precondition: matchRowTag(ifMatch, id),
 		build: func(headers, row []string, cols rowColumns) ([]any, error) {
 			return tombstoneRowCells(headers, row, cols, sh.Slug, tgt.tab, time.Now())
 		},

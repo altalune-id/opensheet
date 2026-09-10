@@ -39,11 +39,11 @@ type Purger interface {
 // Writer mutates the rows of one published sheet.
 type Writer interface {
 	Append(ctx context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error)
-	PatchRow(ctx context.Context, sh *sheet.Sheet, id string, patch map[string]any) (gsheet.Row, error)
-	CreateRow(ctx context.Context, sh *sheet.Sheet, fields map[string]any) (sheet.WrittenRow, error)
-	CreateRows(ctx context.Context, sh *sheet.Sheet, rows []map[string]any) ([]string, error)
-	ReplaceRow(ctx context.Context, sh *sheet.Sheet, id string, fields map[string]any) (sheet.WrittenRow, error)
-	SoftDeleteRow(ctx context.Context, sh *sheet.Sheet, id string) error
+	PatchRow(ctx context.Context, sh *sheet.Sheet, id string, patch map[string]any, ifMatch string) (gsheet.Row, error)
+	CreateRow(ctx context.Context, sh *sheet.Sheet, fields map[string]any, idemKey, bodyHash string) (sheet.WrittenRow, error)
+	CreateRows(ctx context.Context, sh *sheet.Sheet, rows []map[string]any, idemKey, bodyHash string) ([]string, error)
+	ReplaceRow(ctx context.Context, sh *sheet.Sheet, id string, fields map[string]any, ifMatch string) (sheet.WrittenRow, error)
+	SoftDeleteRow(ctx context.Context, sh *sheet.Sheet, id, ifMatch string) error
 }
 
 // Tabber lists and creates the tabs of one registered spreadsheet.
@@ -365,16 +365,7 @@ func ageSeconds(fetchedAt time.Time) int {
 	return age
 }
 
+// NOTE: the sheet package owns the comparison, so If-None-Match here and If-Match inside the write lock cannot read one tag differently.
 func matchesETag(header, etag string) bool {
-	if header == "" {
-		return false
-	}
-	quoted := strconv.Quote(etag)
-	for tag := range strings.SplitSeq(header, ",") {
-		tag = strings.TrimSpace(tag)
-		if tag == "*" || strings.TrimPrefix(tag, "W/") == quoted {
-			return true
-		}
-	}
-	return false
+	return sheet.MatchesETag(header, etag)
 }
