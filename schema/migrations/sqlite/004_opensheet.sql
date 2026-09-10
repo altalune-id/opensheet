@@ -23,6 +23,7 @@ CREATE INDEX {{.TablePrefix}}credentials_org_project_idx
 CREATE INDEX {{.TablePrefix}}credentials_authorized_by_idx
   ON {{.TablePrefix}}credentials (authorized_by_user_id);
 
+-- SECURITY: spreadsheets:write is already mintable but enforced nowhere, so keys carrying it exist; defaulting to 0 stops the tab-creation route from granting them write access retroactively when it deploys.
 CREATE TABLE {{.TablePrefix}}spreadsheets (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,
@@ -32,7 +33,7 @@ CREATE TABLE {{.TablePrefix}}spreadsheets (
   google_file_id      TEXT NOT NULL,
   title               TEXT NOT NULL DEFAULT '',
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL, writable INTEGER NOT NULL DEFAULT 0,
   UNIQUE (project_id, google_file_id)
 );
 
@@ -42,6 +43,7 @@ CREATE INDEX {{.TablePrefix}}spreadsheets_org_project_idx
 CREATE INDEX {{.TablePrefix}}spreadsheets_credential_idx
   ON {{.TablePrefix}}spreadsheets (credential_id);
 
+-- SECURITY: writable defaults to 0, so no sheet published before this migration becomes writable by deploying it.
 CREATE TABLE {{.TablePrefix}}sheets (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,
@@ -54,7 +56,7 @@ CREATE TABLE {{.TablePrefix}}sheets (
   -- 0 means "use cache.defaultTTL"; the aggregate otherwise bounds it to [1s, 24h].
   cache_ttl_secs      INTEGER NOT NULL DEFAULT 0 CHECK (cache_ttl_secs >= 0 AND cache_ttl_secs <= 86400),
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL, writable INTEGER NOT NULL DEFAULT 0,
   UNIQUE (project_id, slug)
 );
 
@@ -117,10 +119,56 @@ CREATE INDEX {{.TablePrefix}}sheet_snapshots_org_project_idx
 CREATE INDEX {{.TablePrefix}}sheet_snapshots_expires_idx
   ON {{.TablePrefix}}sheet_snapshots (expires_at);
 
+CREATE TABLE {{.TablePrefix}}sessions (
+  sid         TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES {{.TablePrefix}}users(id) ON DELETE CASCADE,
+  -- SECURITY: sealed Principal, AAD-bound to sid — it carries a live IdP ID token.
+  payload     BLOB NOT NULL,
+  expires_at  TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+
+CREATE INDEX {{.TablePrefix}}sessions_expires_idx
+  ON {{.TablePrefix}}sessions (expires_at);
+
+CREATE INDEX {{.TablePrefix}}sessions_user_idx
+  ON {{.TablePrefix}}sessions (user_id);
+
+CREATE TABLE {{.TablePrefix}}sheet_write_attempts (
+  sheet_id            TEXT NOT NULL REFERENCES {{.TablePrefix}}sheets(id) ON DELETE CASCADE,
+  tab                 TEXT NOT NULL,
+  -- NOTE: idem_key, not key: `ON CONFLICT (sheet_id, tab, key)` beside `SET key = key` reads as a trap.
+  idem_key            TEXT NOT NULL,
+  body_hash           TEXT NOT NULL,
+  -- NOTE: nullable, because the no-op DO UPDATE returns the freshly inserted row on the claimed path, where no payload exists yet.
+  payload             BLOB,
+  done                INTEGER NOT NULL,
+  claim_token         TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  expires_at          TEXT NOT NULL,
+  org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,
+  project_id          TEXT NOT NULL REFERENCES {{.TablePrefix}}projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (sheet_id, tab, idem_key)
+);
+
+CREATE INDEX {{.TablePrefix}}sheet_write_attempts_org_project_idx
+  ON {{.TablePrefix}}sheet_write_attempts (org_id, project_id);
+
+CREATE INDEX {{.TablePrefix}}sheet_write_attempts_expires_idx
+  ON {{.TablePrefix}}sheet_write_attempts (expires_at);
+
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+
+DROP INDEX IF EXISTS {{.TablePrefix}}sheet_write_attempts_expires_idx;
+DROP INDEX IF EXISTS {{.TablePrefix}}sheet_write_attempts_org_project_idx;
+DROP TABLE IF EXISTS {{.TablePrefix}}sheet_write_attempts;
+
+DROP INDEX IF EXISTS {{.TablePrefix}}sessions_user_idx;
+DROP INDEX IF EXISTS {{.TablePrefix}}sessions_expires_idx;
+DROP TABLE IF EXISTS {{.TablePrefix}}sessions;
 
 DROP INDEX IF EXISTS {{.TablePrefix}}sheet_snapshots_expires_idx;
 DROP INDEX IF EXISTS {{.TablePrefix}}sheet_snapshots_org_project_idx;
