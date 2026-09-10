@@ -41,6 +41,7 @@ type Writer interface {
 	Append(ctx context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error)
 	PatchRow(ctx context.Context, sh *sheet.Sheet, id string, patch map[string]any) (gsheet.Row, error)
 	CreateRow(ctx context.Context, sh *sheet.Sheet, fields map[string]any) (sheet.WrittenRow, error)
+	CreateRows(ctx context.Context, sh *sheet.Sheet, rows []map[string]any) ([]string, error)
 	ReplaceRow(ctx context.Context, sh *sheet.Sheet, id string, fields map[string]any) (sheet.WrittenRow, error)
 }
 
@@ -118,6 +119,7 @@ func NewHandler(p HandlerParams) http.Handler {
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}", h.appendRow)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.rowByID)
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}/rows", h.createRow)
+	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}/rows/batch", h.createRows)
 	inner.HandleFunc("PUT /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.replaceRow)
 	inner.HandleFunc("PATCH /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.patchRow)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/capabilities", h.capabilities)

@@ -38,6 +38,14 @@ type tabsResponse struct {
 	Tabs []string `json:"tabs"`
 }
 
+type batchRequest struct {
+	Rows []json.RawMessage `json:"rows"`
+}
+
+type batchResponse struct {
+	IDs []string `json:"ids"`
+}
+
 type createTabRequest struct {
 	Title string `json:"title"`
 }
@@ -139,6 +147,35 @@ func (h *handler) createRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeRow(w, r, http.StatusCreated, row)
+}
+
+func (h *handler) createRows(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as createRow does, and for the same reason.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	body, err := readBody(w, r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	rows, err := parseBatch(body)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	ids, err := h.writer.CreateRows(r.Context(), sc.sheet, rows)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.writeJSON(w, r, http.StatusCreated, batchResponse{IDs: ids})
 }
 
 func (h *handler) replaceRow(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +351,26 @@ func checkCells(cells []any) ([]any, error) {
 		}
 	}
 	return cells, nil
+}
+
+// NOTE: every row goes through parsePatch, so a batch row reads exactly like a keyed create body — numeric_columns included.
+func parseBatch(body []byte) ([]map[string]any, error) {
+	var req batchRequest
+	if err := json.Unmarshal(bytes.TrimSpace(body), &req); err != nil {
+		return nil, &InvalidBodyError{Reason: "the body must be a JSON object naming rows"}
+	}
+	if len(req.Rows) == 0 {
+		return nil, &InvalidBodyError{Reason: "the body must name at least one row"}
+	}
+	rows := make([]map[string]any, 0, len(req.Rows))
+	for _, raw := range req.Rows {
+		fields, err := parsePatch(raw)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, fields)
+	}
+	return rows, nil
 }
 
 func parsePatch(body []byte) (map[string]any, error) {

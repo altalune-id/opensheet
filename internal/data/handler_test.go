@@ -120,17 +120,25 @@ type rowWriteCall struct {
 	fields  map[string]any
 }
 
+type batchCall struct {
+	sheetID uuid.UUID
+	rows    []map[string]any
+}
+
 type fakeWriter struct {
 	appended   int
 	appendErr  error
 	row        gsheet.Row
 	patchErr   error
 	written    sheet.WrittenRow
+	ids        []string
 	createErr  error
+	createsErr error
 	replaceErr error
 	appends    []appendCall
 	patches    []patchCall
 	creates    []rowWriteCall
+	batches    []batchCall
 	replaces   []rowWriteCall
 }
 
@@ -156,6 +164,14 @@ func (f *fakeWriter) CreateRow(_ context.Context, sh *sheet.Sheet, fields map[st
 		return sheet.WrittenRow{}, f.createErr
 	}
 	return f.written, nil
+}
+
+func (f *fakeWriter) CreateRows(_ context.Context, sh *sheet.Sheet, rows []map[string]any) ([]string, error) {
+	f.batches = append(f.batches, batchCall{sheetID: sh.ID, rows: rows})
+	if f.createsErr != nil {
+		return nil, f.createsErr
+	}
+	return f.ids, nil
 }
 
 func (f *fakeWriter) ReplaceRow(
@@ -291,6 +307,7 @@ func newRig() *rig {
 				Data: gsheet.Row{"id": "42", "name": "ada"},
 				ETag: "rowtag",
 			},
+			ids: []string{"42", "43"},
 		},
 		tabs:          &fakeTabber{tabs: []string{"Rates", "Payroll"}},
 		authz:         &fakeAuthorizer{},
@@ -1769,5 +1786,152 @@ func TestHandler_CreateAndReplaceRowRejectABodyTheyCannotRead(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+const batchRowsPath = createRowsPath + "/batch"
+
+func TestHandler_CreateRowsReturns201WithTheIDsInRequestOrder(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, batchRowsPath,
+		[]byte(`{"rows":[{"name":"ada"},{"name":"bob"}]}`), keyHeader())
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"ids":["42","43"]}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if len(g.writer.batches) != 1 {
+		t.Fatalf("CreateRows calls = %d, want 1", len(g.writer.batches))
+	}
+	call := g.writer.batches[0]
+	if call.sheetID != g.sheets.ref.ID {
+		t.Errorf("sheetID = %s, want the resolved sheet", call.sheetID)
+	}
+	if len(call.rows) != 2 {
+		t.Fatalf("rows = %#v, want two rows", call.rows)
+	}
+	if got, ok := call.rows[0]["name"].(string); !ok || got != "ada" {
+		t.Errorf("rows[0] = %#v, want name=ada — the batch keeps request order", call.rows[0])
+	}
+	if got, ok := call.rows[1]["name"].(string); !ok || got != "bob" {
+		t.Errorf("rows[1] = %#v, want name=bob — the batch keeps request order", call.rows[1])
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+}
+
+// SECURITY: allowRead bypasses authorization for a public sheet, so the batch route calls authorize
+// directly — a mirrored read helper would hand anonymous write access to every public sheet.
+func TestHandler_CreateRowsAuthorizesEvenOnAPublicSheet(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.authz.err = errors.New("no grant")
+
+	rec := g.send(t, http.MethodPost, batchRowsPath, []byte(`{"rows":[{"name":"ada"}]}`), nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for an unauthorized write; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+	if len(g.writer.batches) != 0 {
+		t.Error("an unauthorized batch must not reach the workflow")
+	}
+}
+
+func TestHandler_CreateRowsAcceptsNumericColumnsPerRow(t *testing.T) {
+	g := newRig()
+
+	rec := g.send(t, http.MethodPost, batchRowsPath,
+		[]byte(`{"rows":[{"rate_idr":"1300000","numeric_columns":["rate_idr"]}]}`), keyHeader())
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	fields := g.writer.batches[0].rows[0]
+	if _, named := fields[numericColumnsKey]; named {
+		t.Error("numeric_columns is a hint, not a column — it must be stripped from the row")
+	}
+	got, ok := fields["rate_idr"].(float64)
+	if !ok {
+		t.Fatalf("rows[0][rate_idr] = %#v, want a float64", fields["rate_idr"])
+	}
+	if got != 1300000 {
+		t.Errorf("rows[0][rate_idr] = %v, want 1300000", got)
+	}
+}
+
+func TestHandler_CreateRowsRejectsABodyItCannotRead(t *testing.T) {
+	cases := map[string]string{
+		"empty":             ``,
+		"not an object":     `["a"]`,
+		"no rows":           `{"rows":[]}`,
+		"rows not a list":   `{"rows":{"name":"ada"}}`,
+		"row not an object": `{"rows":["ada"]}`,
+		"nested value":      `{"rows":[{"name":{"a":1}}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := newRig()
+
+			rec := g.send(t, http.MethodPost, batchRowsPath, []byte(body), keyHeader())
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(g.writer.batches) != 0 {
+				t.Error("the batch ran on a body the handler could not read")
+			}
+		})
+	}
+}
+
+func TestHandler_CreateRowsReportsANonWritableSheetAsForbidden(t *testing.T) {
+	g := newRig()
+	g.writer.createsErr = &sheet.NotWritableError{SheetID: g.sheets.ref.ID.String(), Slug: "prices"}
+
+	rec := g.send(t, http.MethodPost, batchRowsPath, []byte(`{"rows":[{"name":"ada"}]}`), keyHeader())
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_CreateRowsReportsAnOversizeBatchAsUnprocessable(t *testing.T) {
+	g := newRig()
+	g.writer.createsErr = &sheet.BatchTooLargeError{Rows: 501, Limit: 500}
+
+	rec := g.send(t, http.MethodPost, batchRowsPath, []byte(`{"rows":[{"name":"ada"}]}`), keyHeader())
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetBatchTooLarge) {
+		t.Errorf("body = %s, want it to name %s so a client can branch on it", got, apperror.CodeSheetBatchTooLarge)
+	}
+	if got := rec.Body.String(); !strings.Contains(got, "500") {
+		t.Errorf("body = %s, want it to state the row limit", got)
+	}
+}
+
+// The body cap is the cheapest bound on a batch, and it applies to this route because every write
+// route reads its body through readBody.
+func TestHandler_CreateRowsRefusesAnOversizeBodyBeforeParsing(t *testing.T) {
+	g := newRig()
+	body := append([]byte(`{"rows":[{"name":"`), bytes.Repeat([]byte("a"), maxWriteBodyBytes)...)
+	body = append(body, []byte(`"}]}`)...)
+
+	rec := g.send(t, http.MethodPost, batchRowsPath, body, keyHeader())
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.writer.batches) != 0 {
+		t.Error("an oversize body must be refused before the batch is parsed")
 	}
 }

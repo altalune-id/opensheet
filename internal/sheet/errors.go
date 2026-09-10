@@ -789,3 +789,33 @@ func IsIDMismatchError(err error) bool {
 	_, ok := errors.AsType[*IDMismatchError](err)
 	return ok
 }
+
+// BatchTooLargeError signals a batch carrying more rows than one request may write.
+type BatchTooLargeError struct {
+	Rows  int
+	Limit int
+}
+
+func (e *BatchTooLargeError) Error() string {
+	return fmt.Sprintf("sheet: batch: %d rows over the %d row limit", e.Rows, e.Limit)
+}
+
+// ToAppError maps BatchTooLargeError to an InvalidArgument envelope its own status override lifts to 422.
+func (e *BatchTooLargeError) ToAppError() *apperror.AppError {
+	limit := strconv.Itoa(e.Limit)
+	return apperror.New(
+		apperror.CodeSheetBatchTooLarge,
+		"A batch may carry at most "+limit+" rows",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetBatchTooLarge,
+			Meta: map[string]string{"rows": strconv.Itoa(e.Rows), "limit": limit},
+		},
+	)
+}
+
+// IsBatchTooLargeError reports whether err's tree contains a *BatchTooLargeError.
+func IsBatchTooLargeError(err error) bool {
+	_, ok := errors.AsType[*BatchTooLargeError](err)
+	return ok
+}

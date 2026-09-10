@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	idColumn = "id"
-	rowIDLen = 21
-	noRowIdx = -1
+	idColumn     = "id"
+	rowIDLen     = 21
+	noRowIdx     = -1
+	maxBatchRows = 500
 )
 
 type rowColumns struct {
@@ -82,7 +83,9 @@ func NewWriteWorkflow(
 type writeOutcome struct {
 	row       gsheet.Row
 	id        string
+	ids       []string
 	liveRows  int
+	wrote     bool
 	projected bool
 }
 
@@ -242,7 +245,7 @@ func (w *WriteWorkflow) applyUpdate(
 			return uErr
 		}
 		row := writtenProjection(id, rowIdx, tbl.Headers, cells, cols.del)
-		out.row, out.id = row.Data, id
+		out.row, out.id, out.wrote = row.Data, id, true
 		out.liveRows = liveRowCount(tbl, cols.del, rowIdx, row.DeletedAt == nil)
 		if pErr := w.rows.UpsertRow(txCtx, key, row); pErr != nil {
 			return pErr
@@ -261,12 +264,12 @@ func (w *WriteWorkflow) outcome(
 		return writeOutcome{}, w.fail(ctx, situation, google, sh, tgt.src)
 	}
 	if runErr != nil {
-		if out.row == nil {
+		if !out.wrote {
 			return writeOutcome{}, w.passthrough(ctx, operation+": write row", runErr, sh)
 		}
 		// NOTE: Google already holds the row, so a write-through that failed after it degrades to the purge behaviour rather than reporting a write that happened as a failure.
 		_ = w.unexpected(ctx, operation+": write through", runErr, "sheet_id", sh.ID, "tab", key.Tab)
-		return writeOutcome{row: out.row, id: out.id}, nil
+		return writeOutcome{row: out.row, id: out.id, ids: out.ids, wrote: true}, nil
 	}
 	return out, nil
 }

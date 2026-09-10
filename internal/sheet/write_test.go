@@ -2,6 +2,7 @@ package sheet_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1193,4 +1194,260 @@ func TestWriteWorkflow_ReplaceRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 	assert.Equal(t, row.Data, got.Data, "the replaced row must come back with its cleared column")
 	assert.Equal(t, row.ETag, got.ETag, "the replace must hand back the tag a read of the same row computes")
 	assert.Equal(t, afterWrite, h.google.callCount(), "the read must be answered from the projection")
+}
+
+const appendedThree = `{"updates":{"updatedRows":3,"updatedRange":"'Rates'!A4:B6"}}`
+
+func appendCount(f *fakeWriteSheets) int {
+	n := 0
+	for _, r := range f.recorded() {
+		if r.method == http.MethodPost {
+			n++
+		}
+	}
+	return n
+}
+
+func projectedJSON(t *testing.T, rows []sheet.ProjectedRow) string {
+	t.Helper()
+	raw, err := json.Marshal(rows)
+	require.NoError(t, err)
+	return string(raw)
+}
+
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet
+// cannot be probed for existence through timing or error shape.
+func TestWriteWorkflow_CreateRowsRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", false)
+
+	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{{"name": "cyd"}})
+	require.Error(t, err)
+	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
+	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "no request may reach Google for a non-writable sheet")
+}
+
+func TestWriteWorkflow_CreateRows_AppendsEveryRowInOneCallAndProjectsSequentialIndexes(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+	h.google.setAppend(http.StatusOK, appendedThree)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+
+	ids, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+		{"name": "cyd"},
+		{"id": "mine", "name": "dee"},
+		{"name": "eve"},
+	})
+	require.NoError(t, err)
+	require.Len(t, ids, 3)
+	assert.Equal(t, "mine", ids[1], "the ids come back in request order")
+	assert.Len(t, ids[0], 21, "an id the row omits is a generated 21-character nanoid")
+
+	assert.Equal(t, 1, appendCount(h.google), "N rows are written by one append, never one append per row")
+	req := h.google.lastOf(t, http.MethodPost)
+	assert.Contains(t, req.url, "valueInputOption=RAW")
+	assert.Contains(t, req.body, `["`+ids[0]+`","cyd"]`)
+	assert.Contains(t, req.body, `["mine","dee"]`)
+	assert.Contains(t, req.body, `["`+ids[2]+`","eve"]`)
+
+	live, lErr := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, lErr)
+	require.Len(t, live, 5)
+	assert.Equal(t, 2, live[2].RowIndex, "row_index is the block's start row less two")
+	assert.Equal(t, 3, live[3].RowIndex, "each later row follows from the start row")
+	assert.Equal(t, 4, live[4].RowIndex)
+	assert.Equal(t, ids, []string{live[2].RowID, live[3].RowID, live[4].RowID})
+
+	afterWrite := h.google.callCount()
+	got, rErr := h.rf.RowByID(t.Context(), sh, "mine")
+	require.NoError(t, rErr)
+	assert.Equal(t, gsheet.Row{"id": "mine", "name": "dee"}, got.Data)
+	assert.Equal(t, afterWrite, h.google.callCount(), "a batched row is readable from the projection with no refetch")
+	assert.Zero(t, h.unex.Load(), "a clean batch reports no incident")
+}
+
+// Asserting only that the response was an error would pass on a half-applied batch: the whole batch is
+// validated before the append, so a bad last row must leave Google and the projection untouched.
+func TestBatchCreate_InvalidLastRowWritesNothing(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setAppend(http.StatusOK, appendedThree)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+	before := projectedJSON(t, h.rows.Projected(key))
+	beforeGen := h.rows.Generation(sh.ID)
+
+	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+		{"name": "cyd"},
+		{"name": "dee"},
+		{"nope": "eve"},
+	})
+	require.Error(t, err)
+	assert.True(t, sheet.IsUnknownColumnError(err), "got %T: %v", err, err)
+
+	assert.Zero(t, appendCount(h.google), "not one write may reach Google when any row of the batch is invalid")
+	assert.Equal(t, before, projectedJSON(t, h.rows.Projected(key)), "the projection must be byte-identical")
+	assert.Equal(t, beforeGen, h.rows.Generation(sh.ID), "a refused batch bumps no generation")
+}
+
+func TestWriteWorkflow_CreateRows_RefusesADuplicateIDWithinTheBatch(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+		{"id": "same", "name": "cyd"},
+		{"id": "same", "name": "dee"},
+	})
+	require.Error(t, err)
+	assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, appendCount(h.google), "two rows of one batch cannot claim one id")
+}
+
+func TestWriteWorkflow_CreateRows_RefusesAnIDTheTabAlreadyHolds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		table string
+		id    string
+	}{
+		{name: "live row", table: idNameTable, id: "1"},
+		{name: "tombstoned row", table: tombstonedTable, id: "z"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.google.setTable(http.StatusOK, tc.table)
+
+			_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+				{"name": "cyd"},
+				{"id": tc.id, "name": "dee"},
+			})
+			require.Error(t, err)
+			assert.True(t, sheet.IsDuplicateIDError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+			assert.Zero(t, appendCount(h.google),
+				"the duplicate check reads the tab, so a tombstoned id is refused before the append")
+		})
+	}
+}
+
+func TestWriteWorkflow_CreateRows_RefusesTheDeletedAtColumn(t *testing.T) {
+	t.Parallel()
+	for _, header := range []string{"deleted_at", "Deleted At"} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+			h.google.setTable(http.StatusOK, `{"values":[["id","name","`+header+`"],["1","ada",""]]}`)
+
+			_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+				{"name": "cyd"},
+				{"name": "dee", header: "2026-09-10T04:11:09Z"},
+			})
+			require.Error(t, err)
+			assert.True(t, sheet.IsReadOnlyColumnError(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
+			assert.Zero(t, appendCount(h.google), "a row cannot be created already deleted")
+		})
+	}
+}
+
+func TestWriteWorkflow_CreateRows_RefusesAnUnknownColumnAndABlankSuppliedID(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		batch []map[string]any
+		is    func(error) bool
+	}{
+		"unknown column": {
+			batch: []map[string]any{{"nope": "x"}},
+			is:    sheet.IsUnknownColumnError,
+		},
+		"blank id": {
+			batch: []map[string]any{{"id": "  ", "name": "cyd"}},
+			is:    sheet.IsInvalidRowError,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newWriteHarness(t)
+			sh, _ := h.seed(t, "Rates", true)
+
+			_, err := h.wf.CreateRows(t.Context(), sh, tc.batch)
+			require.Error(t, err)
+			assert.True(t, tc.is(err), "got %T: %v", err, err)
+			assert.Equal(t, http.StatusBadRequest, appErrorOf(t, err).HTTPStatus())
+			assert.Zero(t, appendCount(h.google))
+		})
+	}
+}
+
+func TestWriteWorkflow_CreateRows_WritesOmittedColumnsEmpty(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setTable(http.StatusOK, idNameNoteTable)
+	h.google.setAppend(http.StatusOK, `{"updates":{"updatedRows":2,"updatedRange":"'Rates'!A3:C4"}}`)
+
+	ids, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+		{"id": "one", "name": "cyd"},
+		{"id": "two", "note": "kept"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"one", "two"}, ids)
+	body := h.google.lastOf(t, http.MethodPost).body
+	assert.Contains(t, body, `["one","cyd",""]`, "a column the row omits is written empty")
+	assert.Contains(t, body, `["two","","kept"]`)
+}
+
+func TestWriteWorkflow_CreateRows_RefusesAnEmptyBatchAndOneOverTheRowLimit(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+
+	_, err := h.wf.CreateRows(t.Context(), sh, nil)
+	require.Error(t, err)
+	assert.True(t, sheet.IsInvalidRowError(err), "got %T: %v", err, err)
+
+	over := make([]map[string]any, 501)
+	for i := range over {
+		over[i] = map[string]any{"name": "cyd"}
+	}
+	_, err = h.wf.CreateRows(t.Context(), sh, over)
+	require.Error(t, err)
+	assert.True(t, sheet.IsBatchTooLargeError(err), "got %T: %v", err, err)
+	ae := appErrorOf(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, ae.HTTPStatus())
+	assert.Contains(t, ae.Message(), "500", "the refusal must state the limit it enforces")
+	assert.Zero(t, h.google.callCount(), "the row cap is enforced before any Google call")
+}
+
+func TestWriteWorkflow_CreateRows_RunsTheLockAndTheProjectionInOneUnitOfWork(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.google.setAppend(http.StatusOK, appendedThree)
+
+	_, err := h.wf.CreateRows(t.Context(), sh, []map[string]any{
+		{"name": "cyd"}, {"name": "dee"}, {"name": "eve"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), h.units.runs.Load(),
+		"the Google read, the one append and every projection write share one transaction")
 }

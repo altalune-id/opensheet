@@ -54,13 +54,21 @@ type AppendResult struct {
 
 // Append adds cells as one row at the end of tab and reports where Google wrote it.
 func (w *Writer) Append(ctx context.Context, fileID, tab string, cells []any) (AppendResult, error) {
+	return w.AppendRows(ctx, fileID, tab, [][]any{cells})
+}
+
+// AppendRows adds rows as one block at the end of tab in a single request and reports where Google wrote it.
+func (w *Writer) AppendRows(ctx context.Context, fileID, tab string, rows [][]any) (AppendResult, error) {
 	tab = strings.TrimSpace(tab)
 	if tab == "" {
 		return AppendResult{}, &TabNotFoundError{Tab: tab}
 	}
+	if len(rows) == 0 {
+		return AppendResult{}, &InvalidRangeError{Range: quoteRange(tab)}
+	}
 
 	resp, err := w.svc.Spreadsheets.Values.
-		Append(fileID, quoteRange(tab), &sheetsapi.ValueRange{Values: [][]any{cells}}).
+		Append(fileID, quoteRange(tab), &sheetsapi.ValueRange{Values: rows}).
 		ValueInputOption(valueInputRaw).
 		InsertDataOption(insertDataRows).
 		Context(ctx).Do()

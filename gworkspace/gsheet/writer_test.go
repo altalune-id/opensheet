@@ -191,6 +191,57 @@ func TestWriter_AppendParsesThePositionFromTheResolvedRange(t *testing.T) {
 	}
 }
 
+func TestWriter_AppendRowsSendsEveryRowInOneRequest(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{"updates":{"updatedRows":3,"updatedRange":"'Rates'!A4:B6"}}`
+	})
+
+	res, err := w.AppendRows(context.Background(), "FILE", "Rates", [][]any{
+		{"a", 1}, {"b", 2}, {"c", 3},
+	})
+	if err != nil {
+		t.Fatalf("AppendRows: %v", err)
+	}
+	if res.StartRow != 4 {
+		t.Errorf("StartRow = %d, want 4 — every row_index of the block follows from it", res.StartRow)
+	}
+	if res.Rows != 3 {
+		t.Errorf("Rows = %d, want 3", res.Rows)
+	}
+
+	got := sent.snapshot()
+	if got.calls != 1 {
+		t.Fatalf("AppendRows made %d requests, want exactly 1 for the whole block", got.calls)
+	}
+	if !strings.Contains(got.query, "valueInputOption=RAW") {
+		t.Errorf("query = %q, want it to carry valueInputOption=RAW", got.query)
+	}
+	for _, want := range []string{`["a",1]`, `["b",2]`, `["c",3]`} {
+		if !strings.Contains(got.body, want) {
+			t.Errorf("body = %q, want it to carry %s", got.body, want)
+		}
+	}
+}
+
+func TestWriter_AppendRowsRejectsAnEmptyBlock(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{}`
+	})
+
+	if _, err := w.AppendRows(context.Background(), "FILE", "Rates", nil); !IsInvalidRangeError(err) {
+		t.Fatalf("AppendRows error = %v (%T), want InvalidRangeError", err, err)
+	}
+	if got := sent.snapshot(); got.calls != 0 {
+		t.Errorf("AppendRows made %d requests for an empty block, want 0", got.calls)
+	}
+}
+
 func TestWriter_AppendRejectsABlankTab(t *testing.T) {
 	t.Parallel()
 	var sent sentRequest

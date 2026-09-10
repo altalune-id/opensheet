@@ -100,6 +100,7 @@ const (
 	CodeSheetNothingToFix        = "SHT025"
 	CodeSheetColumnNotEmpty      = "SHT026"
 	CodeSheetIDMismatch          = "SHT027"
+	CodeSheetBatchTooLarge       = "SHT028"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

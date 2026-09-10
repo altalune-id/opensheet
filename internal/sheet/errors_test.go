@@ -134,6 +134,41 @@ func TestIDMismatchError(t *testing.T) {
 	}
 }
 
+func TestBatchTooLargeError(t *testing.T) {
+	e := &BatchTooLargeError{Rows: 501, Limit: 500}
+	msg := e.Error()
+	if !strings.Contains(msg, "501") || !strings.Contains(msg, "500") {
+		t.Errorf("Error() = %q, want it to carry the count and the limit", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetBatchTooLarge)
+
+	if !IsBatchTooLargeError(e) {
+		t.Error("IsBatchTooLargeError = false, want true")
+	}
+	if !IsBatchTooLargeError(fmt.Errorf("wrap: %w", e)) {
+		t.Error("IsBatchTooLargeError did not unwrap")
+	}
+	if IsBatchTooLargeError(errors.New("plain")) {
+		t.Error("IsBatchTooLargeError matched a plain error")
+	}
+	if IsBatchTooLargeError(nil) {
+		t.Error("IsBatchTooLargeError matched nil")
+	}
+}
+
+func TestBatchTooLargeError_MapsTo422AndStatesTheLimit(t *testing.T) {
+	app := (&BatchTooLargeError{Rows: 501, Limit: 500}).ToAppError()
+	if got := app.Code(); got != "SHT028" {
+		t.Errorf("Code() = %q, want %q", got, "SHT028")
+	}
+	if got := app.HTTPStatus(); got != http.StatusUnprocessableEntity {
+		t.Errorf("HTTPStatus() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := app.Message(); !strings.Contains(got, "500") {
+		t.Errorf("Message() = %q, want it to state the row limit", got)
+	}
+}
+
 func TestIDMismatchError_MapsTo422(t *testing.T) {
 	app := (&IDMismatchError{PathID: "row-1", BodyID: "row-2"}).ToAppError()
 	if got := app.Code(); got != "SHT027" {
