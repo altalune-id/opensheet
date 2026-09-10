@@ -23,7 +23,7 @@ CREATE INDEX {{.TablePrefix}}credentials_org_project_idx
 CREATE INDEX {{.TablePrefix}}credentials_authorized_by_idx
   ON {{.TablePrefix}}credentials (authorized_by_user_id);
 
--- SECURITY: spreadsheets:write is already mintable but enforced nowhere, so keys carrying it exist; defaulting to 0 stops the tab-creation route from granting them write access retroactively when it deploys.
+-- SECURITY: writable defaults to 0, so registering a document never grants tab creation; a key carrying spreadsheets:write still needs this flag set deliberately.
 CREATE TABLE {{.TablePrefix}}spreadsheets (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,
@@ -33,7 +33,8 @@ CREATE TABLE {{.TablePrefix}}spreadsheets (
   google_file_id      TEXT NOT NULL,
   title               TEXT NOT NULL DEFAULT '',
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL, writable INTEGER NOT NULL DEFAULT 0,
+  updated_at          TEXT NOT NULL,
+  writable            INTEGER NOT NULL DEFAULT 0,
   UNIQUE (project_id, google_file_id)
 );
 
@@ -43,7 +44,7 @@ CREATE INDEX {{.TablePrefix}}spreadsheets_org_project_idx
 CREATE INDEX {{.TablePrefix}}spreadsheets_credential_idx
   ON {{.TablePrefix}}spreadsheets (credential_id);
 
--- SECURITY: writable defaults to 0, so no sheet published before this migration becomes writable by deploying it.
+-- SECURITY: writable defaults to 0, so publishing a tab never grants row writes; enabling them is a separate deliberate act.
 CREATE TABLE {{.TablePrefix}}sheets (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES {{.TablePrefix}}orgs(id) ON DELETE CASCADE,
@@ -56,7 +57,8 @@ CREATE TABLE {{.TablePrefix}}sheets (
   -- 0 means "use cache.defaultTTL"; the aggregate otherwise bounds it to [1s, 24h].
   cache_ttl_secs      INTEGER NOT NULL DEFAULT 0 CHECK (cache_ttl_secs >= 0 AND cache_ttl_secs <= 86400),
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL, writable INTEGER NOT NULL DEFAULT 0,
+  updated_at          TEXT NOT NULL,
+  writable            INTEGER NOT NULL DEFAULT 0,
   UNIQUE (project_id, slug)
 );
 

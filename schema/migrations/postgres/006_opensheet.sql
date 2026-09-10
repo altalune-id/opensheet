@@ -75,7 +75,7 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}spreadsheets (
   title               TEXT NOT NULL DEFAULT '',
   created_at          TIMESTAMPTZ NOT NULL,
   updated_at          TIMESTAMPTZ NOT NULL,
-  -- SECURITY: spreadsheets:write is already mintable but enforced nowhere, so keys carrying it exist; defaulting to false stops the tab-creation route from granting them write access retroactively when it deploys.
+  -- SECURITY: defaults to false, so registering a document never grants tab creation; a key carrying spreadsheets:write still needs this flag set deliberately.
   writable            BOOLEAN NOT NULL DEFAULT false,
   UNIQUE (project_id, google_file_id)
 );
@@ -99,7 +99,7 @@ CREATE TABLE {{.Schema}}.{{.TablePrefix}}sheets (
   cache_ttl_secs      INTEGER NOT NULL DEFAULT 0 CHECK (cache_ttl_secs >= 0 AND cache_ttl_secs <= 86400),
   created_at          TIMESTAMPTZ NOT NULL,
   updated_at          TIMESTAMPTZ NOT NULL,
-  -- SECURITY: defaults to false, so no sheet published before this migration becomes writable by deploying it.
+  -- SECURITY: defaults to false, so publishing a tab never grants row writes; enabling them is a separate deliberate act.
   writable            BOOLEAN NOT NULL DEFAULT false,
   UNIQUE (project_id, slug)
 );
