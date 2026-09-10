@@ -13,6 +13,7 @@ import (
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/schema"
 )
@@ -51,7 +52,7 @@ func newSQLiteFixture(t *testing.T) *sqliteFixture {
 func seedSQLiteProject(t *testing.T, sqlDB *sql.DB, prefix, orgSlug, projSlug string) (uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	userID, orgID, projID := uuid.New(), uuid.New(), uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := sqlDB.Exec(q, args...); err != nil {
@@ -70,7 +71,7 @@ func seedSQLiteProject(t *testing.T, sqlDB *sql.DB, prefix, orgSlug, projSlug st
 func (f *sqliteFixture) seedSheet(t *testing.T) uuid.UUID {
 	t.Helper()
 	credID, docID, sheetID := uuid.New(), uuid.New(), uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := f.db.Exec(q, args...); err != nil {

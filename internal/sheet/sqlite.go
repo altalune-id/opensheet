@@ -86,7 +86,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 	}
 	secs := secsFromTTL(sh.CacheTTL)
 	writable := boolToInt(sh.Writable)
-	updatedAt := sh.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	updatedAt := sqliteent.SQLiteTime(sh.UpdatedAt)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sh.ID.String(),
@@ -98,7 +98,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			string(sh.Visibility),
 			secs,
 			writable,
-			sh.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(sh.CreatedAt),
 			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).

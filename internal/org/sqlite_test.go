@@ -12,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/schema"
 )
 
@@ -36,7 +37,7 @@ func newSQLiteStoreForTest(t *testing.T) (org.Store, *sql.DB, string) {
 func seedUser(t *testing.T, sqlDB *sql.DB, prefix string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",

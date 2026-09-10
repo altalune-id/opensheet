@@ -83,7 +83,7 @@ func (s *sqliteStore) Save(ctx context.Context, c *Credential) error {
 	if _, err := tenant.From(ctx); err != nil {
 		return err
 	}
-	updatedAt := c.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	updatedAt := sqliteent.SQLiteTime(c.UpdatedAt)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			c.ID.String(),
@@ -95,7 +95,7 @@ func (s *sqliteStore) Save(ctx context.Context, c *Credential) error {
 			c.AuthorizedByUserID.String(),
 			c.GoogleAccountEmail,
 			c.Sealed,
-			c.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(c.CreatedAt),
 			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).

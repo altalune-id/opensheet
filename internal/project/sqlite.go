@@ -63,7 +63,7 @@ func (s *sqliteStore) Save(ctx context.Context, p *Project) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	sysVal := int64(0)
 	if p.System {
 		sysVal = 1
@@ -71,7 +71,7 @@ func (s *sqliteStore) Save(ctx context.Context, p *Project) error {
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			p.ID.String(), p.OrgID.String(), p.Slug, p.Name, tc.UserID.String(),
-			p.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(p.CreatedAt),
 			now, sysVal,
 		).
 		ON_CONFLICT(s.table.ID).

@@ -124,7 +124,7 @@ func (s *sqliteStore) writeKey(ctx context.Context, tx *sql.Tx, k *APIKey) error
 			k.ID.String(), k.OrgID.String(), k.ProjectID.String(), k.Name, k.KeyPrefix, k.SecretHash,
 			scopes,
 			sqliteNullableTime(k.ExpiresAt), sqliteNullableTime(k.LastUsedAt), sqliteNullableTime(k.RevokedAt),
-			k.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(k.CreatedAt),
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(sqlite.SET(
@@ -300,7 +300,7 @@ func (s *sqliteStore) TouchLastUsed(ctx context.Context, orgID, projectID, id uu
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		stmt := s.table.
 			UPDATE(s.table.LastUsedAt).
-			SET(sqlite.String(at.UTC().Format(time.RFC3339Nano))).
+			SET(sqlite.String(sqliteent.SQLiteTime(at))).
 			WHERE(s.table.ID.EQ(sqlite.String(id.String())).
 				AND(s.table.OrgID.EQ(sqlite.String(orgID.String()))).
 				AND(s.table.ProjectID.EQ(sqlite.String(projectID.String()))))
@@ -383,14 +383,14 @@ func sqliteNullableTime(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return sqliteent.SQLiteTime(*t)
 }
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
 		return sqlite.StringExp(sqlite.NULL)
 	}
-	return sqlite.String(t.UTC().Format(time.RFC3339Nano))
+	return sqlite.String(sqliteent.SQLiteTime(*t))
 }
 
 func parseSQLiteUUID(col, raw string) (uuid.UUID, error) {

@@ -11,6 +11,7 @@ import (
 
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/schema"
@@ -97,7 +98,7 @@ func orderedV7Pair(t *testing.T) (lo, hi uuid.UUID) {
 
 func seedSQLiteTenant(t *testing.T, sqlDB *sql.DB, prefix string, tc tenant.Context) {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec(t, sqlDB,
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) VALUES (?, ?, '', '', 0, ?, ?)",
 		tc.UserID.String(), tc.UserID.String()+"@x.co", now, now)
@@ -112,7 +113,7 @@ func seedSQLiteTenant(t *testing.T, sqlDB *sql.DB, prefix string, tc tenant.Cont
 func seedSQLiteCredential(t *testing.T, sqlDB *sql.DB, prefix string, tc tenant.Context, name string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec(t, sqlDB,
 		"INSERT INTO "+prefix+"credentials (id, org_id, project_id, name, kind, status, authorized_by_user_id, google_account_email, sealed, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, 'service_account', 'active', ?, '', X'00', ?, ?)",
@@ -266,7 +267,6 @@ func TestSQLiteStore_List(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d rows, want 2", len(got))
 	}
-	// TODO: flaky — RFC3339Nano trims trailing zeros, so TEXT comparison can invert two distinct created_at values.
 	if got[0].ID != first.ID || got[1].ID != second.ID {
 		t.Error("List must be oldest first")
 	}
@@ -394,7 +394,7 @@ func TestSQLiteStore_DeleteCascadesSheets(t *testing.T) {
 	sp := f.save(t, goodFileID, "Prices")
 
 	sheetID := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec(t, f.db,
 		"INSERT INTO "+f.prefix+"sheets (id, org_id, project_id, spreadsheet_id, tab, slug, visibility, cache_ttl_secs, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, 'Q1', 'prices', 'key', 0, ?, ?)",

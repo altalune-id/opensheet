@@ -12,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/schema"
 )
@@ -69,7 +70,7 @@ func (f *sqliteFixture) newCredential(t *testing.T, name string) *credential.Cre
 func seedProject(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, projID uuid.UUID) { //nolint:nonamedreturns // triple
 	t.Helper()
 	userID, orgID, projID = uuid.New(), uuid.New(), uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	exec := func(query string, args ...any) {
 		if _, err := sqlDB.Exec(query, args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -86,7 +87,7 @@ func seedProject(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, pro
 
 func (f *sqliteFixture) seedSpreadsheet(t *testing.T, credentialID uuid.UUID) {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	_, err := f.sqlDB.Exec(
 		"INSERT INTO "+f.prefix+"spreadsheets (id, org_id, project_id, credential_id, google_file_id, title, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, 'FILE', 'Prices', ?, ?)",

@@ -122,8 +122,8 @@ func (r *sqliteMemberProfileRow) toProfile() (*MemberProfile, error) {
 }
 
 func (s *sqliteStore) Save(ctx context.Context, o *Org) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	created := o.CreatedAt.UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
+	created := sqliteent.SQLiteTime(o.CreatedAt)
 	stmt := s.orgs.INSERT(s.orgs.AllColumns).
 		VALUES(o.ID.String(), o.Slug, o.Name, o.OwnerID.String(), created, now, boolToInt(o.System)).
 		ON_CONFLICT(s.orgs.ID).
@@ -178,7 +178,7 @@ func (s *sqliteStore) SaveMembership(ctx context.Context, m *Membership) error {
 			m.OrgID.String(),
 			m.UserID.String(),
 			string(m.Role),
-			m.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(m.CreatedAt),
 			boolToInt(m.System),
 		).
 		ON_CONFLICT(s.members.OrgID, s.members.UserID).

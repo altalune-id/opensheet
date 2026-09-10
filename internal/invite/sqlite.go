@@ -83,17 +83,17 @@ func (s *sqliteStore) Save(ctx context.Context, i *Invite) error {
 			i.Email,
 			string(i.Role),
 			i.TokenHash,
-			i.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(i.ExpiresAt),
 			sqliteNullableTimeArg(i.UsedAt),
 			tc.UserID.String(),
-			i.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(i.CreatedAt),
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(sqlite.SET(
 			s.table.Email.SET(sqlite.String(i.Email)),
 			s.table.Role.SET(sqlite.String(string(i.Role))),
 			s.table.TokenHash.SET(sqlite.String(i.TokenHash)),
-			s.table.ExpiresAt.SET(sqlite.String(i.ExpiresAt.UTC().Format(time.RFC3339Nano))),
+			s.table.ExpiresAt.SET(sqlite.String(sqliteent.SQLiteTime(i.ExpiresAt))),
 			s.table.AcceptedAt.SET(sqliteNullableTimeExpr(i.UsedAt)),
 		))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
@@ -213,12 +213,12 @@ func sqliteNullableTimeArg(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return sqliteent.SQLiteTime(*t)
 }
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
 		return sqlite.StringExp(sqlite.NULL)
 	}
-	return sqlite.String(t.UTC().Format(time.RFC3339Nano))
+	return sqlite.String(sqliteent.SQLiteTime(*t))
 }

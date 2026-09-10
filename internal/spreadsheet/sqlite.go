@@ -81,7 +81,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 		return err
 	}
 	writable := boolToInt(sp.Writable)
-	updatedAt := sp.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	updatedAt := sqliteent.SQLiteTime(sp.UpdatedAt)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sp.ID.String(),
@@ -91,7 +91,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 			sp.GoogleFileID,
 			sp.Title,
 			writable,
-			sp.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(sp.CreatedAt),
 			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).

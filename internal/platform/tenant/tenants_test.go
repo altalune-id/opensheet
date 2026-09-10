@@ -14,6 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -40,7 +41,7 @@ func newTenantsFixture(t *testing.T, ids []uuid.UUID) *tenant.Enumerator {
 	for i, id := range ids {
 		_, err = sqlDB.ExecContext(t.Context(),
 			`INSERT INTO t_orgs (id, created_at) VALUES (?, ?)`,
-			id.String(), time.Unix(int64(i), 0).UTC().Format(time.RFC3339Nano))
+			id.String(), sqliteent.SQLiteTime(time.Unix(int64(i), 0)))
 		require.NoError(t, err)
 	}
 

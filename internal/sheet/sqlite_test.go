@@ -11,6 +11,7 @@ import (
 
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/schema"
@@ -64,7 +65,7 @@ func newSQLiteFixture(t *testing.T) *fixture {
 func seedUserAndOrg(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID uuid.UUID) {
 	t.Helper()
 	userID, orgID = uuid.New(), uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -83,7 +84,7 @@ func seedUserAndOrg(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID u
 func seedProject(t *testing.T, sqlDB *sql.DB, prefix string, orgID, userID uuid.UUID, slug string) uuid.UUID {
 	t.Helper()
 	projectID := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"projects (id, org_id, slug, name, created_by, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -96,7 +97,7 @@ func seedProject(t *testing.T, sqlDB *sql.DB, prefix string, orgID, userID uuid.
 func seedCredential(t *testing.T, sqlDB *sql.DB, prefix string, orgID, projectID, userID uuid.UUID, name string) uuid.UUID {
 	t.Helper()
 	credentialID := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"credentials (id, org_id, project_id, name, kind, status, "+
 			"authorized_by_user_id, google_account_email, sealed, created_at, updated_at) "+
@@ -111,7 +112,7 @@ func seedCredential(t *testing.T, sqlDB *sql.DB, prefix string, orgID, projectID
 func seedSpreadsheet(t *testing.T, sqlDB *sql.DB, prefix string, orgID, projectID, credentialID uuid.UUID, fileID string) uuid.UUID {
 	t.Helper()
 	spreadsheetID := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"spreadsheets (id, org_id, project_id, credential_id, google_file_id, title, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, ?, 'Rates', ?, ?)",

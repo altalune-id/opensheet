@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/schema"
@@ -44,7 +46,7 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, proj
 	userID = uuid.New()
 	orgID = uuid.New()
 	projID = uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -350,5 +352,45 @@ func TestSQLiteStore_MarkDoneOlderThan_NothingStale(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("swept=%d want 0", n)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_SweepsRowSharingTheCutoffSecond(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	cutoff := time.Date(2026, 9, 9, 2, 12, 19, 236756000, time.UTC)
+	older := []time.Time{
+		time.Date(2026, 9, 9, 2, 12, 19, 0, time.UTC),
+		time.Date(2026, 9, 9, 2, 12, 19, 236700000, time.UTC),
+	}
+
+	for i, created := range older {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, fmt.Sprintf("stale-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.CreatedAt = created
+		td.UpdatedAt = created
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 100)
+	if err != nil {
+		t.Fatalf("MarkDoneOlderThan: %v", err)
+	}
+	if n != len(older) {
+		t.Fatalf("swept=%d want %d: a row with fewer fractional digits than the cutoff must still sort before it", n, len(older))
+	}
+
+	no := false
+	open, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{Done: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Errorf("open todos after sweep: %+v", open)
 	}
 }
