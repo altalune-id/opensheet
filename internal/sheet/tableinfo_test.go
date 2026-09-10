@@ -162,6 +162,25 @@ func TestReadWorkflow_TableInfo_NamesDeletedAtOnlyWhenTheTabHasIt(t *testing.T) 
 	}
 }
 
+func TestReadWorkflow_TableInfo_ValidatedButUnreadSheetStillReportsItsIDColumn(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	at := time.Now().UTC()
+	sh.ContractOK = true
+	sh.ValidatedAt = &at
+
+	got, err := h.wf.TableInfo(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("TableInfo err = %v", err)
+	}
+	if !got.IDColumn {
+		t.Errorf("IDColumn = false, want true: publish validated the id column, so an unread sheet must not report itself untyped")
+	}
+	if got.RowCount != 0 || len(got.Columns) != 0 {
+		t.Errorf("TableInfo = %+v, want no rows and no columns until the first read", got)
+	}
+}
+
 func TestReadWorkflow_TableInfo_UnprojectedSheetReportsAnEmptyTable(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)

@@ -50,7 +50,7 @@ func (w *ReadWorkflow) TableInfo(ctx context.Context, sh *Sheet) (TableInfo, err
 	columns := tableColumns(stats)
 	return TableInfo{
 		Columns:           columns,
-		IDColumn:          hasIDColumn(columns),
+		IDColumn:          idColumnKnown(columns, sh),
 		SoftDelete:        stats.SoftDelete,
 		Writable:          sh.Writable,
 		SatisfiesContract: sh.ContractOK,
@@ -70,6 +70,14 @@ func tableColumns(stats TableStats) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// NOTE: the projection is empty until the first read, so an unread sheet falls back to publish's verdict rather than reporting a validated tab as untyped.
+func idColumnKnown(columns []string, sh *Sheet) bool {
+	if len(columns) > 0 {
+		return hasIDColumn(columns)
+	}
+	return sh.ContractOK && sh.ValidatedAt != nil
 }
 
 func hasIDColumn(columns []string) bool {
