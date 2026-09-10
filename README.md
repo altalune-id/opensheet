@@ -79,19 +79,29 @@ it mounts the other two HTTP surfaces under `http.basePath`.
 Data-plane routes, with `http.basePath` empty:
 
 ```
-GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}               # the tab's rows as a JSON array
-POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}               # append one row: {"values":[...]}
-PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}     # patch one row: {"column":"value"}
-GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/capabilities  # the tab's shape and contract state
-DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache         # drop this sheet's snapshots
-GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs      # the document's tab titles
-POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs      # create a tab: {"title":"Q2"}
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}              # the tab's rows as a JSON array
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}              # append one row: {"values":[...]}
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}    # one row by id, with a row ETag
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows         # create one row: {"column":"value"}
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/batch   # create many rows: {"rows":[…]} — all or nothing
+PUT    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}    # replace one row; an omitted known column is cleared
+PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}    # patch one row: {"column":"value"}
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}    # soft delete: stamps deleted_at
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/capabilities # the tab's shape and contract state
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache        # drop this sheet's snapshots
+GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs     # the document's tab titles
+POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs     # create a tab: {"title":"Q2"}
 ```
 
 A write needs `sheets:write` plus `sheets.writable` on the sheet; the tabs routes
 need `spreadsheets:read` / `spreadsheets:write`, and `spreadsheets.writable` to
 create. They name no sheet, so a key restricted to specific sheets cannot use
-them at all. `POST …/sheets/{slug}` honours `Idempotency-Key`.
+them at all. `POST …/sheets/{slug}`, `POST …/rows` and `POST …/rows/batch`
+honour `Idempotency-Key`; a retry under one key replays the first attempt's
+response rather than writing again. `PATCH`, `PUT` and `DELETE` on a row honour
+`If-Match` against the row's `ETag` — a stale tag is `412` and writes nothing,
+an absent header is last-write-wins. `PUT` and `DELETE` are idempotent by
+construction and need no key, and a delete of an already-deleted row is `204`.
 
 `…/capabilities` is authorized like the rows `GET` (`sheets:read`, or public
 visibility) and is answered from the row projection and the `sheets` row alone —

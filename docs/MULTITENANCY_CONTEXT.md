@@ -167,7 +167,12 @@ copy of this list is the probe table in `internal/boot/route_scope_test.go`:
 GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}
 POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}
 GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/capabilities
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/batch
+PUT    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}
 PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}
 DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache
 GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs
 POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs
