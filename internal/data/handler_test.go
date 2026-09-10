@@ -71,6 +71,20 @@ func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error
 	return f.rows, f.err
 }
 
+type fakeInspector struct {
+	info  sheet.TableInfo
+	err   error
+	calls []uuid.UUID
+}
+
+func (f *fakeInspector) TableInfo(_ context.Context, sh *sheet.Sheet) (sheet.TableInfo, error) {
+	f.calls = append(f.calls, sh.ID)
+	if f.err != nil {
+		return sheet.TableInfo{}, f.err
+	}
+	return f.info, nil
+}
+
 type appendCall struct {
 	sheetID  uuid.UUID
 	cells    []any
@@ -184,6 +198,7 @@ type rig struct {
 	projects      *fakeProjects
 	sheets        *fakeSheets
 	reader        *fakeReader
+	inspector     *fakeInspector
 	purger        *fakePurger
 	writer        *fakeWriter
 	tabs          *fakeTabber
@@ -207,6 +222,13 @@ func newRig() *rig {
 			ETag:      "deadbeef",
 			FetchedAt: time.Now().UTC(),
 		}},
+		inspector: &fakeInspector{info: sheet.TableInfo{
+			Columns:           []string{"id", "name"},
+			IDColumn:          true,
+			SatisfiesContract: true,
+			RowCount:          2,
+			Generation:        7,
+		}},
 		purger:        &fakePurger{},
 		writer:        &fakeWriter{appended: 1, row: gsheet.Row{"id": "42", "name": "ada"}},
 		tabs:          &fakeTabber{tabs: []string{"Rates", "Payroll"}},
@@ -223,6 +245,7 @@ func (g *rig) handler() http.Handler {
 		Projects:   g.projects,
 		Sheets:     g.sheets,
 		Reader:     g.reader,
+		Inspector:  g.inspector,
 		Purger:     g.purger,
 		Writer:     g.writer,
 		Tabs:       g.tabs,
@@ -1300,5 +1323,143 @@ func TestHandler_WriteFailureFromAnUntypedErrorIs500(t *testing.T) {
 	}
 	if got := decodeBody(t, rec)["error"]; got == nil {
 		t.Errorf("body = %s, want the shared error envelope", rec.Body.String())
+	}
+}
+
+// TestHandler_Capabilities_ReportsDriftWithoutCallingGoogle is the point of the route: a client learns a
+// sheet has no working deleted_at column before trying to delete a row, and pays no Google read for it.
+func TestHandler_Capabilities_ReportsDriftWithoutCallingGoogle(t *testing.T) {
+	g := newRig()
+	g.inspector.info = sheet.TableInfo{
+		Columns:           []string{"id", "name"},
+		IDColumn:          true,
+		SatisfiesContract: false,
+		ContractReason:    `sheet: tab "Rates" has two columns named deleted_at`,
+		RowCount:          1284,
+		Generation:        42,
+	}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"/capabilities", keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		SatisfiesContract bool   `json:"satisfiesContract"`
+		ContractReason    string `json:"contractReason"`
+		RowCount          int64  `json:"rowCount"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal err = %v; body=%s", err, rec.Body.String())
+	}
+	if got.SatisfiesContract {
+		t.Error("satisfiesContract = true, want false")
+	}
+	if want := `sheet: tab "Rates" has two columns named deleted_at`; got.ContractReason != want {
+		t.Errorf("contractReason = %q, want %q", got.ContractReason, want)
+	}
+	if got.RowCount != 1284 {
+		t.Errorf("rowCount = %d, want 1284", got.RowCount)
+	}
+	if len(g.reader.calls) != 0 {
+		t.Errorf("Rows ran %d times, want 0 — the reader is the only path to Google", len(g.reader.calls))
+	}
+}
+
+func TestHandler_CapabilitiesServesTheTableInfoOfAHealthySheet(t *testing.T) {
+	g := newRig()
+	validatedAt := time.Date(2026, 9, 10, 4, 11, 9, 0, time.UTC)
+	g.sheets.ref.Writable = true
+	g.inspector.info = sheet.TableInfo{
+		Columns:           []string{"id", "name", "email"},
+		IDColumn:          true,
+		Writable:          true,
+		SatisfiesContract: true,
+		RowCount:          1284,
+		Generation:        42,
+		ValidatedAt:       &validatedAt,
+	}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"/capabilities", keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	want := `{"columns":["id","name","email"],"idColumn":true,"softDelete":false,"writable":true,` +
+		`"satisfiesContract":true,"contractReason":"","rowCount":1284,"generation":42,` +
+		`"validatedAt":"2026-09-10T04:11:09Z"}`
+	if got := rec.Body.String(); got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got, want := rec.Header().Get("Content-Type"), "application/json; charset=utf-8"; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
+	}
+	if len(g.inspector.calls) != 1 || g.inspector.calls[0] != g.sheets.ref.ID {
+		t.Errorf("TableInfo calls = %v, want one call for %s", g.inspector.calls, g.sheets.ref.ID)
+	}
+}
+
+// SECURITY: capabilities names a sheet's shape, so it must refuse exactly as the whole-tab GET refuses.
+func TestHandler_CapabilitiesRefusalIsTheSame404(t *testing.T) {
+	g := newRig()
+	g.authz.err = apperror.New(apperror.CodeAPIKeyInsufficientScope, "Insufficient scope", codes.PermissionDenied)
+
+	rec := g.do(t, http.MethodGet, rowsPath+"/capabilities", keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got, want := rec.Body.String(), `{"error":{"code":"SHT001","message":"Sheet not found"}}`; got != want {
+		t.Errorf("body = %s, want the shared masked envelope %s", got, want)
+	}
+	if len(g.inspector.calls) != 0 {
+		t.Errorf("TableInfo ran %d times after a refused authorization, want 0", len(g.inspector.calls))
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsRead {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsRead)
+	}
+}
+
+func TestHandler_CapabilitiesNeedsNoCredentialForAPublicSheet(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+
+	rec := g.do(t, http.MethodGet, rowsPath+"/capabilities", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.authz.calls) != 0 {
+		t.Errorf("Authorize was called %d times for a public sheet, want 0", len(g.authz.calls))
+	}
+}
+
+func TestHandler_CapabilitiesPublicDisabledFromTheReadPathIsTheSame404(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.inspector.err = apperror.New(apperror.CodeSheetPublicDisabled,
+		"Public sheets are disabled on this deployment", codes.FailedPrecondition)
+
+	rec := g.do(t, http.MethodGet, rowsPath+"/capabilities", nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"error":{"code":"SHT001","message":"Sheet not found"}}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+}
+
+// The literal segment must win over {slug}, or capabilities would resolve as a sheet named "capabilities".
+func TestHandler_CapabilitiesBeatsTheSlugPattern(t *testing.T) {
+	g := newRig()
+
+	g.do(t, http.MethodGet, rowsPath+"/capabilities", keyHeader())
+
+	if len(g.reader.calls) != 0 {
+		t.Errorf("Rows ran %d times, want 0 — GET /sheets/{slug} matched the capabilities path", len(g.reader.calls))
+	}
+	if len(g.inspector.calls) != 1 {
+		t.Errorf("TableInfo calls = %d, want 1", len(g.inspector.calls))
 	}
 }

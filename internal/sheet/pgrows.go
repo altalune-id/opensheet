@@ -37,6 +37,12 @@ type pgGenerationRow struct {
 	Generation int64 `alias:"sheets.generation"`
 }
 
+type pgRowStats struct {
+	Tab        string `alias:"sheet_rows.tab"`
+	Total      int64  `alias:"row_stats.total"`
+	Tombstoned int64  `alias:"row_stats.tombstoned"`
+}
+
 type pgProjectedRow struct {
 	RowID    string `alias:"sheet_rows.row_id"`
 	RowIndex int64  `alias:"sheet_rows.row_index"`
@@ -189,6 +195,78 @@ func (s *postgresRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]Proje
 		})
 	}
 	return out, nil
+}
+
+// NOTE: an empty sheets.tab means "the first tab", whose name only Google knows — so the busiest projected tab stands in, which a rename's orphans mirror row for row.
+func (s *postgresRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return TableStats{}, err
+	}
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return TableStats{}, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	where := s.rows.SheetID.EQ(postgres.UUID(sheetID)).
+		AND(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID)))
+	if tab != "" {
+		where = where.AND(s.rows.Tab.EQ(postgres.String(tab)))
+	}
+	counted := postgres.SELECT(
+		s.rows.Tab,
+		postgres.COUNT(postgres.STAR).AS("row_stats.total"),
+		postgres.COUNT(s.rows.DeletedAt).AS("row_stats.tombstoned"),
+	).
+		FROM(s.rows).
+		WHERE(where).
+		GROUP_BY(s.rows.Tab).
+		ORDER_BY(postgres.COUNT(postgres.STAR).DESC(), s.rows.Tab.ASC()).
+		LIMIT(1)
+	var stats pgRowStats
+	if qErr := counted.QueryContext(ctx, tx, &stats); qErr != nil {
+		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+			return TableStats{Tab: tab}, nil
+		}
+		return TableStats{}, fmt.Errorf("sheet.rows.postgres.Stats: %w", qErr)
+	}
+	columns, err := s.firstLiveColumns(ctx, tx, tc, SnapshotKey{SheetID: sheetID, Tab: stats.Tab})
+	if err != nil {
+		return TableStats{}, err
+	}
+	return TableStats{
+		Tab:        stats.Tab,
+		Columns:    columns,
+		RowCount:   stats.Total - stats.Tombstoned,
+		SoftDelete: stats.Tombstoned > 0,
+	}, nil
+}
+
+func (s *postgresRowStore) firstLiveColumns(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, k SnapshotKey,
+) ([]string, error) {
+	stmt := postgres.SELECT(s.rows.Data).
+		FROM(s.rows).
+		WHERE(s.rows.SheetID.EQ(postgres.UUID(k.SheetID)).
+			AND(s.rows.Tab.EQ(postgres.String(k.Tab))).
+			AND(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID))).
+			AND(s.rows.DeletedAt.IS_NULL())).
+		ORDER_BY(s.rows.RowIndex.ASC()).
+		LIMIT(1)
+	var row pgProjectedRow
+	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sheet.rows.postgres: first live row: %w", err)
+	}
+	data, err := unmarshalRowData(row.Data)
+	if err != nil {
+		return nil, err
+	}
+	return dataColumns(data), nil
 }
 
 func (s *postgresRowStore) PurgeSheet(ctx context.Context, sheetID uuid.UUID) error {

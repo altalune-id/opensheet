@@ -160,6 +160,19 @@ The data plane cannot reuse `OrgScopeFor`: that helper takes a `session.Principa
 `internal/data/scope.go` resolves `org.BySlug` through the definer wrapper, enters org scope, then runs
 the tenanted `project.BySlug` and `sheet.BySlug`, and answers every failure with the same JSON 404.
 
+Every data-plane route resolves that way, including the ones hanging off a sheet slug. The enforced
+copy of this list is the probe table in `internal/boot/route_scope_test.go`:
+
+```
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/capabilities
+PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache
+GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs
+POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs
+```
+
 `org.BySlug`, `org.List`, `invite.ByTokenHash` and `invite.FindPendingForEmail` are deliberately
 **not** in that list: they run through `SECURITY DEFINER` wrappers because they are consulted
 before a tenant scope exists — resolving a slug, or an invite, is what establishes the scope.

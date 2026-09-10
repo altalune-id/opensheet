@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +27,14 @@ type ContractState struct {
 	Reason string
 }
 
+// TableStats is what the projection knows about one tab without reading every row of it.
+type TableStats struct {
+	Tab        string
+	Columns    []string
+	RowCount   int64
+	SoftDelete bool
+}
+
 // RowStore persists the queryable projection of a published tab.
 type RowStore interface {
 	// LockSheet takes the sheet's write lock and returns its current generation.
@@ -37,8 +47,14 @@ type RowStore interface {
 	UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error
 	// ListLive returns the live rows for one (sheet, tab) in row_index order.
 	ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error)
+	// Stats counts one tab's live rows and names its columns; an empty tab means the tab the projection holds most of.
+	Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error)
 	// PurgeSheet drops every projected row for a sheet, across tabs.
 	PurgeSheet(ctx context.Context, sheetID uuid.UUID) error
+}
+
+func dataColumns(data gsheet.Row) []string {
+	return slices.Sorted(maps.Keys(data))
 }
 
 func marshalRowData(data gsheet.Row) (string, error) {

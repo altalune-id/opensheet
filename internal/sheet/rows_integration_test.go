@@ -290,6 +290,10 @@ func TestPgRowStore_IsTenantScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "org B must read zero rows from org A's sheet")
 
+	statsForB, err := f.rows.Stats(ctxB, sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.TableStats{Tab: "Rates"}, statsForB, "org B must count zero rows in org A's sheet")
+
 	_, err = f.rows.LockSheet(ctxB, sh.ID)
 	assert.True(t, sheet.IsNotFoundError(err), "cross-org LockSheet want NotFoundError, got %T: %v", err, err)
 
@@ -324,6 +328,9 @@ func TestPgRowStore_RequiresTenantScope(t *testing.T) {
 
 	_, err = f.rows.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
+
+	_, err = f.rows.Stats(t.Context(), k.SheetID, k.Tab)
+	assert.True(t, tenant.IsMissingError(err), "Stats want MissingError, got %T: %v", err, err)
 
 	assert.True(t, tenant.IsMissingError(f.rows.PurgeSheet(t.Context(), k.SheetID)))
 }
@@ -387,4 +394,79 @@ func TestPgRowStore_MarkContract_DiscardsWhenGenerationMoved(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.ContractOK)
 	assert.Empty(t, got.ContractReason)
+}
+
+func TestPgRowStore_Stats_CountsLiveRowsAndNamesColumns(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	deletedAt := time.Now().UTC()
+	ok, err := f.rows.Replace(ctx, k, 0, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "bo"}, DeletedAt: &deletedAt},
+		{RowID: "c", RowIndex: 2, Data: gsheet.Row{"id": "c", "name": "cyd"}},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.rows.Stats(ctx, sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.TableStats{
+		Tab:        "Rates",
+		Columns:    []string{"id", "name"},
+		RowCount:   2,
+		SoftDelete: true,
+	}, got, "Stats counts live rows only and reports the tombstoned column")
+}
+
+func TestPgRowStore_Stats_IsScopedToOneTab(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+
+	ok, err := f.rows.Replace(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}, 0,
+		[]sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
+		sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = f.rows.Replace(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "Renamed"}, 1, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}},
+		{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b"}},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.rows.Stats(ctx, sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, got.RowCount, "a renamed tab's orphaned rows are not this tab's")
+}
+
+// A sheet naming no tab means "the first tab", whose name only Google knows, so the projection answers for the tab it holds.
+func TestPgRowStore_Stats_UnnamedTabAnswersForTheProjectedTab(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "")
+
+	ok, err := f.rows.Replace(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "First"}, 0,
+		[]sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
+		sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.rows.Stats(ctx, sh.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, "First", got.Tab)
+	assert.EqualValues(t, 1, got.RowCount)
+}
+
+func TestPgRowStore_Stats_UnprojectedSheetCountsNothing(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+
+	got, err := f.rows.Stats(ctx, sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.TableStats{Tab: "Rates"}, got, "nothing projected is not an error")
 }

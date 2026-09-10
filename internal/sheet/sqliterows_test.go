@@ -275,6 +275,9 @@ func TestSQLiteRowStore_RequiresTenantScope(t *testing.T) {
 	_, err = store.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
 
+	_, err = store.Stats(t.Context(), k.SheetID, k.Tab)
+	assert.True(t, tenant.IsMissingError(err), "Stats want MissingError, got %T: %v", err, err)
+
 	assert.True(t, tenant.IsMissingError(store.PurgeSheet(t.Context(), k.SheetID)))
 }
 
@@ -320,4 +323,81 @@ func TestSQLiteRowStore_MarkContract_DiscardsWhenGenerationMoved(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.ContractOK)
 	assert.Empty(t, got.ContractReason)
+}
+
+func TestSQLiteRowStore_Stats_CountsLiveRowsAndNamesColumns(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	deletedAt := time.Now().UTC()
+	ok, err := store.Replace(f.ctx(), k, 0, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "bo"}, DeletedAt: &deletedAt},
+		{RowID: "c", RowIndex: 2, Data: gsheet.Row{"id": "c", "name": "cyd"}},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := store.Stats(f.ctx(), sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.TableStats{
+		Tab:        "Rates",
+		Columns:    []string{"id", "name"},
+		RowCount:   2,
+		SoftDelete: true,
+	}, got, "Stats counts live rows only and reports the tombstoned column")
+}
+
+func TestSQLiteRowStore_Stats_IsScopedToOneTab(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+
+	for tab, rows := range map[string][]sheet.ProjectedRow{
+		"Rates": {{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
+		"Renamed": {
+			{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}},
+			{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b"}},
+		},
+	} {
+		ok, err := store.Replace(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: tab},
+			int64(len(rows)-1), rows, sheet.ContractState{OK: true})
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+
+	got, err := store.Stats(f.ctx(), sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, got.RowCount, "a renamed tab's orphaned rows are not this tab's")
+}
+
+// A sheet naming no tab means "the first tab", whose name only Google knows, so the projection answers for the tab it holds.
+func TestSQLiteRowStore_Stats_UnnamedTabAnswersForTheProjectedTab(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "First"}
+
+	ok, err := store.Replace(f.ctx(), k, 0, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := store.Stats(f.ctx(), sh.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, "First", got.Tab)
+	assert.EqualValues(t, 1, got.RowCount)
+}
+
+func TestSQLiteRowStore_Stats_UnprojectedSheetCountsNothing(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+
+	got, err := store.Stats(f.ctx(), sh.ID, "Rates")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.TableStats{Tab: "Rates"}, got, "nothing projected is not an error")
 }

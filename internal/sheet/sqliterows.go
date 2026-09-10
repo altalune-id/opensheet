@@ -36,6 +36,12 @@ type sqliteProjectedRow struct {
 	Data     string `alias:"sheet_rows.data"`
 }
 
+type sqliteRowStats struct {
+	Tab        string `alias:"sheet_rows.tab"`
+	Total      int64  `alias:"row_stats.total"`
+	Tombstoned int64  `alias:"row_stats.tombstoned"`
+}
+
 type sqliteGenerationRow struct {
 	Generation int64 `alias:"sheets.generation"`
 }
@@ -186,6 +192,69 @@ func (s *sqliteRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]Project
 		})
 	}
 	return out, nil
+}
+
+// NOTE: an empty sheets.tab means "the first tab", whose name only Google knows — so the busiest projected tab stands in, which a rename's orphans mirror row for row.
+func (s *sqliteRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return TableStats{}, err
+	}
+	where := s.rows.SheetID.EQ(sqlite.String(sheetID.String())).
+		AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String())))
+	if tab != "" {
+		where = where.AND(s.rows.Tab.EQ(sqlite.String(tab)))
+	}
+	counted := sqlite.SELECT(
+		s.rows.Tab,
+		sqlite.COUNT(sqlite.STAR).AS("row_stats.total"),
+		sqlite.COUNT(s.rows.DeletedAt).AS("row_stats.tombstoned"),
+	).
+		FROM(s.rows).
+		WHERE(where).
+		GROUP_BY(s.rows.Tab).
+		ORDER_BY(sqlite.COUNT(sqlite.STAR).DESC(), s.rows.Tab.ASC()).
+		LIMIT(1)
+	var stats sqliteRowStats
+	if qErr := counted.QueryContext(ctx, s.db, &stats); qErr != nil {
+		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+			return TableStats{Tab: tab}, nil
+		}
+		return TableStats{}, fmt.Errorf("sheet.rows.sqlite.Stats: %w", qErr)
+	}
+	columns, err := s.firstLiveColumns(ctx, tc, SnapshotKey{SheetID: sheetID, Tab: stats.Tab})
+	if err != nil {
+		return TableStats{}, err
+	}
+	return TableStats{
+		Tab:        stats.Tab,
+		Columns:    columns,
+		RowCount:   stats.Total - stats.Tombstoned,
+		SoftDelete: stats.Tombstoned > 0,
+	}, nil
+}
+
+func (s *sqliteRowStore) firstLiveColumns(ctx context.Context, tc tenant.Context, k SnapshotKey) ([]string, error) {
+	stmt := sqlite.SELECT(s.rows.Data).
+		FROM(s.rows).
+		WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+			AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+			AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
+			AND(s.rows.DeletedAt.IS_NULL())).
+		ORDER_BY(s.rows.RowIndex.ASC()).
+		LIMIT(1)
+	var row sqliteProjectedRow
+	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sheet.rows.sqlite: first live row: %w", err)
+	}
+	data, err := unmarshalRowData(row.Data)
+	if err != nil {
+		return nil, err
+	}
+	return dataColumns(data), nil
 }
 
 func (s *sqliteRowStore) PurgeSheet(ctx context.Context, sheetID uuid.UUID) error {

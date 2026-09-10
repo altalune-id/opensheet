@@ -3,6 +3,7 @@ package fakes
 import (
 	"context"
 	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -302,6 +303,7 @@ type SheetRows struct {
 	ReplaceErr      error
 	MarkContractErr error
 	ListLiveErr     error
+	StatsErr        error
 }
 
 // NewSheetRows returns an empty in-memory sheet.RowStore.
@@ -428,6 +430,45 @@ func (f *SheetRows) ListLive(_ context.Context, k sheet.SnapshotKey) ([]sheet.Pr
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RowIndex < out[j].RowIndex })
 	return out, nil
+}
+
+func (f *SheetRows) Stats(_ context.Context, sheetID uuid.UUID, tab string) (sheet.TableStats, error) {
+	if f.StatsErr != nil {
+		return sheet.TableStats{}, f.StatsErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := sheet.TableStats{Tab: tab}
+	for k, rows := range f.data {
+		if k.SheetID != sheetID || (tab != "" && k.Tab != tab) {
+			continue
+		}
+		stats := statsOf(k.Tab, rows)
+		if out.Tab != "" && (stats.RowCount < out.RowCount ||
+			(stats.RowCount == out.RowCount && stats.Tab > out.Tab)) {
+			continue
+		}
+		out = stats
+	}
+	return out, nil
+}
+
+func statsOf(tab string, rows []sheet.ProjectedRow) sheet.TableStats {
+	out := sheet.TableStats{Tab: tab}
+	live := make([]sheet.ProjectedRow, 0, len(rows))
+	for _, row := range rows {
+		if row.DeletedAt != nil {
+			out.SoftDelete = true
+			continue
+		}
+		live = append(live, row)
+	}
+	out.RowCount = int64(len(live))
+	sort.Slice(live, func(i, j int) bool { return live[i].RowIndex < live[j].RowIndex })
+	if len(live) > 0 {
+		out.Columns = slices.Sorted(maps.Keys(live[0].Data))
+	}
+	return out
 }
 
 func (f *SheetRows) PurgeSheet(_ context.Context, sheetID uuid.UUID) error {

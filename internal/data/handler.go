@@ -25,6 +25,11 @@ type Reader interface {
 	Rows(ctx context.Context, sh *sheet.Sheet) (sheet.Rows, error)
 }
 
+// Inspector reports what one published sheet's projection and contract state say about its table.
+type Inspector interface {
+	TableInfo(ctx context.Context, sh *sheet.Sheet) (sheet.TableInfo, error)
+}
+
 // Purger drops every cached tab of one sheet.
 type Purger interface {
 	PurgeCache(ctx context.Context, sheetID uuid.UUID) error
@@ -64,6 +69,7 @@ const mountSuffix = "/api/v1"
 type handler struct {
 	resolver   resolver
 	reader     Reader
+	inspector  Inspector
 	purger     Purger
 	writer     Writer
 	tabs       Tabber
@@ -80,6 +86,7 @@ type HandlerParams struct {
 	Projects   Projects
 	Sheets     Sheets
 	Reader     Reader
+	Inspector  Inspector
 	Purger     Purger
 	Writer     Writer
 	Tabs       Tabber
@@ -94,6 +101,7 @@ func NewHandler(p HandlerParams) http.Handler {
 	h := &handler{
 		resolver:   resolver{orgs: p.Orgs, projects: p.Projects, sheets: p.Sheets},
 		reader:     p.Reader,
+		inspector:  p.Inspector,
 		purger:     p.Purger,
 		writer:     p.Writer,
 		tabs:       p.Tabs,
@@ -106,6 +114,7 @@ func NewHandler(p HandlerParams) http.Handler {
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}", h.rows)
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}", h.appendRow)
 	inner.HandleFunc("PATCH /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.patchRow)
+	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/capabilities", h.capabilities)
 	inner.HandleFunc("DELETE /orgs/{org}/projects/{project}/sheets/{slug}/cache", h.purge)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.listTabs)
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.createTab)
@@ -131,6 +140,26 @@ func (h *handler) rows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeRows(w, r, sc.sheet, rows)
+}
+
+// NOTE: answered from the projection and the sheets row, so polling it costs no Google read.
+func (h *handler) capabilities(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as rows does.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.allowRead(r, sc); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	info, err := h.inspector.TableInfo(r.Context(), sc.sheet)
+	if err != nil {
+		h.fail(w, r, maskPublicDisabled(err))
+		return
+	}
+	h.writeJSON(w, r, http.StatusOK, info)
 }
 
 func (h *handler) purge(w http.ResponseWriter, r *http.Request) {

@@ -53,6 +53,7 @@ func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *s
 		Projects:   projectsForData{svc: s.Projects},
 		Sheets:     sheetsForData{svc: s.Sheets},
 		Reader:     s.Read,
+		Inspector:  s.Read,
 		Purger:     s.Sheets,
 		Writer:     s.Write,
 		Tabs:       s.Spreadsheets,
