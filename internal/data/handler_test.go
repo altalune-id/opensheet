@@ -125,6 +125,11 @@ type batchCall struct {
 	rows    []map[string]any
 }
 
+type deleteCall struct {
+	sheetID uuid.UUID
+	rowID   string
+}
+
 type fakeWriter struct {
 	appended   int
 	appendErr  error
@@ -135,11 +140,13 @@ type fakeWriter struct {
 	createErr  error
 	createsErr error
 	replaceErr error
+	deleteErr  error
 	appends    []appendCall
 	patches    []patchCall
 	creates    []rowWriteCall
 	batches    []batchCall
 	replaces   []rowWriteCall
+	deletes    []deleteCall
 }
 
 func (f *fakeWriter) Append(_ context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error) {
@@ -182,6 +189,11 @@ func (f *fakeWriter) ReplaceRow(
 		return sheet.WrittenRow{}, f.replaceErr
 	}
 	return f.written, nil
+}
+
+func (f *fakeWriter) SoftDeleteRow(_ context.Context, sh *sheet.Sheet, id string) error {
+	f.deletes = append(f.deletes, deleteCall{sheetID: sh.ID, rowID: id})
+	return f.deleteErr
 }
 
 type addTabCall struct {
@@ -1933,5 +1945,103 @@ func TestHandler_CreateRowsRefusesAnOversizeBodyBeforeParsing(t *testing.T) {
 	}
 	if len(g.writer.batches) != 0 {
 		t.Error("an oversize body must be refused before the batch is parsed")
+	}
+}
+
+func TestHandler_DeleteRowReturns204AndNoBody(t *testing.T) {
+	g := newRig()
+
+	rec := g.do(t, http.MethodDelete, rowPath, keyHeader())
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); body != "" {
+		t.Errorf("body = %s, want it empty", body)
+	}
+	if len(g.writer.deletes) != 1 {
+		t.Fatalf("SoftDeleteRow calls = %d, want 1", len(g.writer.deletes))
+	}
+	call := g.writer.deletes[0]
+	if call.sheetID != g.sheets.ref.ID {
+		t.Errorf("sheetID = %s, want the resolved sheet", call.sheetID)
+	}
+	if call.rowID != "42" {
+		t.Errorf("rowID = %q, want the path id", call.rowID)
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+}
+
+// SECURITY: allowRead bypasses authorization for a public sheet, so a delete route that reused it would
+// hand anonymous delete access to every public sheet.
+func TestHandler_DeleteRowAuthorizesEvenOnAPublicSheet(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.authz.err = errors.New("no grant")
+
+	rec := g.do(t, http.MethodDelete, rowPath, nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for an unauthorized delete; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsWrite {
+		t.Errorf("Authorize calls = %+v, want one call with %q", g.authz.calls, authn.ScopeSheetsWrite)
+	}
+	if len(g.writer.deletes) != 0 {
+		t.Error("an unauthorized delete must not reach the workflow")
+	}
+}
+
+func TestHandler_DeleteRowReportsANonWritableSheetAsForbidden(t *testing.T) {
+	g := newRig()
+	g.writer.deleteErr = &sheet.NotWritableError{SheetID: g.sheets.ref.ID.String(), Slug: "prices"}
+
+	rec := g.do(t, http.MethodDelete, rowPath, keyHeader())
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteRowReportsAnUnknownIDAsNotFound(t *testing.T) {
+	g := newRig()
+	g.writer.deleteErr = &sheet.RowNotFoundError{ID: "42"}
+
+	rec := g.do(t, http.MethodDelete, rowPath, keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteRowReportsADriftedSheetAsAConflict(t *testing.T) {
+	g := newRig()
+	g.writer.deleteErr = &sheet.ContractViolationError{Slug: "prices", Reason: "duplicate id"}
+
+	rec := g.do(t, http.MethodDelete, rowPath, keyHeader())
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteRowReportsAMissingDeletedAtColumnAsUnprocessable(t *testing.T) {
+	g := newRig()
+	g.writer.deleteErr = &sheet.SoftDeleteUnsupportedError{Slug: "prices", Tab: "Rates"}
+
+	rec := g.do(t, http.MethodDelete, rowPath, keyHeader())
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, apperror.CodeSheetSoftDeleteUnsupported) {
+		t.Errorf("body = %s, want it to name %s so a client can branch on it",
+			body, apperror.CodeSheetSoftDeleteUnsupported)
+	}
+	if !strings.Contains(body, "deleted_at") {
+		t.Errorf("body = %s, want it to name the remedy: add a deleted_at column", body)
 	}
 }

@@ -819,3 +819,32 @@ func IsBatchTooLargeError(err error) bool {
 	_, ok := errors.AsType[*BatchTooLargeError](err)
 	return ok
 }
+
+// SoftDeleteUnsupportedError signals a delete on a tab whose header row carries no deleted_at column.
+type SoftDeleteUnsupportedError struct {
+	Slug string
+	Tab  string
+}
+
+func (e *SoftDeleteUnsupportedError) Error() string {
+	return fmt.Sprintf("sheet: %q: tab %q has no %s column", e.Slug, e.Tab, deletedAtColumn)
+}
+
+// ToAppError maps SoftDeleteUnsupportedError to an InvalidArgument envelope its own status override lifts to 422.
+func (e *SoftDeleteUnsupportedError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetSoftDeleteUnsupported,
+		"This tab cannot record a deletion: add a column headed "+deletedAtColumn+" to it, then delete the row again",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetSoftDeleteUnsupported,
+			Meta: map[string]string{"slug": e.Slug, "tab": e.Tab, "column": deletedAtColumn},
+		},
+	)
+}
+
+// IsSoftDeleteUnsupportedError reports whether err's tree contains a *SoftDeleteUnsupportedError.
+func IsSoftDeleteUnsupportedError(err error) bool {
+	_, ok := errors.AsType[*SoftDeleteUnsupportedError](err)
+	return ok
+}

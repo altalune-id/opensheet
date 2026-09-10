@@ -43,6 +43,7 @@ type Writer interface {
 	CreateRow(ctx context.Context, sh *sheet.Sheet, fields map[string]any) (sheet.WrittenRow, error)
 	CreateRows(ctx context.Context, sh *sheet.Sheet, rows []map[string]any) ([]string, error)
 	ReplaceRow(ctx context.Context, sh *sheet.Sheet, id string, fields map[string]any) (sheet.WrittenRow, error)
+	SoftDeleteRow(ctx context.Context, sh *sheet.Sheet, id string) error
 }
 
 // Tabber lists and creates the tabs of one registered spreadsheet.
@@ -122,6 +123,7 @@ func NewHandler(p HandlerParams) http.Handler {
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}/rows/batch", h.createRows)
 	inner.HandleFunc("PUT /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.replaceRow)
 	inner.HandleFunc("PATCH /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.patchRow)
+	inner.HandleFunc("DELETE /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.deleteRow)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/capabilities", h.capabilities)
 	inner.HandleFunc("DELETE /orgs/{org}/projects/{project}/sheets/{slug}/cache", h.purge)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.listTabs)

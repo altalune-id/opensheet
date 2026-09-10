@@ -67,15 +67,23 @@ func (w *ReadWorkflow) RowByID(ctx context.Context, sh *Sheet, id string) (Row, 
 	return out, nil
 }
 
-// NOTE: an empty sheets.tab names the first tab, whose name only Google knows, so the busiest projected tab stands in — the resolution Stats already makes.
 func (w *ReadWorkflow) rowKey(ctx context.Context, sh *Sheet) (SnapshotKey, error) {
+	key, err := projectedKey(ctx, w.rows, sh)
+	if err != nil {
+		return SnapshotKey{}, w.unexpected(ctx, "sheet.RowByID: resolve the tab", err, "sheet_id", sh.ID)
+	}
+	return key, nil
+}
+
+// NOTE: an empty sheets.tab names the first tab, whose name only Google knows, so the busiest projected tab stands in — the resolution Stats already makes.
+func projectedKey(ctx context.Context, rows RowStore, sh *Sheet) (SnapshotKey, error) {
 	tab := strings.TrimSpace(sh.Tab)
 	if tab != "" {
 		return SnapshotKey{SheetID: sh.ID, Tab: tab}, nil
 	}
-	stats, err := w.rows.Stats(ctx, sh.ID, "")
+	stats, err := rows.Stats(ctx, sh.ID, "")
 	if err != nil {
-		return SnapshotKey{}, w.unexpected(ctx, "sheet.RowByID: resolve the tab", err, "sheet_id", sh.ID)
+		return SnapshotKey{}, err
 	}
 	return SnapshotKey{SheetID: sh.ID, Tab: stats.Tab}, nil
 }
@@ -321,6 +329,86 @@ func (w *WriteWorkflow) applyBatchCreate(
 		return nil
 	})
 	return w.outcome(ctx, sh, tgt, key, "sheet.CreateRows", out, google, situation, runErr)
+}
+
+// SoftDeleteRow tombstones the row id addresses, reporting success for a row already tombstoned.
+func (w *WriteWorkflow) SoftDeleteRow(ctx context.Context, sh *Sheet, id string) error {
+	ctx, span := tracer.Start(ctx, "sheet.SoftDeleteRow",
+		trace.WithAttributes(
+			attribute.String("sheet.id", sh.ID.String()),
+			attribute.String("sheet.slug", sh.Slug),
+		))
+	defer span.End()
+
+	// SECURITY: the flag is checked before any Google call, so a non-writable sheet cannot be probed for existence through timing or error shape.
+	if !sh.Writable {
+		return recordSpanError(span, &NotWritableError{SheetID: sh.ID.String(), Slug: sh.Slug})
+	}
+	// NOTE: the persisted header flag, so a tab that cannot record a deletion is refused before any Google call — the case capabilities.softDelete warns a client about.
+	if !sh.SoftDelete {
+		return recordSpanError(span, &SoftDeleteUnsupportedError{Slug: sh.Slug, Tab: strings.TrimSpace(sh.Tab)})
+	}
+	contract, err := w.rows.ContractOf(ctx, sh.ID)
+	if err != nil {
+		return recordSpanError(span, w.passthrough(ctx, "sheet.SoftDeleteRow: contract state", err, sh))
+	}
+	if !contract.OK {
+		return recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: contract.Reason})
+	}
+
+	// NOTE: the tombstone check precedes every precondition, because a retry of a delete that already
+	// landed carries a tag no live row matches and idempotency answers it before any of them.
+	tombstoned, err := w.tombstoned(ctx, sh, id)
+	if err != nil {
+		return recordSpanError(span, err)
+	}
+	if tombstoned {
+		span.SetAttributes(attribute.Bool("sheet.tombstoned", true))
+		return nil
+	}
+
+	tgt, err := w.target(ctx, sh)
+	if err != nil {
+		return recordSpanError(span, err)
+	}
+	span.SetAttributes(attribute.String("sheet.tab", tgt.tab))
+
+	key := SnapshotKey{SheetID: sh.ID, Tab: tgt.tab}
+	plan := rowUpdate{
+		situation: "sheet.SoftDeleteRow",
+		settled: func(row []string, cols rowColumns) bool {
+			return isTombstoneCell(cellAt(row, cols.del))
+		},
+		build: func(headers, row []string, cols rowColumns) ([]any, error) {
+			return tombstoneRowCells(headers, row, cols, sh.Slug, tgt.tab, time.Now())
+		},
+	}
+	out, err := w.applyUpdate(ctx, sh, tgt, key, id, plan)
+	if err != nil {
+		return recordSpanError(span, err)
+	}
+	if !out.wrote {
+		return nil
+	}
+	span.SetAttributes(attribute.Bool("sheet.projected", out.projected))
+	w.settle(ctx, sh, key, out)
+	return nil
+}
+
+// NOTE: a projection short of the tab it mirrors cannot report absence, so an unresolved id falls through to the fresh read inside the lock, which is what refuses an unknown one.
+func (w *WriteWorkflow) tombstoned(ctx context.Context, sh *Sheet, id string) (bool, error) {
+	key, err := projectedKey(ctx, w.rows, sh)
+	if err != nil {
+		return false, w.unexpected(ctx, "sheet.SoftDeleteRow: resolve the tab", err, "sheet_id", sh.ID)
+	}
+	row, err := w.rows.RowByID(ctx, key, id)
+	if IsRowNotFoundError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, w.passthrough(ctx, "sheet.SoftDeleteRow: read the projected row", err, sh)
+	}
+	return row.DeletedAt != nil, nil
 }
 
 // NOTE: the tag is the payload hash of one row, taken with etagOf, so a written row and a read row cannot tag the same bytes differently.

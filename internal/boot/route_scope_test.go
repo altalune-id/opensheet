@@ -120,6 +120,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, dbase + "/sheets/probe-sheet/rows/batch", nil},
 		{http.MethodPut, dbase + "/sheets/probe-sheet/rows/" + id, nil},
 		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/rows/" + id, nil},
 		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
 		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},

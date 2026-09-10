@@ -92,6 +92,7 @@ type writeOutcome struct {
 type rowUpdate struct {
 	situation string
 	liveOnly  bool
+	settled   func(row []string, cols rowColumns) bool
 	build     func(headers, row []string, cols rowColumns) ([]any, error)
 }
 
@@ -233,6 +234,10 @@ func (w *WriteWorkflow) applyUpdate(
 		}
 		if plan.liveOnly && isTombstoneCell(cellAt(tbl.Rows[rowIdx], cols.del)) {
 			return &RowNotFoundError{ID: id}
+		}
+		// NOTE: the fresh read is what decides a delete already applied, so a retry the projection could not answer costs no second write and keeps the first tombstone's instant.
+		if plan.settled != nil && plan.settled(tbl.Rows[rowIdx], cols) {
+			return nil
 		}
 		cells, bErr := plan.build(tbl.Headers, tbl.Rows[rowIdx], cols)
 		if bErr != nil {
@@ -465,6 +470,14 @@ func replaceRowCells(headers []string, cols rowColumns, fields map[string]any, i
 	}
 	replaced[cols.id] = id
 	return fillCells(headers, nil, replaced), nil
+}
+
+// NOTE: RFC3339 in UTC, so the cell's text order matches chronological order the way the projection column's own encoding does.
+func tombstoneRowCells(headers, row []string, cols rowColumns, slug, tab string, at time.Time) ([]any, error) {
+	if cols.del < 0 {
+		return nil, &SoftDeleteUnsupportedError{Slug: slug, Tab: tab}
+	}
+	return fillCells(headers, row, map[int]any{cols.del: at.UTC().Format(time.RFC3339)}), nil
 }
 
 func createRowCells(

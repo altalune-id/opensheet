@@ -207,6 +207,25 @@ func (h *handler) replaceRow(w http.ResponseWriter, r *http.Request) {
 	h.writeRow(w, r, http.StatusOK, row)
 }
 
+func (h *handler) deleteRow(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as createRow does, and for the same reason — a mirrored allowRead
+	// would hand anonymous delete access to every public sheet.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	if dErr := h.writer.SoftDeleteRow(r.Context(), sc.sheet, r.PathValue("id")); dErr != nil {
+		h.fail(w, r, dErr)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *handler) listTabs(w http.ResponseWriter, r *http.Request) {
 	// SECURITY: resolve then authorize, as rows does.
 	r, sc, err := h.resolveProject(r)

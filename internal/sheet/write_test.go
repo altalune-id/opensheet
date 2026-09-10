@@ -1451,3 +1451,220 @@ func TestWriteWorkflow_CreateRows_RunsTheLockAndTheProjectionInOneUnitOfWork(t *
 	assert.Equal(t, int64(1), h.units.runs.Load(),
 		"the Google read, the one append and every projection write share one transaction")
 }
+
+const twoLiveTable = `{"values":[["id","name","deleted_at"],["1","ada",""],["2","bob",""]]}`
+
+func updateCount(f *fakeWriteSheets) int {
+	n := 0
+	for _, r := range f.recorded() {
+		if r.method == http.MethodPut {
+			n++
+		}
+	}
+	return n
+}
+
+func sentCells(t *testing.T, req recordedRequest) []any {
+	t.Helper()
+	var sent struct {
+		Values [][]any `json:"values"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(req.body), &sent))
+	require.Len(t, sent.Values, 1, "one row per update request")
+	return sent.Values[0]
+}
+
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet
+// cannot be probed for existence through timing or error shape.
+func TestWriteWorkflow_SoftDeleteRowRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", false)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	require.Error(t, err)
+	assert.True(t, sheet.IsNotWritableError(err), "got %v", err)
+	assert.Equal(t, http.StatusForbidden, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "no request may reach Google for a non-writable sheet")
+}
+
+func TestWriteWorkflow_SoftDeleteRow_WritesAnRFC3339TombstoneAndDropsTheRowFromThePayload(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, twoLiveTable)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+	before := h.rows.Generation(sh.ID)
+
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+
+	req := h.google.lastOf(t, http.MethodPut)
+	assert.Contains(t, req.url, "valueInputOption=RAW", "a tombstone is a cell value like any other, so it is written RAW")
+	assert.Contains(t, decodedURL(t, req.url), "'Rates'!A2:C2", "the row is addressed at row_index+2, never by deleteDimension")
+	cells := sentCells(t, req)
+	require.Len(t, cells, 3)
+	assert.Equal(t, []any{"1", "ada"}, cells[:2], "the columns the delete does not touch are written back unchanged")
+	stamp, ok := cells[2].(string)
+	require.True(t, ok, "the tombstone cell = %#v, want a string", cells[2])
+	at, err := time.Parse(time.RFC3339, stamp)
+	require.NoError(t, err, "the tombstone cell must be an RFC3339 instant, so its text order is chronological")
+	assert.WithinDuration(t, time.Now(), at, time.Minute)
+
+	projected := h.rows.Projected(key)
+	require.Len(t, projected, 2, "a tombstoned row stays in the projection")
+	require.Equal(t, "1", projected[0].RowID)
+	assert.NotNil(t, projected[0].DeletedAt, "the projection records the tombstone")
+
+	live, err := h.rows.ListLive(t.Context(), key)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, "2", live[0].RowID)
+
+	snap, found, err := h.snaps.Get(t.Context(), key)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.JSONEq(t, `[{"id":"2","name":"bob"}]`, string(snap.Payload), "the rebuilt payload excludes the deleted row")
+	assert.Equal(t, before+1, h.rows.Generation(sh.ID), "the write bumps the generation once")
+	assert.Zero(t, h.unex.Load(), "a clean delete reports no incident")
+}
+
+// The write count is the assertion: a second delete answered from the projection proves the idempotent
+// case short-circuits, where a rewritten tombstone would pass a status-only check and lose the first instant.
+func TestWriteWorkflow_SoftDeleteRow_IsIdempotentAndWritesOnce(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, softDeleteTable)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+	})
+
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	afterFirst := h.google.callCount()
+	require.Equal(t, 1, updateCount(h.google))
+	first := h.rows.Projected(key)
+	require.Len(t, first, 1)
+	require.NotNil(t, first[0].DeletedAt)
+
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"), "a delete of a tombstoned row is 204, not an error")
+	assert.Equal(t, 1, updateCount(h.google), "the second delete must be answered from the projection")
+	assert.Equal(t, afterFirst, h.google.callCount(), "an already-tombstoned row costs no Google call at all")
+
+	again := h.rows.Projected(key)
+	require.Len(t, again, 1)
+	require.NotNil(t, again[0].DeletedAt)
+	assert.Equal(t, *first[0].DeletedAt, *again[0].DeletedAt, "the first tombstone's instant must survive the retry")
+}
+
+func TestWriteWorkflow_SoftDeleteRow_RefusesAnUnknownID(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, softDeleteTable)
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "99")
+	require.Error(t, err)
+	assert.True(t, sheet.IsRowNotFoundError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusNotFound, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, updateCount(h.google), "an unknown id is refused before the write")
+}
+
+// The persisted flag is what task 1 exists for: the refusal names the remedy and costs no Google call,
+// which is the case capabilities.softDelete warns a client about.
+func TestWriteWorkflow_SoftDeleteRow_RefusesATabWithNoDeletedAtColumnWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	h.seedContract(sh)
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	require.Error(t, err)
+	assert.True(t, sheet.IsSoftDeleteUnsupportedError(err), "got %T: %v", err, err)
+	ae := appErrorOf(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, ae.HTTPStatus())
+	assert.Equal(t, apperror.CodeSheetSoftDeleteUnsupported, ae.Code())
+	assert.Contains(t, ae.Message(), "deleted_at", "the copy must name the remedy a client can act on")
+	assert.Zero(t, h.google.callCount(), "a tab that cannot record a deletion is refused before any Google call")
+}
+
+// The flag mirrors the last refresh, so the fresh read inside the lock is what refuses a column dropped since.
+func TestWriteWorkflow_SoftDeleteRow_RefusesADeletedAtColumnDroppedSinceTheLastRefresh(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, idNameTable)
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	require.Error(t, err)
+	assert.True(t, sheet.IsSoftDeleteUnsupportedError(err), "got %T: %v", err, err)
+	assert.Zero(t, updateCount(h.google), "the refusal precedes the write")
+}
+
+func TestWriteWorkflow_SoftDeleteRow_RefusesADriftedContractWithoutCallingGoogle(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: false, Reason: "duplicate id"})
+
+	err := h.wf.SoftDeleteRow(t.Context(), sh, "1")
+	require.Error(t, err)
+	assert.True(t, sheet.IsContractViolationError(err), "got %T: %v", err, err)
+	assert.Equal(t, http.StatusConflict, appErrorOf(t, err).HTTPStatus())
+	assert.Zero(t, h.google.callCount(), "a sheet whose rows cannot be addressed by id is refused before any read")
+}
+
+// NOTE: LockSheet is enroll-or-own, so a delete that does not run inside one transaction takes no lock at all.
+func TestWriteWorkflow_SoftDeleteRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, softDeleteTable)
+
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	assert.Equal(t, int64(1), h.units.runs.Load(),
+		"the Google read, the Google write and the projection write share one transaction")
+}
+
+// The tab GET is the surface a delete must clear the row from, and the row GET is what still answers 404.
+func TestWriteWorkflow_SoftDeleteRow_RemovesTheRowFromBothReadsWithNoRefetch(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	sh.SoftDelete = true
+	h.seedContract(sh)
+	h.google.setTable(http.StatusOK, twoLiveTable)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{
+		{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}},
+		{RowID: "2", RowIndex: 1, Data: gsheet.Row{"id": "2", "name": "bob"}},
+	})
+
+	require.NoError(t, h.wf.SoftDeleteRow(t.Context(), sh, "1"))
+	afterWrite := h.google.callCount()
+
+	got, err := h.rf.Rows(t.Context(), sh)
+	require.NoError(t, err)
+	assert.Equal(t, []gsheet.Row{{"id": "2", "name": "bob"}}, got.Values, "the tab read must not carry the deleted row")
+
+	_, err = h.rf.RowByID(t.Context(), sh, "1")
+	assert.True(t, sheet.IsRowNotFoundError(err), "a tombstoned row reads back as not found: %v", err)
+	assert.Equal(t, afterWrite, h.google.callCount(), "both reads must be answered from the rebuilt snapshot")
+}

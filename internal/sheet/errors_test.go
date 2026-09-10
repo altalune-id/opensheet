@@ -178,3 +178,38 @@ func TestIDMismatchError_MapsTo422(t *testing.T) {
 		t.Errorf("HTTPStatus() = %d, want %d", got, http.StatusUnprocessableEntity)
 	}
 }
+
+func TestSoftDeleteUnsupportedError(t *testing.T) {
+	e := &SoftDeleteUnsupportedError{Slug: "prices", Tab: "Rates"}
+	msg := e.Error()
+	if !strings.Contains(msg, "prices") || !strings.Contains(msg, "Rates") {
+		t.Errorf("Error() = %q, want it to carry the slug and the tab", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetSoftDeleteUnsupported)
+
+	if !IsSoftDeleteUnsupportedError(e) {
+		t.Error("IsSoftDeleteUnsupportedError = false, want true")
+	}
+	if !IsSoftDeleteUnsupportedError(fmt.Errorf("wrap: %w", e)) {
+		t.Error("IsSoftDeleteUnsupportedError did not unwrap")
+	}
+	if IsSoftDeleteUnsupportedError(errors.New("plain")) {
+		t.Error("IsSoftDeleteUnsupportedError matched a plain error")
+	}
+	if IsSoftDeleteUnsupportedError(nil) {
+		t.Error("IsSoftDeleteUnsupportedError matched nil")
+	}
+}
+
+func TestSoftDeleteUnsupportedError_MapsTo422AndNamesTheRemedy(t *testing.T) {
+	app := (&SoftDeleteUnsupportedError{Slug: "prices", Tab: "Rates"}).ToAppError()
+	if got := app.Code(); got != "SHT029" {
+		t.Errorf("Code() = %q, want %q", got, "SHT029")
+	}
+	if got := app.HTTPStatus(); got != http.StatusUnprocessableEntity {
+		t.Errorf("HTTPStatus() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := app.Message(); !strings.Contains(got, "deleted_at") {
+		t.Errorf("Message() = %q, want it to name the column a client must add", got)
+	}
+}
