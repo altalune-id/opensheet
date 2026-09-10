@@ -221,6 +221,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	)
 	writeWorkflow := sheet.NewWriteWorkflow(
 		snaps,
+		sheetRows,
 		sheetAttempts,
 		spreadsheetsForSheet{svc: spreadsheets},
 		tokensForSheetWrite{svc: credentials},

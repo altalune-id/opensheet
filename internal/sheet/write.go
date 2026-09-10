@@ -24,6 +24,7 @@ const idColumn = "id"
 // WriteWorkflow mutates a writable sheet's rows and invalidates its snapshot.
 type WriteWorkflow struct {
 	snaps      SnapshotStore
+	rows       RowStore
 	attempts   IdempotencyStore
 	sources    Sources
 	tokens     TokenSources
@@ -36,6 +37,7 @@ type WriteWorkflow struct {
 // NewWriteWorkflow binds the write path to its dependencies.
 func NewWriteWorkflow(
 	snaps SnapshotStore,
+	rows RowStore,
 	attempts IdempotencyStore,
 	sources Sources,
 	tokens TokenSources,
@@ -46,6 +48,7 @@ func NewWriteWorkflow(
 ) *WriteWorkflow {
 	return &WriteWorkflow{
 		snaps:      snaps,
+		rows:       rows,
 		attempts:   attempts,
 		sources:    sources,
 		tokens:     tokens,
@@ -121,6 +124,7 @@ func (w *WriteWorkflow) Append(ctx context.Context, sh *Sheet, cells []any, idem
 	if reserved {
 		w.complete(ctx, sh, key, n)
 	}
+	// NOTE: 2b's keyed create supersedes this purge — it is header-aware, and will need UpdatedRange from gsheet.Writer.Append for the row_index.
 	w.purge(ctx, sh)
 	return n, nil
 }
@@ -241,6 +245,9 @@ func (w *WriteWorkflow) purge(ctx context.Context, sh *Sheet) {
 	if err := w.snaps.PurgeSheet(ctx, sh.ID); err != nil {
 		_ = w.unexpected(ctx, "sheet.write: purge snapshot", err, "sheet_id", sh.ID)
 	}
+	if err := w.rows.PurgeSheet(ctx, sh.ID); err != nil {
+		_ = w.unexpected(ctx, "sheet.write: purge projection", err, "sheet_id", sh.ID)
+	}
 }
 
 func (w *WriteWorkflow) fail(ctx context.Context, situation string, err error, sh *Sheet, src Source) error {
@@ -344,6 +351,9 @@ func rowOf(headers []string, cells []any) gsheet.Row {
 	names, _ := gsheet.NormalizeHeaders(headers)
 	out := make(gsheet.Row, len(names))
 	for i, name := range names {
+		if isDeletedAtHeader(headers[i]) {
+			continue
+		}
 		out[name] = cellText(cells[i])
 	}
 	return out

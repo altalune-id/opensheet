@@ -150,6 +150,7 @@ func (f *fakeWriteSheets) factory() gsheet.WriterFactory {
 
 type writeHarness struct {
 	snaps    *fakes.SheetSnapshots
+	rows     *fakes.SheetRows
 	attempts sheet.IdempotencyStore
 	srcs     *fakes.SheetSources
 	toks     *fakes.SheetTokenSources
@@ -163,6 +164,7 @@ func newWriteHarness(t *testing.T) *writeHarness {
 	t.Helper()
 	h := &writeHarness{
 		snaps:    fakes.NewSheetSnapshots(),
+		rows:     fakes.NewSheetRows(),
 		attempts: sheet.NewMemoryIdempotencyStore(),
 		srcs:     fakes.NewSheetSources(),
 		toks:     fakes.NewSheetTokenSources(),
@@ -176,7 +178,7 @@ func newWriteHarness(t *testing.T) *writeHarness {
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
 	h.wf = sheet.NewWriteWorkflow(
-		h.snaps, h.attempts, h.srcs, h.toks, h.reauth, h.google.factory(),
+		h.snaps, h.rows, h.attempts, h.srcs, h.toks, h.reauth, h.google.factory(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
 	)
 	return h
@@ -278,6 +280,20 @@ func TestWriteWorkflow_AppendPurgesTheSnapshot(t *testing.T) {
 	_, found, err := h.snaps.Get(t.Context(), key)
 	require.NoError(t, err)
 	assert.False(t, found, "the snapshot the write invalidated must be gone")
+}
+
+// NOTE: Append has no write-through — it reads no header row and Writer.Append returns a count, so there is no row_id or row_index to upsert.
+func TestWriteWorkflow_AppendPurgesTheProjection(t *testing.T) {
+	t.Parallel()
+	h := newWriteHarness(t)
+	sh, _ := h.seed(t, "Rates", true)
+	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	h.rows.Seed(key, []sheet.ProjectedRow{{RowID: "1", RowIndex: 0, Data: gsheet.Row{"id": "1", "name": "ada"}}})
+
+	_, err := h.wf.Append(t.Context(), sh, []any{"x"}, "", "")
+	require.NoError(t, err)
+
+	assert.Empty(t, h.rows.Projected(key), "the projection the append invalidated must be gone")
 }
 
 func TestWriteWorkflow_AppendSurvivesAPurgeFailure(t *testing.T) {

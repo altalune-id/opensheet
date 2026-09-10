@@ -146,10 +146,9 @@ func validateContract(tbl gsheet.Table, tab string) (ContractState, []string, er
 
 // NOTE: a deleted_at header is the soft-delete opt-in, not a reserved name; only a duplicate is an error, because it makes the column unaddressable.
 func deletedAtColumnOf(headers []string, tab string) (int, error) {
-	want := squeezeHeader(deletedAtColumn)
 	var found []int
 	for i, h := range headers {
-		if squeezeHeader(foldHeader(h)) == want {
+		if isDeletedAtHeader(h) {
 			found = append(found, i)
 		}
 	}
@@ -160,6 +159,10 @@ func deletedAtColumnOf(headers []string, tab string) (int, error) {
 		return -1, nil
 	}
 	return found[0], nil
+}
+
+func isDeletedAtHeader(h string) bool {
+	return squeezeHeader(foldHeader(h)) == squeezeHeader(deletedAtColumn)
 }
 
 func squeezeHeader(h string) string {
