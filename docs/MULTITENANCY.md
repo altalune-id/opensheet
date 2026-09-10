@@ -113,7 +113,7 @@ flowchart TD
 ## Common pitfalls
 
 - **Inlining `current_setting('app.current_org_id')::uuid` in a policy** → a transaction-local `set_config` resets to `''`, not NULL, when the transaction ends, so any pooled connection that once served a tenant makes `''::uuid` raise `22P02` on every later cross-tenant read. Use `{{.Schema}}.{{.TablePrefix}}current_org_id()`, which wraps it in `NULLIF`.
-- **Reading a tenant table before a tenant exists** — invite-by-token, invite-by-email, org-by-slug. RLS hides every row, so the query returns empty rather than failing. Add a `SECURITY DEFINER` wrapper in `005_definer_functions.sql` and read through it.
+- **Reading a tenant table before a tenant exists** — invite-by-token, invite-by-email, org-by-slug. RLS hides every row, so the query returns empty rather than failing. Read through a `SECURITY DEFINER` wrapper. The five that exist today are declared in `005_definer_functions.sql`, which is a template file — add a **new** one in a migration this project owns, never by editing `005`. See "The template boundary" in [`../schema/README.md`](../schema/README.md).
 
 - **Forgetting `set_config` in a tx** → RLS blocks all rows for `opensheet_service`. Symptom: empty result sets in prod, works in dev under superuser. Fix: use `tenant.PgConn.BeginTenanted` (stores already do).
 - **Cross-tenant leak in a service method** — a service that accepts `orgID` as a parameter but doesn't compare against `tenant.From(ctx).OrgID`. Always use the org from ctx as source of truth; parameters are for scoping within the same tenant only.
