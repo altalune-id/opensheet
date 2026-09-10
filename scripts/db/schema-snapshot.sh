@@ -21,7 +21,7 @@ psql "$dsn" -Atc "
   FROM pg_proc p WHERE p.pronamespace = to_regnamespace('$sch') ORDER BY 1, 2" > "$out/functions.txt"
 
 psql "$dsn" -Atc "
-  SELECT conrelid::regclass, conname, contype, confdeltype, pg_get_constraintdef(oid)
+  SELECT conrelid::regclass::text, conname, contype, confdeltype, pg_get_constraintdef(oid)
   FROM pg_constraint WHERE connamespace = to_regnamespace('$sch') ORDER BY 1, 2" > "$out/constraints.txt"
 
 psql "$dsn" -Atc "

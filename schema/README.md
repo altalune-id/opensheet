@@ -11,8 +11,10 @@ domain interfaces — SQLite is dev/demo, Postgres is production.
 
 ```
 schema/
-├── migrations/postgres/    # 001_init … 008_opensheet_definer, VERSION
-├── migrations/sqlite/      # 001_init … 004_opensheet, VERSION
+├── migrations/postgres/    # 001_init … 005_definer_functions (template),
+│                           # 006_opensheet (this project), VERSION
+├── migrations/sqlite/      # 001_init … 003_todo_stale_idx (template),
+│                           # 004_opensheet (this project), VERSION
 ├── migrator.go             # goose runner, template rendering, embed FS
 ├── migrator_templatefs.go  # per-boot template-rendered file system
 ├── rls_guard.go            # boot-time BYPASSRLS rejection + pg_policies audit
@@ -33,7 +35,14 @@ Exactly three, defined by `templateVars` in `migrator_templatefs.go`:
 | ------------------ | ----------------------------------------------------------------------- |
 | `{{.Schema}}`      | schema holding the app's tables (`db.schema`)                           |
 | `{{.TablePrefix}}` | prepended to every table, index, policy and function (`db.tablePrefix`) |
-| `{{.RLSEnforce}}`  | `db.allowBypassRLS` inverted — wraps the whole body of an RLS migration |
+| `{{.RLSEnforce}}`  | `tenant.rlsEnforce` — wraps the whole body of an RLS migration          |
+
+`{{.RLSEnforce}}` is `tenant.rlsEnforce`
+(`OPENSHEET_TENANT_RLS_ENFORCE`, default `true`), read by `migrator.go` as
+`cfg.Tenant.RLSEnforce`. It is **not** derived from `db.allowBypassRLS` — the
+two are independent keys, so setting `db.allowBypassRLS` changes nothing about
+what a migration renders. To render a schema without policies, set
+`OPENSHEET_TENANT_RLS_ENFORCE=false`.
 
 There is **no `Role` variable.** Migrations do not `SET ROLE`; the migrator
 _connection_ does. `boot.MigratorDBConfig` sets `DBConfig.Role` from
@@ -180,15 +189,27 @@ Some lookups run before any tenant scope exists, so they cannot pass through
 RLS. Each is a `SECURITY DEFINER` function owned by the migrator role, with
 `SET search_path` pinned and `EXECUTE` revoked from `PUBLIC`:
 
-| Function                         | Migration    | Consulted before scope exists to…         |
-| -------------------------------- | ------------ | ----------------------------------------- |
-| `current_org_id`                 | `002`        | read the GUC RLS policies compare against |
-| `list_org_ids`                   | `005`, `013` | enumerate tenants for the scheduler       |
-| `resolve_org_by_slug`            | `005`        | turn a URL slug into an org               |
-| `list_orgs_for_user`             | `005`, `013` | list a user's orgs at login               |
-| `resolve_invite_by_token_hash`   | `005`        | redeem an invite                          |
-| `list_pending_invites_for_email` | `005`, `014` | find an invite during signup              |
-| `apikey_by_prefix`               | `008`        | resolve a presented API key's org         |
+| Function                         | Migration    | Consulted before scope exists to…   |
+| -------------------------------- | ------------ | ----------------------------------- |
+| `list_org_ids`                   | `005`, `006` | enumerate tenants for the scheduler |
+| `resolve_org_by_slug`            | `005`        | turn a URL slug into an org         |
+| `list_orgs_for_user`             | `005`, `006` | list a user's orgs at login         |
+| `resolve_invite_by_token_hash`   | `005`        | redeem an invite                    |
+| `list_pending_invites_for_email` | `005`, `006` | find an invite during signup        |
+| `apikey_by_prefix`               | `006`        | resolve a presented API key's org   |
+
+`006` refines four of these: `CREATE OR REPLACE` adds an ordering tiebreak to
+`list_orgs_for_user` and `list_pending_invites_for_email`, `DROP` then `CREATE`
+widens `list_org_ids` to `RETURNS TABLE (id uuid, created_at timestamptz)`
+(Postgres refuses `CREATE OR REPLACE` across a return-type change), and
+`apikey_by_prefix` is added outright.
+
+SECURITY: **`current_org_id` (`002`) is not one of these.** It is plain
+`LANGUAGE sql STABLE` with no `SECURITY DEFINER` and no `REVOKE`, and all 12
+RLS policies call it in `USING`, evaluated as the _querying_ role. Revoking
+`EXECUTE` on it breaks every tenant-scoped read, and only under
+`db.allowBypassRLS=false` — so it passes every dev run. Do not add it to the
+list above and do not redefine it.
 
 SECURITY: `apikey_by_prefix` returns `SETOF api_keys` — the key row only. It
 deliberately does **not** join `api_key_sheets`, which has its own RLS policy.
@@ -202,7 +223,8 @@ collapse it into one query.
 
 1. Add `NNN_<name>.sql` under both `migrations/postgres/` and
    `migrations/sqlite/`, with goose `-- +goose Up` / `-- +goose Down` and
-   `-- +goose StatementBegin` / `StatementEnd` markers.
+   `-- +goose StatementBegin` / `StatementEnd` markers. The next Postgres
+   migration is `007`; the next SQLite one is `005`.
 2. **Bump `VERSION`** in the affected dialect to the highest `NNN` present.
    `migrator.go` reads it as goose's target, so a file beyond the pin is
    **silently ignored** — no error, just an absent table.
@@ -218,6 +240,21 @@ collapse it into one query.
    `ENABLE ROW LEVEL SECURITY` with `FORCE ROW LEVEL SECURITY`.
 5. Migrations are append-only history. Never edit or delete one that a deployed
    instance has already applied — correct it with a new migration instead.
+
+### The template boundary
+
+Postgres `001`–`005` and SQLite `001`–`003` came from the altalune template.
+They are **never edited, renamed, renumbered or deleted** — keeping them intact
+is what lets this fork stay diffable against the template it came from, the
+same reason `authl/`, `logger/`, `nanoid/` and `internal/platform/` signatures
+are copied verbatim.
+
+A fix we need to a template-owned object therefore goes into a migration **we**
+own, placed as early in our sequence as possible — today `006_opensheet.sql`,
+the first migration we own — never by editing the template file. Inside that
+file, refinements to inherited objects come before opensheet's own tables. If
+the `invites` table or one of its functions needs changing, that change is a
+new migration of ours, not an edit to `002` or `005`.
 
 ## Verifying
 
