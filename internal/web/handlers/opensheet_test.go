@@ -1290,3 +1290,86 @@ func TestSheetHandler_BulkPublishFragmentLinksStayProjectScoped(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), `"/orgs"`,
 		"a fragment rendered without ActiveOrg collapses ProjectPath to /orgs")
 }
+
+func TestSheetHandler_PublishWithoutAnIDColumnNamesTheRemedy(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+	f.Google.setRows(`{"values":[["name","qty"],["apple","3"]]}`)
+
+	form := url.Values{
+		"spreadsheet_id": {sp.ID.String()},
+		"slug":           {"q1"},
+		"tab":            {"First"},
+		"visibility":     {"key"},
+	}
+	rec := f.do(t, http.MethodPost, f.path("/sheets"), form.Encode())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.NotContains(t, body, "Could not publish that sheet.")
+	assert.Contains(t, body, "no id column")
+	assert.Contains(t, body, "Add a column headed id in row 1")
+	assert.Contains(t, body, "write scope")
+
+	items, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	assert.Empty(t, items, "a tab that fails the contract must publish nothing")
+}
+
+func TestSheetHandler_PublishWithADuplicateIDNamesTheValue(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+	f.Google.setRows(`{"values":[["id","name"],["r1","apple"],["r1","pear"]]}`)
+
+	form := url.Values{
+		"spreadsheet_id": {sp.ID.String()},
+		"slug":           {"q1"},
+		"tab":            {"First"},
+		"visibility":     {"key"},
+	}
+	rec := f.do(t, http.MethodPost, f.path("/sheets"), form.Encode())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "share the id r1")
+}
+
+func TestSheetHandler_PublishWithAnEmptyIDNamesTheSpreadsheetRow(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+	f.Google.setRows(`{"values":[["id","name"],["r1","apple"],["","pear"]]}`)
+
+	form := url.Values{
+		"spreadsheet_id": {sp.ID.String()},
+		"slug":           {"q1"},
+		"tab":            {"First"},
+		"visibility":     {"key"},
+	}
+	rec := f.do(t, http.MethodPost, f.path("/sheets"), form.Encode())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "Row 3 of this tab has content but no id",
+		"row_index 1 is the third spreadsheet row, counting the header")
+}
+
+func TestSheetHandler_BulkPublishNamesTheRemedyPerRow(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	cred := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, cred.ID)
+	f.Google.setRows(`{"values":[["name","qty"],["apple","3"]]}`)
+
+	body := "tab=0&slug.0=rates&tab=1&slug.1=payroll&visibility=key&cache_ttl=300"
+	rec := f.do(t, http.MethodPost, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), body)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := rec.Body.String()
+	assert.NotContains(t, got, "Could not publish that sheet.")
+	assert.Equal(t, 2, strings.Count(got, "Add a column headed id in row 1"),
+		"each ticked row fails on its own and must carry its own remedy")
+
+	items, err := f.Sheets.List(f.ctx())
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}

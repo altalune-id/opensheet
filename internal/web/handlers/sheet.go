@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"cmp"
+	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -12,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -21,6 +24,9 @@ import (
 
 // maxPreviewRows bounds how much of a tab the preview table renders.
 const maxPreviewRows = 50
+
+const noIDColumnCopy = "This tab has no id column. Add a column headed id in row 1, with a unique value in every row. " +
+	"To have opensheet add it for you instead, re-authorize this spreadsheet's credential with write scope."
 
 // SheetHandler owns the project-scoped published-sheet pages.
 type SheetHandler struct {
@@ -99,7 +105,7 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.Sheets.Create(sc.req.Context(), create); err != nil {
 		h.LogErr("web sheet: create", err)
-		in.Error, in.ErrorCode = publishMessage(err), ErrorRef(err)
+		in.Error, in.ErrorCode = publishMessage(i18n.TranslatorFrom(sc.req.Context()), err), ErrorRef(err)
 		h.writeSection(w, sc, in)
 		return
 	}
@@ -144,7 +150,7 @@ func (h *SheetHandler) PostUpdate(w http.ResponseWriter, r *http.Request) {
 	writable := form.Get("writable") == "1"
 	if _, err := h.Sheets.Update(sc.req.Context(), sh.ID, sheet.UpdateInput{Tab: &tab, Visibility: &vis, CacheTTL: &ttl, Writable: &writable}); err != nil {
 		h.LogErr("web sheet: update", err)
-		h.renderDetail(w, sc, sh, publishMessage(err), err)
+		h.renderDetail(w, sc, sh, publishMessage(i18n.TranslatorFrom(sc.req.Context()), err), err)
 		return
 	}
 	h.redirect(w, sc, "/sheets/"+sh.ID.String())
@@ -333,7 +339,7 @@ func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, 
 	})
 	if err != nil {
 		h.LogErr("web sheet: bulk create", err)
-		row.Failure = publishMessage(err)
+		row.Failure = publishMessage(i18n.TranslatorFrom(sc.req.Context()), err)
 		return
 	}
 	row.Published, row.Created, row.SheetID = true, true, sh.ID.String()
@@ -543,7 +549,7 @@ func parseTTL(raw string) (ttl time.Duration, failure string) {
 	return time.Duration(secs) * time.Second, ""
 }
 
-func publishMessage(err error) string {
+func publishMessage(tr *i18n.Translator, err error) string {
 	switch {
 	case sheet.IsInvalidSlugError(err),
 		sheet.IsInvalidVisibilityError(err),
@@ -554,7 +560,53 @@ func publishMessage(err error) string {
 	case spreadsheet.IsNotFoundError(err):
 		return "That spreadsheet is not registered in this project."
 	}
+	if msg, ok := contractMessage(tr, err); ok {
+		return msg
+	}
 	return "Could not publish that sheet."
+}
+
+// NOTE: the table-contract errors' Error() text is written for logs, so the form states the remedy instead of passing it through.
+func contractMessage(tr *i18n.Translator, err error) (string, bool) {
+	if _, ok := errors.AsType[*sheet.NoIDColumnError](err); ok {
+		return trOr(tr, "sheets.publish_error.no_id_column", noIDColumnCopy), true
+	}
+	if e, ok := errors.AsType[*sheet.AmbiguousIDColumnError](err); ok {
+		return trOr(tr, "sheets.publish_error.ambiguous_id_column",
+			fmt.Sprintf("This tab has %d columns headed id. Rename or remove all but one, then publish again.", len(e.Columns)),
+			"Columns", len(e.Columns)), true
+	}
+	if e, ok := errors.AsType[*sheet.DuplicateColumnError](err); ok {
+		return trOr(tr, "sheets.publish_error.duplicate_column",
+			fmt.Sprintf("This tab has %d columns headed %s. Rename or remove all but one, then publish again.", len(e.Columns), e.Column),
+			"Columns", len(e.Columns), "Column", e.Column), true
+	}
+	if e, ok := errors.AsType[*sheet.EmptyIDError](err); ok {
+		row := spreadsheetRow(e.RowIndex)
+		return trOr(tr, "sheets.publish_error.empty_id",
+			fmt.Sprintf("Row %d of this tab has content but no id. Fill in its id, or clear the row, then publish again.", row),
+			"Row", row), true
+	}
+	if e, ok := errors.AsType[*sheet.DuplicateIDError](err); ok {
+		return trOr(tr, "sheets.publish_error.duplicate_id",
+			fmt.Sprintf("%d rows of this tab share the id %s. Give every row a unique id, then publish again.", e.Count, e.ID),
+			"Count", e.Count, "ID", e.ID), true
+	}
+	return "", false
+}
+
+// spreadsheetRow turns a zero-based data-row index into the row number the operator sees in Google.
+func spreadsheetRow(rowIndex int) int { return rowIndex + 2 }
+
+// trOr localizes key, falling back to fallback when the request carries no translator or the key is untranslated.
+func trOr(tr *i18n.Translator, key, fallback string, args ...any) string {
+	if tr == nil {
+		return fallback
+	}
+	if out := tr.T(key, args...); out != key {
+		return out
+	}
+	return fallback
 }
 
 func previewMessage(err error) string {
