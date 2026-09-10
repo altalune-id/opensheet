@@ -122,29 +122,44 @@ func TestReadWorkflow_TableInfo_CountsOnlyTheSheetsOwnTab(t *testing.T) {
 	}
 }
 
-func TestReadWorkflow_TableInfo_NamesDeletedAtOnlyWhenTheTabHasIt(t *testing.T) {
+// A tab carrying the column but no deletions is the case the inferred flag got wrong: it reported
+// softDelete false, so a client concluded delete was unsupported and never tried.
+func TestReadWorkflow_TableInfo_NamesDeletedAtFromThePersistedFlag(t *testing.T) {
 	deletedAt := time.Now().UTC()
 	for name, tt := range map[string]struct {
-		rows        []sheet.ProjectedRow
-		wantCols    []string
-		wantSoftDel bool
+		softDelete bool
+		rows       []sheet.ProjectedRow
+		wantCols   []string
 	}{
-		"no soft delete": {
+		"no deleted_at column": {
 			rows:     []sheet.ProjectedRow{liveRow("a", 0, gsheet.Row{"id": "a", "name": "ada"})},
 			wantCols: []string{"id", "name"},
 		},
-		"soft delete": {
+		"deleted_at column and no deletions": {
+			softDelete: true,
+			rows:       []sheet.ProjectedRow{liveRow("a", 0, gsheet.Row{"id": "a", "name": "ada"})},
+			wantCols:   []string{"deleted_at", "id", "name"},
+		},
+		"deleted_at column and a tombstone": {
+			softDelete: true,
 			rows: []sheet.ProjectedRow{
 				liveRow("a", 0, gsheet.Row{"id": "a", "name": "ada"}),
 				{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "bo"}, DeletedAt: &deletedAt},
 			},
-			wantCols:    []string{"deleted_at", "id", "name"},
-			wantSoftDel: true,
+			wantCols: []string{"deleted_at", "id", "name"},
+		},
+		"a tombstone cannot stand in for the flag": {
+			rows: []sheet.ProjectedRow{
+				liveRow("a", 0, gsheet.Row{"id": "a", "name": "ada"}),
+				{RowID: "b", RowIndex: 1, Data: gsheet.Row{"id": "b", "name": "bo"}, DeletedAt: &deletedAt},
+			},
+			wantCols: []string{"id", "name"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newReadHarness(t, harnessOpts{})
 			sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+			sh.SoftDelete = tt.softDelete
 			h.rows.Seed(sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}, tt.rows)
 
 			got, err := h.wf.TableInfo(t.Context(), sh)
@@ -155,8 +170,8 @@ func TestReadWorkflow_TableInfo_NamesDeletedAtOnlyWhenTheTabHasIt(t *testing.T) 
 			if !reflect.DeepEqual(got.Columns, tt.wantCols) {
 				t.Errorf("Columns = %v, want %v", got.Columns, tt.wantCols)
 			}
-			if got.SoftDelete != tt.wantSoftDel {
-				t.Errorf("SoftDelete = %v, want %v", got.SoftDelete, tt.wantSoftDel)
+			if got.SoftDelete != tt.softDelete {
+				t.Errorf("SoftDelete = %v, want %v", got.SoftDelete, tt.softDelete)
 			}
 		})
 	}

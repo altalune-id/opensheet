@@ -21,18 +21,18 @@ type ProjectedRow struct {
 	DeletedAt *time.Time
 }
 
-// ContractState is what a refresh learned about the tab's table contract.
+// ContractState is what a refresh learned from the tab's header row: its table contract, and its soft-delete opt-in.
 type ContractState struct {
-	OK     bool
-	Reason string
+	OK         bool
+	Reason     string
+	SoftDelete bool
 }
 
 // TableStats is what the projection knows about one tab without reading every row of it.
 type TableStats struct {
-	Tab        string
-	Columns    []string
-	RowCount   int64
-	SoftDelete bool
+	Tab      string
+	Columns  []string
+	RowCount int64
 }
 
 // RowStore persists the queryable projection of a published tab.

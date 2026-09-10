@@ -46,11 +46,17 @@ func NewWriter(ctx context.Context, ts oauth2.TokenSource, opts ...gworkspace.Op
 	return &Writer{Client: &Client{svc: svc}}, nil
 }
 
-// Append adds cells as one row at the end of tab and reports how many rows Google wrote.
-func (w *Writer) Append(ctx context.Context, fileID, tab string, cells []any) (int, error) {
+// AppendResult reports the 1-based spreadsheet row an append landed on and how many rows Google wrote.
+type AppendResult struct {
+	StartRow int
+	Rows     int
+}
+
+// Append adds cells as one row at the end of tab and reports where Google wrote it.
+func (w *Writer) Append(ctx context.Context, fileID, tab string, cells []any) (AppendResult, error) {
 	tab = strings.TrimSpace(tab)
 	if tab == "" {
-		return 0, &TabNotFoundError{Tab: tab}
+		return AppendResult{}, &TabNotFoundError{Tab: tab}
 	}
 
 	resp, err := w.svc.Spreadsheets.Values.
@@ -59,12 +65,16 @@ func (w *Writer) Append(ctx context.Context, fileID, tab string, cells []any) (i
 		InsertDataOption(insertDataRows).
 		Context(ctx).Do()
 	if err != nil {
-		return 0, translateRange(err, fileID, tab)
+		return AppendResult{}, translateRange(err, fileID, tab)
 	}
 	if resp.Updates == nil {
-		return 0, nil
+		return AppendResult{}, &AppendRangeError{Range: ""}
 	}
-	return int(resp.Updates.UpdatedRows), nil
+	start, err := spanStartRow(resp.Updates.UpdatedRange)
+	if err != nil {
+		return AppendResult{}, err
+	}
+	return AppendResult{StartRow: start, Rows: int(resp.Updates.UpdatedRows)}, nil
 }
 
 // UpdateRow overwrites the cells of one 1-based row of tab.

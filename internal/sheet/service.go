@@ -112,6 +112,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 	sh.ValidatedAt = &validatedAt
 	sh.ContractOK = state.OK
 	sh.ContractReason = state.Reason
+	sh.SoftDelete = state.SoftDelete
 
 	if err := s.store.Save(ctx, sh); err != nil {
 		if IsAlreadyExistsError(err) {

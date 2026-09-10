@@ -130,7 +130,7 @@ func (w *WriteWorkflow) Append(ctx context.Context, sh *Sheet, cells []any, idem
 		reserved = true
 	}
 
-	n, err := tgt.writer.Append(ctx, tgt.src.GoogleFileID, tgt.tab, cells)
+	res, err := tgt.writer.Append(ctx, tgt.src.GoogleFileID, tgt.tab, cells)
 	if err != nil {
 		if reserved {
 			w.release(ctx, sh, key)
@@ -138,11 +138,11 @@ func (w *WriteWorkflow) Append(ctx context.Context, sh *Sheet, cells []any, idem
 		return 0, recordSpanError(span, w.fail(ctx, "sheet.Append: append row", err, sh, tgt.src))
 	}
 	if reserved {
-		w.complete(ctx, sh, key, n)
+		w.complete(ctx, sh, key, res.Rows)
 	}
-	// NOTE: 2b's keyed create supersedes this purge — it is header-aware, and will need UpdatedRange from gsheet.Writer.Append for the row_index.
+	// NOTE: 2b's keyed create supersedes this purge — it is header-aware, and takes the row_index from res.StartRow rather than refetching.
 	w.purge(ctx, sh)
-	return n, nil
+	return res.Rows, nil
 }
 
 // PatchRow overwrites the patched columns of the row sh's id column matches to id, and returns the row as written.

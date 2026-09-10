@@ -63,6 +63,39 @@ func valuesBody(t *testing.T, headers []string, rows [][]string) string {
 	return string(raw)
 }
 
+// The tab has the column and no deletions — the case an inferred flag reported as false, so a client
+// concluded delete was unsupported and never tried.
+func TestPublishWorkflow_Validate_ReadsTheSoftDeleteOptInFromTheHeaderRow(t *testing.T) {
+	t.Parallel()
+	for name, tt := range map[string]struct {
+		headers []string
+		want    bool
+	}{
+		"no deleted_at column": {[]string{"id", "name"}, false},
+		"deleted_at":           {[]string{"id", "deleted_at"}, true},
+		"Deleted At":           {[]string{"id", "Deleted At"}, true},
+		"deletedAt":            {[]string{"id", "deletedAt"}, true},
+		"a lookalike column":   {[]string{"id", "deleted"}, false},
+		"deleted_at is not id": {[]string{"deleted_at", "id"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newPublishHarness(t)
+			row := make([]string, len(tt.headers))
+			row[slices.Index(tt.headers, "id")] = "a"
+			h.google.setRows(http.StatusOK, valuesBody(t, tt.headers, [][]string{row}))
+
+			state, _, err := h.wf.Validate(t.Context(), uuid.Must(uuid.NewV7()), "Q1")
+			if err != nil {
+				t.Fatalf("Validate err = %v", err)
+			}
+			if state.SoftDelete != tt.want {
+				t.Errorf("SoftDelete = %v, want %v for headers %q", state.SoftDelete, tt.want, tt.headers)
+			}
+		})
+	}
+}
+
 func TestPublishWorkflow_Validate(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

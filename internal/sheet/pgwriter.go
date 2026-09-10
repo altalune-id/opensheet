@@ -20,6 +20,7 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 			sh.Tab, sh.Slug, string(sh.Visibility), secs, sh.Writable,
 			sh.CreatedAt.UTC(), sh.UpdatedAt.UTC(),
 			sh.Generation, pgNullableTime(sh.ValidatedAt), sh.ContractOK, sh.ContractReason,
+			sh.SoftDelete,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(
@@ -30,6 +31,7 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 				s.table.CacheTTLSecs.SET(postgres.Int64(secs)),
 				s.table.Writable.SET(postgres.Bool(sh.Writable)),
 				s.table.UpdatedAt.SET(postgres.TimestampzT(sh.UpdatedAt.UTC())),
+				s.table.SoftDelete.SET(postgres.Bool(sh.SoftDelete)),
 			),
 		)
 	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {

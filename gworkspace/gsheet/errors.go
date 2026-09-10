@@ -69,3 +69,16 @@ func IsInvalidRangeError(err error) bool {
 	_, ok := errors.AsType[*InvalidRangeError](err)
 	return ok
 }
+
+// AppendRangeError reports that an append response carried no A1 range naming the row Google wrote.
+type AppendRangeError struct{ Range string }
+
+func (e *AppendRangeError) Error() string {
+	return fmt.Sprintf("gsheet: append range %q: no start row", e.Range)
+}
+
+// IsAppendRangeError reports whether err's chain contains a *AppendRangeError.
+func IsAppendRangeError(err error) bool {
+	_, ok := errors.AsType[*AppendRangeError](err)
+	return ok
+}

@@ -43,6 +43,7 @@ type sqliteSheetRow struct {
 	ValidatedAt    *string `alias:"sheets.validated_at"`
 	ContractOK     int64   `alias:"sheets.contract_ok"`
 	ContractReason string  `alias:"sheets.contract_reason"`
+	SoftDelete     int64   `alias:"sheets.soft_delete"`
 }
 
 func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
@@ -91,6 +92,7 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 		ValidatedAt:    validatedAt,
 		ContractOK:     r.ContractOK != 0,
 		ContractReason: r.ContractReason,
+		SoftDelete:     r.SoftDelete != 0,
 	}, nil
 }
 
@@ -114,6 +116,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 	writable := boolToInt(sh.Writable)
 	updatedAt := sqliteent.SQLiteTime(sh.UpdatedAt)
 	contractOK := boolToInt(sh.ContractOK)
+	softDelete := boolToInt(sh.SoftDelete)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sh.ID.String(),
@@ -131,6 +134,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			sqliteNullableTime(sh.ValidatedAt),
 			contractOK,
 			sh.ContractReason,
+			softDelete,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(
@@ -141,6 +145,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 				s.table.CacheTTLSecs.SET(sqlite.Int(secs)),
 				s.table.Writable.SET(sqlite.Int(writable)),
 				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
+				s.table.SoftDelete.SET(sqlite.Int(softDelete)),
 			),
 		)
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {

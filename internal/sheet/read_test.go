@@ -926,6 +926,35 @@ func TestReadWorkflow_Load_ProjectsTombstonesButServesLiveRowsOnly(t *testing.T)
 	}
 }
 
+// The tab carries the column and nothing is deleted, so only the header row can report the opt-in.
+func TestReadWorkflow_Load_PersistsTheSoftDeleteOptInWithNoDeletions(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	h.google.setRows(http.StatusOK, `{"values":[["id","name","Deleted At"],["a","ada",""]]}`)
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	if _, err := h.wf.Rows(t.Context(), sh); err != nil {
+		t.Fatalf("Rows err = %v", err)
+	}
+
+	if state := h.rows.Contract(sh.ID); !state.SoftDelete {
+		t.Errorf("contract = %+v, want SoftDelete true from the header row", state)
+	}
+}
+
+func TestReadWorkflow_Load_ClearsTheSoftDeleteOptInWhenTheColumnGoes(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	sh.SoftDelete = true
+
+	if _, err := h.wf.Rows(t.Context(), sh); err != nil {
+		t.Fatalf("Rows err = %v", err)
+	}
+
+	if state := h.rows.Contract(sh.ID); state.SoftDelete {
+		t.Errorf("contract = %+v, want SoftDelete false: the header row no longer names the column", state)
+	}
+}
+
 func TestReadWorkflow_Load_DiscardedRefreshServesTheCommittedSnapshot(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)

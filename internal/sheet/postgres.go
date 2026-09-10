@@ -49,6 +49,7 @@ type pgSheetRow struct {
 	ValidatedAt    *time.Time `alias:"sheets.validated_at"`
 	ContractOK     bool       `alias:"sheets.contract_ok"`
 	ContractReason string     `alias:"sheets.contract_reason"`
+	SoftDelete     bool       `alias:"sheets.soft_delete"`
 }
 
 func (r *pgSheetRow) toSheet() *Sheet {
@@ -69,6 +70,7 @@ func (r *pgSheetRow) toSheet() *Sheet {
 		ValidatedAt:    utcOrNil(r.ValidatedAt),
 		ContractOK:     r.ContractOK,
 		ContractReason: r.ContractReason,
+		SoftDelete:     r.SoftDelete,
 	}
 }
 

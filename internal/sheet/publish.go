@@ -111,12 +111,15 @@ func (w *PublishWorkflow) passthrough(ctx context.Context, situation string, err
 func validateContract(tbl gsheet.Table, tab string) (ContractState, []string, error) {
 	headers := slices.Clone(tbl.Headers)
 
+	delCol, dErr := deletedAtColumnOf(headers, tab)
+	softDelete := delCol >= 0
+
 	idCol, err := idColumnOf(headers, tab)
 	if err != nil {
-		return contractFailed(err), headers, err
+		return contractFailed(err, softDelete), headers, err
 	}
-	if _, dErr := deletedAtColumnOf(headers, tab); dErr != nil {
-		return contractFailed(dErr), headers, dErr
+	if dErr != nil {
+		return contractFailed(dErr, softDelete), headers, dErr
 	}
 
 	counts := make(map[string]int, len(tbl.Rows))
@@ -128,7 +131,7 @@ func validateContract(tbl gsheet.Table, tab string) (ContractState, []string, er
 		id := cellAt(row, idCol)
 		if id == "" {
 			eErr := &EmptyIDError{Tab: tab, RowIndex: i}
-			return contractFailed(eErr), headers, eErr
+			return contractFailed(eErr, softDelete), headers, eErr
 		}
 		if counts[id] == 0 {
 			order = append(order, id)
@@ -137,11 +140,11 @@ func validateContract(tbl gsheet.Table, tab string) (ContractState, []string, er
 	}
 	for _, id := range order {
 		if counts[id] > 1 {
-			dErr := &DuplicateIDError{ID: id, Count: counts[id]}
-			return contractFailed(dErr), headers, dErr
+			duplicate := &DuplicateIDError{ID: id, Count: counts[id]}
+			return contractFailed(duplicate, softDelete), headers, duplicate
 		}
 	}
-	return ContractState{OK: true}, headers, nil
+	return ContractState{OK: true, SoftDelete: softDelete}, headers, nil
 }
 
 // NOTE: a deleted_at header is the soft-delete opt-in, not a reserved name; only a duplicate is an error, because it makes the column unaddressable.
@@ -185,6 +188,6 @@ func cellAt(row []string, col int) string {
 	return row[col]
 }
 
-func contractFailed(err error) ContractState {
-	return ContractState{OK: false, Reason: err.Error()}
+func contractFailed(err error, softDelete bool) ContractState {
+	return ContractState{OK: false, Reason: err.Error(), SoftDelete: softDelete}
 }

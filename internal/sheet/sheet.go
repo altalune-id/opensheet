@@ -48,6 +48,7 @@ type Sheet struct {
 	ValidatedAt    *time.Time
 	ContractOK     bool
 	ContractReason string
+	SoftDelete     bool
 }
 
 // NewParams is the input to New.

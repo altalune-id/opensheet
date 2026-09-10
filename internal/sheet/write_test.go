@@ -30,7 +30,7 @@ import (
 const (
 	idNameTable   = `{"values":[["id","name"],["1","ada"],["2","bob"]]}`
 	blankRowTable = `{"values":[["id","name"],["1","ada"],[],["3","cyd"]]}`
-	appendedOne   = `{"updates":{"updatedRows":1}}`
+	appendedOne   = `{"updates":{"updatedRows":1,"updatedRange":"'Rates'!A4:B4"}}`
 )
 
 type recordedRequest struct {

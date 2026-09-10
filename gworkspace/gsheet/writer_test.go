@@ -63,15 +63,18 @@ func TestWriter_AppendSendsRawAndInsertsRows(t *testing.T) {
 	var sent sentRequest
 	w := newTestWriter(t, func(r *http.Request) (int, string) {
 		sent.record(r)
-		return http.StatusOK, `{"updates":{"updatedRows":1}}`
+		return http.StatusOK, `{"updates":{"updatedRows":1,"updatedRange":"'Rates'!A7:B7"}}`
 	})
 
-	n, err := w.Append(context.Background(), "FILE", "Rates", []any{"Aston", 1250000})
+	res, err := w.Append(context.Background(), "FILE", "Rates", []any{"Aston", 1250000})
 	if err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("Append = %d, want 1", n)
+	if res.Rows != 1 {
+		t.Errorf("Rows = %d, want 1", res.Rows)
+	}
+	if res.StartRow != 7 {
+		t.Errorf("StartRow = %d, want 7 — without the position a create cannot address the row it just wrote", res.StartRow)
 	}
 
 	got := sent.snapshot()
@@ -108,7 +111,7 @@ func TestWriter_FormulaPrefixesAreSentAsLiteralTextUnderRaw(t *testing.T) {
 			var sent sentRequest
 			w := newTestWriter(t, func(r *http.Request) (int, string) {
 				sent.record(r)
-				return http.StatusOK, `{"updates":{"updatedRows":1}}`
+				return http.StatusOK, `{"updates":{"updatedRows":1,"updatedRange":"'Rates'!A7:A7"}}`
 			})
 
 			if _, err := w.Append(context.Background(), "FILE", "Rates", []any{v}); err != nil {
@@ -133,16 +136,58 @@ func TestWriter_FormulaPrefixesAreSentAsLiteralTextUnderRaw(t *testing.T) {
 	}
 }
 
-func TestWriter_AppendToleratesAMissingUpdatesObject(t *testing.T) {
+// A silent zero here would be projected as row_index -2, corrupting every later write to the row.
+func TestWriter_AppendRefusesAResponseWithNoUsableRange(t *testing.T) {
 	t.Parallel()
-	w := newTestWriter(t, func(*http.Request) (int, string) { return http.StatusOK, `{}` })
+	for name, body := range map[string]string{
+		"no updates object": `{}`,
+		"no range":          `{"updates":{"updatedRows":1}}`,
+		"empty range":       `{"updates":{"updatedRows":1,"updatedRange":""}}`,
+		"no row":            `{"updates":{"updatedRows":1,"updatedRange":"'Rates'!A:C"}}`,
+		"row zero":          `{"updates":{"updatedRows":1,"updatedRange":"'Rates'!A0:C0"}}`,
+		"not a span":        `{"updates":{"updatedRows":1,"updatedRange":"Rates"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			w := newTestWriter(t, func(*http.Request) (int, string) { return http.StatusOK, body })
 
-	n, err := w.Append(context.Background(), "FILE", "Rates", []any{"a"})
-	if err != nil {
-		t.Fatalf("Append: %v", err)
+			got, err := w.Append(context.Background(), "FILE", "Rates", []any{"a"})
+			if !IsAppendRangeError(err) {
+				t.Fatalf("Append error = %v (%T), want AppendRangeError", err, err)
+			}
+			if got.StartRow != 0 {
+				t.Errorf("StartRow = %d, want 0 alongside the error", got.StartRow)
+			}
+		})
 	}
-	if n != 0 {
-		t.Errorf("Append = %d, want 0 when Google omits the updates object", n)
+}
+
+func TestWriter_AppendParsesThePositionFromTheResolvedRange(t *testing.T) {
+	t.Parallel()
+	for name, tt := range map[string]struct {
+		updatedRange string
+		want         int
+	}{
+		"single row":            {"'Rates'!A7:C7", 7},
+		"multi row takes start": {"'Rates'!A7:C9", 7},
+		"unquoted title":        {"Rates!A12:C12", 12},
+		"title carrying a bang": {"'A!B'!D4:F4", 4},
+		"quoted quote in title": {"'A''!A1:Z'!B2:B2", 2},
+		"wide column label":     {"'Rates'!AAB31:AAD31", 31},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			body := `{"updates":{"updatedRows":1,"updatedRange":"` + tt.updatedRange + `"}}`
+			w := newTestWriter(t, func(*http.Request) (int, string) { return http.StatusOK, body })
+
+			got, err := w.Append(context.Background(), "FILE", "Rates", []any{"a"})
+			if err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+			if got.StartRow != tt.want {
+				t.Errorf("StartRow = %d, want %d for %q", got.StartRow, tt.want, tt.updatedRange)
+			}
+		})
 	}
 }
 

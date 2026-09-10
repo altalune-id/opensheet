@@ -458,7 +458,6 @@ func statsOf(tab string, rows []sheet.ProjectedRow) sheet.TableStats {
 	live := make([]sheet.ProjectedRow, 0, len(rows))
 	for _, row := range rows {
 		if row.DeletedAt != nil {
-			out.SoftDelete = true
 			continue
 		}
 		live = append(live, row)

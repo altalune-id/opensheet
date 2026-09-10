@@ -237,10 +237,9 @@ func (s *postgresRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab str
 		return TableStats{}, err
 	}
 	return TableStats{
-		Tab:        stats.Tab,
-		Columns:    columns,
-		RowCount:   stats.Total - stats.Tombstoned,
-		SoftDelete: stats.Tombstoned > 0,
+		Tab:      stats.Tab,
+		Columns:  columns,
+		RowCount: stats.Total - stats.Tombstoned,
 	}, nil
 }
 
@@ -349,12 +348,14 @@ func (s *postgresRowStore) commitRefresh(
 ) error {
 	stmt := s.sheets.UPDATE(
 		s.sheets.Generation, s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason,
+		s.sheets.SoftDelete,
 	).
 		SET(
 			s.sheets.Generation.ADD(postgres.Int(1)),
 			postgres.TimestampzT(time.Now().UTC()),
 			postgres.Bool(contract.OK),
 			postgres.String(contract.Reason),
+			postgres.Bool(contract.SoftDelete),
 		).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))
@@ -368,11 +369,14 @@ func (s *postgresRowStore) commitRefresh(
 func (s *postgresRowStore) markContract(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
 ) error {
-	stmt := s.sheets.UPDATE(s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason).
+	stmt := s.sheets.UPDATE(
+		s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+	).
 		SET(
 			postgres.TimestampzT(time.Now().UTC()),
 			postgres.Bool(contract.OK),
 			postgres.String(contract.Reason),
+			postgres.Bool(contract.SoftDelete),
 		).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))

@@ -227,10 +227,9 @@ func (s *sqliteRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab strin
 		return TableStats{}, err
 	}
 	return TableStats{
-		Tab:        stats.Tab,
-		Columns:    columns,
-		RowCount:   stats.Total - stats.Tombstoned,
-		SoftDelete: stats.Tombstoned > 0,
+		Tab:      stats.Tab,
+		Columns:  columns,
+		RowCount: stats.Total - stats.Tombstoned,
 	}, nil
 }
 
@@ -330,12 +329,14 @@ func (s *sqliteRowStore) commitRefresh(
 ) error {
 	stmt := s.sheets.UPDATE(
 		s.sheets.Generation, s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason,
+		s.sheets.SoftDelete,
 	).
 		SET(
 			s.sheets.Generation.ADD(sqlite.Int(1)),
 			sqlite.String(sqliteent.SQLiteTime(time.Now())),
 			sqlite.Int(boolToInt(contract.OK)),
 			sqlite.String(contract.Reason),
+			sqlite.Int(boolToInt(contract.SoftDelete)),
 		).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
@@ -349,11 +350,14 @@ func (s *sqliteRowStore) commitRefresh(
 func (s *sqliteRowStore) markContract(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
 ) error {
-	stmt := s.sheets.UPDATE(s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason).
+	stmt := s.sheets.UPDATE(
+		s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+	).
 		SET(
 			sqlite.String(sqliteent.SQLiteTime(time.Now())),
 			sqlite.Int(boolToInt(contract.OK)),
 			sqlite.String(contract.Reason),
+			sqlite.Int(boolToInt(contract.SoftDelete)),
 		).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))

@@ -47,11 +47,11 @@ func (w *ReadWorkflow) TableInfo(ctx context.Context, sh *Sheet) (TableInfo, err
 	}
 	span.SetAttributes(attribute.String("sheet.tab", stats.Tab))
 
-	columns := tableColumns(stats)
+	columns := tableColumns(stats, sh.SoftDelete)
 	return TableInfo{
 		Columns:           columns,
 		IDColumn:          idColumnKnown(columns, sh),
-		SoftDelete:        stats.SoftDelete,
+		SoftDelete:        sh.SoftDelete,
 		Writable:          sh.Writable,
 		SatisfiesContract: sh.ContractOK,
 		ContractReason:    sh.ContractReason,
@@ -61,11 +61,11 @@ func (w *ReadWorkflow) TableInfo(ctx context.Context, sh *Sheet) (TableInfo, err
 	}, nil
 }
 
-// NOTE: deleted_at is stripped from data, so a tombstoned row is the only trace of the column the projection keeps.
-func tableColumns(stats TableStats) []string {
+// NOTE: deleted_at is stripped from data, so the persisted flag is the only trace of the column the projection keeps.
+func tableColumns(stats TableStats, softDelete bool) []string {
 	out := make([]string, 0, len(stats.Columns)+1)
 	out = append(out, stats.Columns...)
-	if stats.SoftDelete && !slices.Contains(out, deletedAtColumn) {
+	if softDelete && !slices.Contains(out, deletedAtColumn) {
 		out = append(out, deletedAtColumn)
 	}
 	slices.Sort(out)

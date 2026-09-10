@@ -502,6 +502,7 @@ func TestSQLiteStore_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	sh.Generation = 7
 	sh.ValidatedAt = &validatedAt
 	sh.ContractReason = "checked"
+	sh.SoftDelete = true
 	if err := f.store.Save(ctx, sh); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -524,6 +525,39 @@ func TestSQLiteStore_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	}
 	if got.ContractReason != "checked" {
 		t.Errorf("ContractReason = %q, want %q", got.ContractReason, "checked")
+	}
+	if !got.SoftDelete {
+		t.Error("SoftDelete = false, want true: sqliteSheetRow needs a matching alias field, or the column reads back false forever")
+	}
+}
+
+func TestSQLiteStore_SoftDeleteSurvivesAnUpsert(t *testing.T) {
+	f := newSQLiteFixture(t)
+	ctx := f.ctx()
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.SoftDelete = true
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	sh.Retab("Harga")
+	if err := f.store.Save(ctx, sh); err != nil {
+		t.Fatalf("re-Save: %v", err)
+	}
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if !got.SoftDelete {
+		t.Error("SoftDelete = false, want true: a metadata edit must not drop the soft-delete opt-in")
 	}
 }
 

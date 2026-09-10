@@ -473,6 +473,7 @@ func TestPostgres_Sheet_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	sh.Generation = 7
 	sh.ValidatedAt = &validatedAt
 	sh.ContractReason = "checked"
+	sh.SoftDelete = true
 	require.NoError(t, f.store.Save(ctx, sh))
 
 	got, err := f.store.ByID(ctx, sh.ID)
@@ -482,6 +483,28 @@ func TestPostgres_Sheet_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	assert.True(t, got.ValidatedAt.Equal(validatedAt), "ValidatedAt = %v, want %v", got.ValidatedAt, validatedAt)
 	assert.True(t, got.ContractOK)
 	assert.Equal(t, "checked", got.ContractReason)
+	assert.True(t, got.SoftDelete,
+		"soft_delete must have a matching alias field on pgSheetRow, or the column reads back false forever")
+}
+
+func TestPostgres_Sheet_SoftDeleteSurvivesAnUpsert(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+		Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	require.NoError(t, err)
+	sh.SoftDelete = true
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.True(t, got.SoftDelete, "a metadata edit must not drop the soft-delete opt-in")
 }
 
 func TestPostgres_Sheet_UpdateDoesNotResetGeneration(t *testing.T) {

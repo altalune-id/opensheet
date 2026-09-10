@@ -320,6 +320,27 @@ func TestService_Create_ValidatesTheTableContract(t *testing.T) {
 			t.Errorf("unexpected() calls = %d, want 0", *unexCalls)
 		}
 	})
+	t.Run("stamps the soft-delete opt-in from the header row", func(t *testing.T) {
+		store := fakes.NewSheet()
+		svc, google, _ := newSvcGoogle(t, store, fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)
+		google.setRows(http.StatusOK, `{"values":[["id","name","Deleted At"],["a","ada",""]]}`)
+		ctx, _ := tenantCtx(t)
+
+		got, err := svc.Create(ctx, sheet.CreateRequest{SpreadsheetID: uuid.New(), Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey})
+		if err != nil {
+			t.Fatalf("Create err = %v", err)
+		}
+		if !got.SoftDelete {
+			t.Error("SoftDelete = false, want true: the tab has the column, and no row has been deleted yet")
+		}
+		stored, sErr := svc.ByID(ctx, got.ID)
+		if sErr != nil {
+			t.Fatalf("ByID err = %v", sErr)
+		}
+		if !stored.SoftDelete {
+			t.Error("the stored sheet reports SoftDelete false, want the flag persisted by the insert")
+		}
+	})
 	t.Run("rejects a tab with no id column and creates nothing", func(t *testing.T) {
 		store := fakes.NewSheet()
 		svc, google, _ := newSvcGoogle(t, store, fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)

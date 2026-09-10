@@ -281,6 +281,31 @@ func TestSQLiteRowStore_RequiresTenantScope(t *testing.T) {
 	assert.True(t, tenant.IsMissingError(store.PurgeSheet(t.Context(), k.SheetID)))
 }
 
+func TestSQLiteRowStore_RefreshPersistsTheSoftDeleteOptIn(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	rows := []sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}}
+	ok, err := store.Replace(f.ctx(), k, 0, rows, sheet.ContractState{OK: true, SoftDelete: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.True(t, got.SoftDelete,
+		"a refresh must persist the opt-in; store.Save drops it, so it has to travel with the contract")
+
+	ok, err = store.MarkContract(f.ctx(), sh.ID, 1, sheet.ContractState{OK: false, Reason: "no id column"})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err = f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.False(t, got.SoftDelete, "MarkContract writes what the header row said, not what it said last time")
+}
+
 func TestSQLiteRowStore_MarkContract_PersistsDriftWithoutTouchingTheRows(t *testing.T) {
 	f := newSQLiteFixture(t)
 	store := newSQLiteRowStore(t, f)
@@ -343,11 +368,10 @@ func TestSQLiteRowStore_Stats_CountsLiveRowsAndNamesColumns(t *testing.T) {
 	got, err := store.Stats(f.ctx(), sh.ID, "Rates")
 	require.NoError(t, err)
 	assert.Equal(t, sheet.TableStats{
-		Tab:        "Rates",
-		Columns:    []string{"id", "name"},
-		RowCount:   2,
-		SoftDelete: true,
-	}, got, "Stats counts live rows only and reports the tombstoned column")
+		Tab:      "Rates",
+		Columns:  []string{"id", "name"},
+		RowCount: 2,
+	}, got, "Stats counts live rows only")
 }
 
 func TestSQLiteRowStore_Stats_IsScopedToOneTab(t *testing.T) {
