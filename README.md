@@ -79,18 +79,26 @@ it mounts the other two HTTP surfaces under `http.basePath`.
 Data-plane routes, with `http.basePath` empty:
 
 ```
-GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}            # the tab's rows as a JSON array
-POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}            # append one row: {"values":[...]}
-PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}  # patch one row: {"column":"value"}
-DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache      # drop this sheet's snapshots
-GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs   # the document's tab titles
-POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs   # create a tab: {"title":"Q2"}
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}               # the tab's rows as a JSON array
+POST   /api/v1/orgs/{org}/projects/{project}/sheets/{slug}               # append one row: {"values":[...]}
+PATCH  /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}     # patch one row: {"column":"value"}
+GET    /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/capabilities  # the tab's shape and contract state
+DELETE /api/v1/orgs/{org}/projects/{project}/sheets/{slug}/cache         # drop this sheet's snapshots
+GET    /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs      # the document's tab titles
+POST   /api/v1/orgs/{org}/projects/{project}/spreadsheets/{id}/tabs      # create a tab: {"title":"Q2"}
 ```
 
 A write needs `sheets:write` plus `sheets.writable` on the sheet; the tabs routes
 need `spreadsheets:read` / `spreadsheets:write`, and `spreadsheets.writable` to
 create. They name no sheet, so a key restricted to specific sheets cannot use
 them at all. `POST …/sheets/{slug}` honours `Idempotency-Key`.
+
+`…/capabilities` is authorized like the rows `GET` (`sheets:read`, or public
+visibility) and is answered from the row projection and the `sheets` row alone —
+no Google call — so it is cheap to poll. It reports the tab's columns, whether it
+has an `id` column, its live row count, and whether it still satisfies the table
+contract. Publishing a tab now reads it once and fails closed if it has no `id`
+column; `capabilities` is a reserved slug.
 
 `api.enabled` gates the RPC surface only — the data plane is always mounted.
 

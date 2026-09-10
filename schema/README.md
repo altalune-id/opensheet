@@ -12,9 +12,11 @@ domain interfaces — SQLite is dev/demo, Postgres is production.
 ```
 schema/
 ├── migrations/postgres/    # 001_init … 005_definer_functions (template),
-│                           # 006_opensheet (this project), VERSION
+│                           # 006_opensheet, 007_row_projection (this
+│                           # project), VERSION
 ├── migrations/sqlite/      # 001_init … 003_todo_stale_idx (template),
-│                           # 004_opensheet (this project), VERSION
+│                           # 004_opensheet, 005_row_projection (this
+│                           # project), VERSION
 ├── migrator.go             # goose runner, template rendering, embed FS
 ├── migrator_templatefs.go  # per-boot template-rendered file system
 ├── rls_guard.go            # boot-time BYPASSRLS rejection + pg_policies audit
@@ -69,6 +71,7 @@ erDiagram
     credentials ||--o{ spreadsheets : "grants access"
     spreadsheets ||--o{ sheets : "has tabs"
     sheets ||--o{ sheet_snapshots : "cached as"
+    sheets ||--o{ sheet_rows : "projected as"
     api_keys ||--o{ api_key_sheets : "granted"
     sheets ||--o{ api_key_sheets : "granted to"
 
@@ -142,6 +145,11 @@ erDiagram
         text slug "unique per project"
         text visibility "key|public"
         int cache_ttl_secs "0 means default, max 86400"
+        bool writable
+        bigint generation "staleness guard and write lock"
+        timestamptz validated_at
+        bool contract_ok
+        text contract_reason
     }
     api_keys {
         uuid id PK
@@ -170,6 +178,16 @@ erDiagram
         uuid org_id FK
         uuid project_id FK
     }
+    sheet_rows {
+        uuid sheet_id PK
+        text tab PK "resolved name, never empty"
+        text row_id PK "the tab's id column"
+        int row_index "position in the fetched tab"
+        jsonb data "deleted_at stripped"
+        timestamptz deleted_at "tombstone"
+        uuid org_id FK
+        uuid project_id FK
+    }
 ```
 
 `users` is global (no `org_id`); every other table is tenant-scoped and appears
@@ -182,6 +200,15 @@ transaction scoped to the key's own org rather than defaulting it — see below.
 
 `sheet_snapshots.payload` is `bytea`, not `jsonb`, because `etag` is a hash of
 those exact bytes and `jsonb` would reorder keys and normalise numbers.
+
+`sheet_rows` is the queryable projection of a published tab, keyed on the tab's
+`id` column. `row_index` is the row's position among the tab's data rows, so an
+interior blank row consumes an index rather than compacting the ones below it;
+the spreadsheet row is `row_index + 2`. `sheets.generation` guards it: a refresh
+captures the counter before fetching and its write is discarded if the counter
+moved, and a `PATCH` takes the same counter as a per-sheet write lock.
+`sheet_rows.data` is `jsonb`, so its keys come back in Postgres' own order — the
+served body is rebuilt with `encoding/json`, never read out of `jsonb` ordering.
 
 ## SECURITY DEFINER wrappers
 
@@ -205,7 +232,7 @@ widens `list_org_ids` to `RETURNS TABLE (id uuid, created_at timestamptz)`
 `apikey_by_prefix` is added outright.
 
 SECURITY: **`current_org_id` (`002`) is not one of these.** It is plain
-`LANGUAGE sql STABLE` with no `SECURITY DEFINER` and no `REVOKE`, and all 12
+`LANGUAGE sql STABLE` with no `SECURITY DEFINER` and no `REVOKE`, and all 13
 RLS policies call it in `USING`, evaluated as the _querying_ role. Revoking
 `EXECUTE` on it breaks every tenant-scoped read, and only under
 `db.allowBypassRLS=false` — so it passes every dev run. Do not add it to the
@@ -224,7 +251,7 @@ collapse it into one query.
 1. Add `NNN_<name>.sql` under both `migrations/postgres/` and
    `migrations/sqlite/`, with goose `-- +goose Up` / `-- +goose Down` and
    `-- +goose StatementBegin` / `StatementEnd` markers. The next Postgres
-   migration is `007`; the next SQLite one is `005`.
+   migration is `008`; the next SQLite one is `006`.
 2. **Bump `VERSION`** in the affected dialect to the highest `NNN` present.
    `migrator.go` reads it as goose's target, so a file beyond the pin is
    **silently ignored** — no error, just an absent table.
