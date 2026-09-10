@@ -93,6 +93,9 @@ const (
 	CodeSheetIdempotencyMismatch = "SHT018"
 	CodeSheetInvalidTabTitle     = "SHT019"
 	CodeSheetInvalidRowIndex     = "SHT020"
+	CodeSheetDuplicateColumn     = "SHT021"
+	CodeSheetEmptyID             = "SHT022"
+	CodeSheetContractViolation   = "SHT023"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

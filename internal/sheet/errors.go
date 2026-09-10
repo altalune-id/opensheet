@@ -609,3 +609,96 @@ func IsIdempotencyMismatchError(err error) bool {
 	_, ok := errors.AsType[*IdempotencyMismatchError](err)
 	return ok
 }
+
+// DuplicateColumnError signals more than one header folding to the same reserved column name.
+type DuplicateColumnError struct {
+	Tab     string
+	Column  string
+	Columns []int
+}
+
+func (e *DuplicateColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: %d headers name the %q column", e.Tab, len(e.Columns), e.Column)
+}
+
+// ToAppError maps DuplicateColumnError to an Aborted envelope.
+func (e *DuplicateColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetDuplicateColumn,
+		"This tab has more than one column with this name; rename all but one",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetDuplicateColumn,
+			Meta: map[string]string{"tab": e.Tab, "column": e.Column, "columns": strconv.Itoa(len(e.Columns))},
+		},
+	)
+}
+
+// IsDuplicateColumnError reports whether err's tree contains a *DuplicateColumnError.
+func IsDuplicateColumnError(err error) bool {
+	_, ok := errors.AsType[*DuplicateColumnError](err)
+	return ok
+}
+
+// EmptyIDError signals a row carrying content under an empty id.
+type EmptyIDError struct {
+	Tab      string
+	RowIndex int
+}
+
+func (e *EmptyIDError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: row %d: empty id", e.Tab, e.RowIndex)
+}
+
+// ToAppError maps EmptyIDError to an Aborted envelope.
+func (e *EmptyIDError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetEmptyID,
+		"A row with content carries an empty id; every row needs one",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetEmptyID,
+			Meta: map[string]string{"tab": e.Tab, "row_index": strconv.Itoa(e.RowIndex)},
+		},
+	)
+}
+
+// IsEmptyIDError reports whether err's tree contains an *EmptyIDError.
+func IsEmptyIDError(err error) bool {
+	_, ok := errors.AsType[*EmptyIDError](err)
+	return ok
+}
+
+// ContractViolationError signals an id-addressed operation on a sheet that does not satisfy the table contract.
+// NOTE: unused until the keyed-write path; landed with its siblings so the block and its docs stay in one piece.
+type ContractViolationError struct {
+	Slug   string
+	Reason string
+}
+
+func (e *ContractViolationError) Error() string {
+	reason := e.Reason
+	if reason == "" {
+		reason = "table contract not satisfied"
+	}
+	return fmt.Sprintf("sheet: %q: %s", e.Slug, reason)
+}
+
+// ToAppError maps ContractViolationError to an Aborted envelope.
+func (e *ContractViolationError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetContractViolation,
+		"This sheet does not satisfy the table contract, so its rows cannot be addressed by id",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetContractViolation,
+			Meta: map[string]string{"slug": e.Slug, "reason": e.Reason},
+		},
+	)
+}
+
+// IsContractViolationError reports whether err's tree contains a *ContractViolationError.
+func IsContractViolationError(err error) bool {
+	_, ok := errors.AsType[*ContractViolationError](err)
+	return ok
+}
