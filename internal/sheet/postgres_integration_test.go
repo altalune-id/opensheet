@@ -42,6 +42,7 @@ type pgFixture struct {
 	store     sheet.Store
 	snapshots sheet.SnapshotStore
 	attempts  sheet.IdempotencyStore
+	rows      sheet.RowStore
 	appDB     *sql.DB
 	ownerDB   *sql.DB
 	prefix    string
@@ -86,7 +87,9 @@ func newPgFixture(t *testing.T) *pgFixture {
 	pgCreateRole(t, admin, appRole, "LOGIN PASSWORD 'pw' NOBYPASSRLS")
 	_, err = admin.ExecContext(t.Context(), fmt.Sprintf(`GRANT USAGE ON SCHEMA public TO %q`, appRole))
 	require.NoError(t, err)
-	for _, table := range []string{prefix + "sheets", prefix + "sheet_snapshots", prefix + "sheet_write_attempts"} {
+	for _, table := range []string{
+		prefix + "sheets", prefix + "sheet_snapshots", prefix + "sheet_write_attempts", prefix + "sheet_rows",
+	} {
 		_, err = migDB.ExecContext(t.Context(),
 			fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON public.%s TO %q`, table, appRole))
 		require.NoError(t, err)
@@ -108,6 +111,7 @@ func newPgFixture(t *testing.T) *pgFixture {
 	pool := db.Pool{W: appDB, R: appDB}
 	pc := tenant.NewPgConn(appDB)
 	f.store = sheet.NewStore(dbCfg, pool, pc)
+	f.rows = sheet.NewRowStore(dbCfg, pool, pc)
 	f.snapshots, err = sheet.NewSnapshotStore(
 		config.CacheConfig{Driver: config.CacheDriverPostgres, MaxBytes: 1 << 20},
 		dbCfg, pc, slog.New(slog.DiscardHandler),
