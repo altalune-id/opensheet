@@ -30,3 +30,12 @@ func TestNewOrgReader_SQLiteReadsTheTable(t *testing.T) {
 	require.Contains(t, r.query, "ORDER BY orgs.created_at ASC")
 	require.Empty(t, r.args)
 }
+
+func TestNewOrgReader_PostgresOrdersOnTheOuterStatement(t *testing.T) {
+	r, ok := NewOrgReader(db.Pool{}, db.DriverPostgres, "public", "opensheet_").(*pgOrgReader)
+	require.True(t, ok)
+	require.Contains(t, r.query, "public.opensheet_list_org_ids() o",
+		"the set-returning function must be aliased, or the outer ORDER BY cannot reference it")
+	require.Contains(t, r.query, "ORDER BY o.created_at ASC, o.id ASC",
+		"postgres does not guarantee an ORDER BY inside an inlinable SQL SRF survives into an outer unordered SELECT")
+}

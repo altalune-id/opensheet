@@ -25,9 +25,9 @@ func NewOrgReader(pool db.Pool, driver db.Driver, schema, tablePrefix string) Or
 			schema = "public"
 		}
 		// NOTE: RawStatement because go-jet has no builder for a set-returning function in FROM position. Only config-supplied identifiers are interpolated; bind any value as a named argument.
-		// TODO: list_org_ids() RETURNS TABLE (id uuid), so the outer statement cannot repeat the function's "created_at ASC, id ASC" — widen the wrapper's return type, then lift the ORDER BY here as invite/org already do.
+		// NOTE: the ORDER BY is repeated on the outer statement because postgres does not guarantee one inside an inlinable SQL set-returning function survives into an outer unordered SELECT.
 		query, args := jetpg.RawStatement(
-			"SELECT id FROM " + schema + "." + tablePrefix + "list_org_ids()").Sql()
+			"SELECT id FROM " + schema + "." + tablePrefix + "list_org_ids() o ORDER BY o.created_at ASC, o.id ASC").Sql()
 		return &pgOrgReader{conn: pool.W, query: query, args: args}
 	}
 	orgs := sqliteent.NewOrgs(tablePrefix)
