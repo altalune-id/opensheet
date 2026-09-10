@@ -143,6 +143,9 @@ func TestMigrateUp_SQLite_CreatesAllTables(t *testing.T) {
 		"opensheet_api_keys",
 		"opensheet_api_key_sheets",
 		"opensheet_sheet_snapshots",
+		"opensheet_bootstrap",
+		"opensheet_sessions",
+		"opensheet_sheet_write_attempts",
 	}
 	for _, tbl := range wantTables {
 		var n int
