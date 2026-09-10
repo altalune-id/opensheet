@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/project"
@@ -28,18 +30,22 @@ const maxPreviewRows = 50
 const noIDColumnCopy = "This tab has no id column. Add a column headed id in row 1, with a unique value in every row. " +
 	"To have opensheet add it for you instead, re-authorize this spreadsheet's credential with write scope."
 
+const manualIDColumnCopy = "Google refused to write to this spreadsheet, so opensheet could not add the id column. " +
+	"Add a column headed id in row 1 yourself, with a unique value in every row, or re-authorize this spreadsheet's credential with write scope."
+
 // SheetHandler owns the project-scoped published-sheet pages.
 type SheetHandler struct {
 	Deps
 	Sheets       *sheet.Service
 	Spreadsheets *spreadsheet.Service
 	Read         *sheet.ReadWorkflow
+	Fix          *sheet.FixWorkflow
 }
 
 // NewSheetHandler wires the handler.
-func NewSheetHandler(d Deps, projects *project.Service, sheets *sheet.Service, spreadsheets *spreadsheet.Service, read *sheet.ReadWorkflow) *SheetHandler {
+func NewSheetHandler(d Deps, projects *project.Service, sheets *sheet.Service, spreadsheets *spreadsheet.Service, read *sheet.ReadWorkflow, fix *sheet.FixWorkflow) *SheetHandler {
 	d.Projects = projects
-	return &SheetHandler{Deps: d, Sheets: sheets, Spreadsheets: spreadsheets, Read: read}
+	return &SheetHandler{Deps: d, Sheets: sheets, Spreadsheets: spreadsheets, Read: read, Fix: fix}
 }
 
 // GetList renders the published sheets.
@@ -106,10 +112,37 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Sheets.Create(sc.req.Context(), create); err != nil {
 		h.LogErr("web sheet: create", err)
 		in.Error, in.ErrorCode = publishMessage(i18n.TranslatorFrom(sc.req.Context()), err), ErrorRef(err)
+		in.FixIDColumnPath = h.fixIDColumnPath(err, sprdID, in.Tab)
 		h.writeSection(w, sc, in)
 		return
 	}
 	h.writeSection(w, sc, templates.SheetsView{})
+}
+
+// PostFixIDColumn adds an id column to one tab of one registered spreadsheet and returns to the publish form.
+// NOTE: this writes to the user's spreadsheet, so it runs only from this button and never as part of publishing — and it deliberately does not then publish, so the operator sees the change first.
+func (h *SheetHandler) PostFixIDColumn(w http.ResponseWriter, r *http.Request) {
+	sc, sp, ok := h.requireRegisteredSpreadsheet(w, r)
+	if !ok {
+		return
+	}
+	tab := strings.TrimSpace(sc.req.URL.Query().Get("tab"))
+	in := templates.SheetsView{SpreadsheetID: sp.ID.String(), Tab: tab}
+	tr := i18n.TranslatorFrom(sc.req.Context())
+
+	out, err := h.Fix.AddIDColumn(sc.req.Context(), sp.ID, tab)
+	if err != nil {
+		h.LogErr("web sheet: fix id column", err)
+		in.Error, in.ErrorCode = fixMessage(tr, err), ErrorRef(err)
+		h.writeSection(w, sc, in)
+		return
+	}
+	in.Tab = out.Tab
+	in.Notice = trOr(tr, "sheets.fix_id_column_done",
+		fmt.Sprintf("opensheet wrote an id column into %s of this spreadsheet and filled %d rows. Check it, then publish again.",
+			tabLabel(out.Tab), out.RowsFilled),
+		"Tab", tabLabel(out.Tab), "Rows", out.RowsFilled)
+	h.writeSection(w, sc, in)
 }
 
 // GetShow renders one published sheet.
@@ -212,6 +245,7 @@ func (h *SheetHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{id}/delete", h.PostDelete)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/publish", h.GetBulkPanel)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/publish", h.PostBulkPublish)
+	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/fix-id-column", h.PostFixIDColumn)
 }
 
 // GetBulkPanel renders the tab-picker panel for one document, which costs one Google round-trip.
@@ -593,6 +627,38 @@ func contractMessage(tr *i18n.Translator, err error) (string, bool) {
 			"Count", e.Count, "ID", e.ID), true
 	}
 	return "", false
+}
+
+// fixIDColumnPath is the project-relative path the "add it for me" button posts to, empty unless err is the one failure that offer can fix.
+func (h *SheetHandler) fixIDColumnPath(err error, sprdID uuid.UUID, tab string) string {
+	if _, ok := errors.AsType[*sheet.NoIDColumnError](err); !ok {
+		return ""
+	}
+	return "/spreadsheets/" + sprdID.String() + "/fix-id-column?tab=" + url.QueryEscape(tab)
+}
+
+// NOTE: a read-only credential is discovered from Google's refusal, never pre-checked, so the 403 is where the manual remedy is named.
+func fixMessage(tr *i18n.Translator, err error) string {
+	if gworkspace.IsPermissionDeniedError(err) || credential.IsReauthNeededError(err) {
+		return trOr(tr, "sheets.fix_error.denied", manualIDColumnCopy)
+	}
+	if _, ok := errors.AsType[*sheet.NothingToFixError](err); ok {
+		return trOr(tr, "sheets.fix_error.nothing_to_fix",
+			"This tab already has an id column with a value in every row that has content. Publish again.")
+	}
+	if e, ok := errors.AsType[*sheet.ColumnNotEmptyError](err); ok {
+		return trOr(tr, "sheets.fix_error.column_not_empty",
+			fmt.Sprintf("Column %s of this tab already holds data in row %d, so opensheet will not overwrite it. "+
+				"Add a column headed id in row 1 yourself, with a unique value in every row.", e.Column, e.Row),
+			"Column", e.Column, "Row", e.Row)
+	}
+	if msg, ok := contractMessage(tr, err); ok {
+		return msg
+	}
+	if spreadsheet.IsNotFoundError(err) {
+		return "That spreadsheet is not registered in this project."
+	}
+	return trOr(tr, "sheets.fix_error.failed", "Could not add an id column to this tab.")
 }
 
 // spreadsheetRow turns a zero-based data-row index into the row number the operator sees in Google.

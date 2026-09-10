@@ -95,6 +95,7 @@ type sheetsFixture struct {
 	Snaps      *fakes.SheetSnapshots
 	Sources    *fakes.SheetSources
 	Read       *sheet.ReadWorkflow
+	Fix        *sheet.FixWorkflow
 	KeyStore   *fakes.APIKey
 	Keys       *apikey.Service
 	Connect    *credential.ConnectWorkflow
@@ -163,6 +164,8 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 
 	read := sheet.NewReadWorkflow(snaps, fakes.NewSheetRows(), sources, readScopedTokens{svc: creds}, fakes.NewSheetReauthers(), clients,
 		publicCaps(caps.PublicSheets), 30*time.Second, 1<<20, discardLogger(), passthroughUnexpected())
+	fix := sheet.NewFixWorkflow(sources, writeScopedTokens{svc: creds}, fakes.NewSheetReauthers(), writers,
+		discardLogger(), passthroughUnexpected())
 
 	keyStore := fakes.NewAPIKey()
 	keys := apikey.NewService(keyStore, discardLogger(), passthroughUnexpected(), fakes.NewAPIKeySheets())
@@ -191,6 +194,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		Snaps:          snaps,
 		Sources:        sources,
 		Read:           read,
+		Fix:            fix,
 		KeyStore:       keyStore,
 		Keys:           keys,
 		Connect:        connect,
@@ -237,7 +241,7 @@ func (f *sheetsFixture) mux(t *testing.T) *http.ServeMux {
 	mux := http.NewServeMux()
 	handlers.NewCredentialHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	handlers.NewSpreadsheetHandler(f.Deps, f.Projects, f.Sprds, f.Creds).Register(mux)
-	handlers.NewSheetHandler(f.Deps, f.Projects, f.Sheets, f.Sprds, f.Read).Register(mux)
+	handlers.NewSheetHandler(f.Deps, f.Projects, f.Sheets, f.Sprds, f.Read, f.Fix).Register(mux)
 	handlers.NewAPIKeyHandler(f.Deps, f.Projects, f.Keys, f.Sheets).Register(mux)
 	handlers.NewGoogleConnectHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	return mux
@@ -282,29 +286,45 @@ func (f *sheetsFixture) seedSheet(t *testing.T, sprdID uuid.UUID, slug string, v
 
 // fakeSheetsAPI serves the Google Sheets endpoints the read path uses plus an OAuth token endpoint.
 type fakeSheetsAPI struct {
-	mu         sync.Mutex
-	rowsBody   string
-	rowsStatus int
-	metaStatus int
-	tabs       []string
-	noRefresh  bool
+	mu           sync.Mutex
+	rowsBody     string
+	rowsStatus   int
+	updateBody   string
+	updateStatus int
+	metaStatus   int
+	tabs         []string
+	noRefresh    bool
+	writes       []sheetWrite
 
 	url      string
 	tokenURL string
 }
 
+// sheetWrite is one values.update the fake received, so a test can assert what reached the spreadsheet.
+type sheetWrite struct {
+	url  string
+	body string
+}
+
 func newFakeSheetsAPI(t *testing.T) *fakeSheetsAPI {
 	t.Helper()
 	f := &fakeSheetsAPI{
-		rowsBody:   `{"values":[["id","name","qty"],["r1","apple","3"]]}`,
-		rowsStatus: http.StatusOK,
-		metaStatus: http.StatusOK,
-		tabs:       []string{"First", "Second"},
+		rowsBody:     `{"values":[["id","name","qty"],["r1","apple","3"]]}`,
+		rowsStatus:   http.StatusOK,
+		updateBody:   `{}`,
+		updateStatus: http.StatusOK,
+		metaStatus:   http.StatusOK,
+		tabs:         []string{"First", "Second"},
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v4/spreadsheets/{file}/values/", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v4/spreadsheets/{file}/values/", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		body, status := f.rowsBody, f.rowsStatus
+		if r.Method == http.MethodPut {
+			raw, _ := io.ReadAll(r.Body)
+			f.writes = append(f.writes, sheetWrite{url: r.URL.String(), body: string(raw)})
+			body, status = f.updateBody, f.updateStatus
+		}
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -353,6 +373,19 @@ func (f *fakeSheetsAPI) setRows(body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rowsBody = body
+}
+
+func (f *fakeSheetsAPI) refuseWrites() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateStatus = http.StatusForbidden
+	f.updateBody = `{"error":{"code":403,"message":"Request had insufficient authentication scopes."}}`
+}
+
+func (f *fakeSheetsAPI) writesReceived() []sheetWrite {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]sheetWrite(nil), f.writes...)
 }
 
 func (f *fakeSheetsAPI) setTabs(tabs ...string) {

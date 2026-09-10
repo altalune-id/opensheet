@@ -96,6 +96,9 @@ const (
 	CodeSheetDuplicateColumn     = "SHT021"
 	CodeSheetEmptyID             = "SHT022"
 	CodeSheetContractViolation   = "SHT023"
+	CodeSheetInvalidRange        = "SHT024"
+	CodeSheetNothingToFix        = "SHT025"
+	CodeSheetColumnNotEmpty      = "SHT026"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

@@ -106,6 +106,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/spreadsheets/" + id, url.Values{"title": {"Probe"}}},
 		{http.MethodPost, pbase + "/spreadsheets/" + id + "/delete", url.Values{}},
 		{http.MethodPost, pbase + "/spreadsheets/" + id + "/publish", url.Values{"tab": {"0"}, "slug.0": {"probe-bulk-sheet"}, "visibility": {"key"}}},
+		{http.MethodPost, pbase + "/spreadsheets/" + id + "/fix-id-column", url.Values{}},
 		{http.MethodPost, pbase + "/sheets", url.Values{"spreadsheet_id": {id}, "slug": {"probe-sheet"}, "visibility": {"key"}}},
 		{http.MethodPost, pbase + "/sheets/" + id, url.Values{"tab": {"Probe"}, "visibility": {"key"}}},
 		{http.MethodPost, pbase + "/sheets/" + id + "/purge", url.Values{}},

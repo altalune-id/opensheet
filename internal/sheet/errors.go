@@ -702,3 +702,61 @@ func IsContractViolationError(err error) bool {
 	_, ok := errors.AsType[*ContractViolationError](err)
 	return ok
 }
+
+// NothingToFixError signals a tab whose id column already gives every row with content a value.
+type NothingToFixError struct {
+	Tab string
+}
+
+func (e *NothingToFixError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: nothing to fix", e.Tab)
+}
+
+// ToAppError maps NothingToFixError to an Aborted envelope.
+func (e *NothingToFixError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetNothingToFix,
+		"This tab already has an id column with a value in every row with content",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetNothingToFix,
+			Meta: map[string]string{"tab": e.Tab},
+		},
+	)
+}
+
+// IsNothingToFixError reports whether err's tree contains a *NothingToFixError.
+func IsNothingToFixError(err error) bool {
+	_, ok := errors.AsType[*NothingToFixError](err)
+	return ok
+}
+
+// ColumnNotEmptyError signals that the column an id header would claim already holds data below row 1.
+type ColumnNotEmptyError struct {
+	Tab    string
+	Column string
+	Row    int
+}
+
+func (e *ColumnNotEmptyError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: column %s holds data in row %d", e.Tab, e.Column, e.Row)
+}
+
+// ToAppError maps ColumnNotEmptyError to an Aborted envelope.
+func (e *ColumnNotEmptyError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetColumnNotEmpty,
+		"The column an id header would claim already holds data, so it will not be overwritten",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetColumnNotEmpty,
+			Meta: map[string]string{"tab": e.Tab, "column": e.Column, "row": strconv.Itoa(e.Row)},
+		},
+	)
+}
+
+// IsColumnNotEmptyError reports whether err's tree contains a *ColumnNotEmptyError.
+func IsColumnNotEmptyError(err error) bool {
+	_, ok := errors.AsType[*ColumnNotEmptyError](err)
+	return ok
+}

@@ -3,6 +3,7 @@ package gsheet
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -24,6 +25,8 @@ const insertDataRows = "INSERT_ROWS"
 // MaxTabTitleRunes is Google's limit on the length of a tab title.
 // https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/sheets#SheetProperties
 const MaxTabTitleRunes = 100
+
+var a1Span = regexp.MustCompile(`^[A-Z]{1,3}[1-9]\d{0,6}(:[A-Z]{1,3}[1-9]\d{0,6})?$`)
 
 // WriterFactory builds a Writer for one credential.
 type WriterFactory func(ctx context.Context, ts oauth2.TokenSource) (*Writer, error)
@@ -75,9 +78,31 @@ func (w *Writer) UpdateRow(ctx context.Context, fileID, tab string, rowIndex int
 	}
 
 	// NOTE: the end column makes the write's extent part of the request, so Google rejects a mis-sized cells slice.
-	rng := fmt.Sprintf("%s!A%d:%s%d", quoteRange(tab), rowIndex, columnLetter(len(cells)), rowIndex)
+	rng := fmt.Sprintf("%s!A%d:%s%d", quoteRange(tab), rowIndex, ColumnLabel(len(cells)), rowIndex)
 	_, err := w.svc.Spreadsheets.Values.
 		Update(fileID, rng, &sheetsapi.ValueRange{Values: [][]any{cells}}).
+		ValueInputOption(valueInputRaw).
+		Context(ctx).Do()
+	if err != nil {
+		return translateRange(err, fileID, tab)
+	}
+	return nil
+}
+
+// UpdateRange overwrites the cells of span — an A1 span within tab, such as "C1" or "C1:C40" — with rows.
+func (w *Writer) UpdateRange(ctx context.Context, fileID, tab, span string, rows [][]any) error {
+	tab = strings.TrimSpace(tab)
+	if tab == "" {
+		return &TabNotFoundError{Tab: tab}
+	}
+	// SECURITY: the span is matched against a closed pattern, so it cannot carry a quote, a second "!" or a tab name of its own out of the caller and into the A1 expression.
+	if len(rows) == 0 || !a1Span.MatchString(span) {
+		return &InvalidRangeError{Range: span}
+	}
+
+	rng := quoteRange(tab) + "!" + span
+	_, err := w.svc.Spreadsheets.Values.
+		Update(fileID, rng, &sheetsapi.ValueRange{Values: rows}).
 		ValueInputOption(valueInputRaw).
 		Context(ctx).Do()
 	if err != nil {

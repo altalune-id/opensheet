@@ -1,7 +1,7 @@
 package gsheet
 
-// columnLetter returns the bijective base-26 A1 column label for a 1-based column number.
-func columnLetter(n int) string {
+// ColumnLabel returns the bijective base-26 A1 column label for a 1-based column number.
+func ColumnLabel(n int) string {
 	if n < 1 {
 		return "A"
 	}

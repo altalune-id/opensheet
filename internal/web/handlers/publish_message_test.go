@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/sheet"
 )
@@ -98,6 +99,87 @@ func TestPublishErrorKeys_ResolveInEveryLocale(t *testing.T) {
 		"sheets.publish_error.duplicate_column",
 		"sheets.publish_error.empty_id",
 		"sheets.publish_error.duplicate_id",
+	}
+	bundle := i18n.NewEmbeddedBundle(i18n.EnUS)
+	for _, loc := range bundle.All() {
+		tr := bundle.For(loc)
+		for _, key := range keys {
+			got := tr.T(key, args...)
+			if got == key {
+				t.Errorf("%s: %s is untranslated", loc, key)
+				continue
+			}
+			if strings.Contains(got, "{{") || strings.Contains(got, "<no value>") {
+				t.Errorf("%s: %s = %q, want its template data rendered", loc, key, got)
+			}
+		}
+	}
+}
+
+const genericFixFailure = "Could not add an id column to this tab."
+
+func fixCases() []contractCase {
+	return []contractCase{
+		{
+			"read-only credential",
+			&gworkspace.PermissionDeniedError{FileID: "F"},
+			[]string{"refused", "headed id", "row 1", "unique value", "write scope"},
+		},
+		{
+			"nothing to fix",
+			&sheet.NothingToFixError{Tab: "Q1"},
+			[]string{"already has an id column", "Publish again"},
+		},
+		{
+			"target column holds data",
+			&sheet.ColumnNotEmptyError{Tab: "Q1", Column: "C", Row: 4},
+			[]string{"Column C", "row 4", "will not overwrite", "headed id"},
+		},
+	}
+}
+
+func TestFixMessage_NamesTheRemedyForEveryRefusal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range fixCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := fixMessage(nil, tc.err)
+			if got == genericFixFailure {
+				t.Fatalf("fixMessage(%T) fell through to the generic copy", tc.err)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(got, want) {
+					t.Fatalf("fixMessage(%T) = %q, want it to contain %q", tc.err, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFixMessage_TranslatedCopyMatchesTheFallback(t *testing.T) {
+	t.Parallel()
+	tr := i18n.NewEmbeddedBundle(i18n.EnUS).For(i18n.EnUS)
+	for _, tc := range fixCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got, want := fixMessage(tr, tc.err), fixMessage(nil, tc.err); got != want {
+				t.Fatalf("fixMessage(en-US, %T) = %q, want the vetted copy %q", tc.err, got, want)
+			}
+		})
+	}
+}
+
+func TestFixKeys_ResolveInEveryLocale(t *testing.T) {
+	t.Parallel()
+	args := []any{"Tab", "Q1", "Rows", 3, "Column", "C", "Row", 4}
+	keys := []string{
+		"sheets.fix_id_column",
+		"sheets.fix_id_column_hint",
+		"sheets.fix_id_column_done",
+		"sheets.fix_error.denied",
+		"sheets.fix_error.nothing_to_fix",
+		"sheets.fix_error.column_not_empty",
+		"sheets.fix_error.failed",
 	}
 	bundle := i18n.NewEmbeddedBundle(i18n.EnUS)
 	for _, loc := range bundle.All() {

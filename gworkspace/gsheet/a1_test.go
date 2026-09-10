@@ -13,8 +13,8 @@ func TestColumnLetter(t *testing.T) {
 		{53, "BA"}, {702, "ZZ"}, {703, "AAA"},
 	}
 	for _, tc := range cases {
-		if got := columnLetter(tc.n); got != tc.want {
-			t.Errorf("columnLetter(%d) = %q, want %q", tc.n, got, tc.want)
+		if got := ColumnLabel(tc.n); got != tc.want {
+			t.Errorf("ColumnLabel(%d) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
 }
@@ -22,8 +22,8 @@ func TestColumnLetter(t *testing.T) {
 func TestColumnLetter_NonPositiveFallsBackToTheFirstColumn(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{0, -1} {
-		if got := columnLetter(n); got != "A" {
-			t.Errorf("columnLetter(%d) = %q, want %q", n, got, "A")
+		if got := ColumnLabel(n); got != "A" {
+			t.Errorf("ColumnLabel(%d) = %q, want %q", n, got, "A")
 		}
 	}
 }

@@ -143,6 +143,12 @@ func (f *fakeWriteSheets) setAppend(status int, body string) {
 	f.appendStatus, f.appendBody = status, body
 }
 
+func (f *fakeWriteSheets) setUpdate(status int, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updateStatus, f.updateBody = status, body
+}
+
 func (f *fakeWriteSheets) factory() gsheet.WriterFactory {
 	return func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Writer, error) {
 		return gsheet.NewWriter(ctx, ts, gworkspace.WithBaseURL(f.url))

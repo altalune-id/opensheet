@@ -104,7 +104,7 @@ func buildWebHandler(
 	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
 	credentialHandler := webhandlers.NewCredentialHandler(deps, projects, svcs.Credentials, svcs.Connect)
 	spreadsheetHandler := webhandlers.NewSpreadsheetHandler(deps, projects, svcs.Spreadsheets, svcs.Credentials)
-	sheetHandler := webhandlers.NewSheetHandler(deps, projects, svcs.Sheets, svcs.Spreadsheets, svcs.Read)
+	sheetHandler := webhandlers.NewSheetHandler(deps, projects, svcs.Sheets, svcs.Spreadsheets, svcs.Read, svcs.Fix)
 	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, projects, svcs.APIKeys, svcs.Sheets)
 	googleHandler := webhandlers.NewGoogleConnectHandler(deps, projects, svcs.Credentials, svcs.Connect)
 	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)

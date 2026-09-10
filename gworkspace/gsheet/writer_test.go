@@ -232,6 +232,87 @@ func TestWriter_UpdateRowRejectsABlankTab(t *testing.T) {
 	}
 }
 
+func TestWriter_UpdateRangeSendsRawAndOneRequest(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{}`
+	})
+
+	rows := [][]any{{"id"}, {"k3mQ8v"}, {"p9xR4j"}, {"zt4LpB"}}
+	if err := w.UpdateRange(context.Background(), "FILE", "Rates", "C1:C4", rows); err != nil {
+		t.Fatalf("UpdateRange: %v", err)
+	}
+
+	got := sent.snapshot()
+	if got.calls != 1 {
+		t.Fatalf("UpdateRange made %d requests, want exactly 1 for the whole span", got.calls)
+	}
+	if got.method != http.MethodPut {
+		t.Errorf("method = %q, want PUT", got.method)
+	}
+	if want := "/v4/spreadsheets/FILE/values/'Rates'!C1:C4"; got.path != want {
+		t.Errorf("path = %q, want %q", got.path, want)
+	}
+	// SECURITY: RAW is the formula-injection control — under USER_ENTERED a crafted existing cell would evaluate on write.
+	if !strings.Contains(got.query, "valueInputOption=RAW") {
+		t.Errorf("query = %q, want it to carry valueInputOption=RAW", got.query)
+	}
+	var payload struct {
+		Values [][]any `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &payload); err != nil {
+		t.Fatalf("decode body %q: %v", got.body, err)
+	}
+	if len(payload.Values) != 4 {
+		t.Errorf("body carried %d rows, want 4", len(payload.Values))
+	}
+}
+
+// SECURITY: a tab named A'!A1:Z must not break out of the range expression a write targets.
+func TestWriter_UpdateRangeQuotesTheTabIntoTheRange(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{}`
+	})
+
+	if err := w.UpdateRange(context.Background(), "FILE", `A'!A1:Z`, "B2", [][]any{{"x"}}); err != nil {
+		t.Fatalf("UpdateRange: %v", err)
+	}
+
+	got := sent.snapshot()
+	if want := `/v4/spreadsheets/FILE/values/'A''!A1:Z'!B2`; got.path != want {
+		t.Errorf("path = %q, want %q", got.path, want)
+	}
+}
+
+func TestWriter_UpdateRangeRejectsBadInputBeforeCallingGoogle(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{}`
+	})
+
+	for _, span := range []string{"", "C", "C0", "A1:", "'Other'!A1", "A1:B2:C3", "a1:b2"} {
+		if err := w.UpdateRange(context.Background(), "FILE", "Rates", span, [][]any{{"x"}}); !IsInvalidRangeError(err) {
+			t.Errorf("UpdateRange(span=%q) error = %v, want InvalidRangeError", span, err)
+		}
+	}
+	if err := w.UpdateRange(context.Background(), "FILE", "Rates", "C1:C4", nil); !IsInvalidRangeError(err) {
+		t.Errorf("UpdateRange(no rows) error = %v, want InvalidRangeError", err)
+	}
+	if err := w.UpdateRange(context.Background(), "FILE", " ", "C1", [][]any{{"x"}}); !IsTabNotFoundError(err) {
+		t.Errorf("UpdateRange(blank tab) error = %v, want TabNotFoundError", err)
+	}
+	if got := sent.snapshot(); got.calls != 0 {
+		t.Errorf("made %d requests, want none — a refused span must never reach the user's spreadsheet", got.calls)
+	}
+}
+
 func TestWriter_AddTabRejectsBadTitlesBeforeCallingGoogle(t *testing.T) {
 	t.Parallel()
 	var sent sentRequest

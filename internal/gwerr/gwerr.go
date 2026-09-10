@@ -106,6 +106,14 @@ func envelope(err error) *apperror.AppError {
 			&apperrorv1.ErrorDetail{Code: apperror.CodeSheetInvalidTabTitle},
 		)
 	}
+	if _, ok := errors.AsType[*gsheet.InvalidRangeError](err); ok {
+		return apperror.New(
+			apperror.CodeSheetInvalidRange,
+			"A cell range must name an A1 span within one tab",
+			codes.InvalidArgument,
+			&apperrorv1.ErrorDetail{Code: apperror.CodeSheetInvalidRange},
+		)
+	}
 	if _, ok := errors.AsType[*gsheet.InvalidRowIndexError](err); ok {
 		return apperror.New(
 			apperror.CodeSheetInvalidRowIndex,

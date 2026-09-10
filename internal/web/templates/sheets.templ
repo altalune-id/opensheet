@@ -27,6 +27,9 @@ type SheetsView struct {
 	Writable      bool
 	Error         string
 	ErrorCode     string
+	Notice        string
+	// FixIDColumnPath is the project-relative path of the offer to add the missing id column, empty unless that offer applies.
+	FixIDColumnPath string
 }
 
 type SheetView struct {
@@ -60,6 +63,27 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 		if v.Error != "" {
 			<div data-error="sheets">
 				@ErrorBanner(d, v.Error, v.ErrorCode)
+				if v.FixIDColumnPath != "" {
+					<div class="mt-3">
+						<button
+							data-fix-id-column
+							type="button"
+							hx-post={ d.ProjectPath(v.ProjectSlug, v.FixIDColumnPath) }
+							hx-target="#sheets-section"
+							hx-swap="outerHTML"
+							class="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/60"
+						>
+							@icons.Icon("plus", "h-4 w-4")
+							<span>{ d.Tr("sheets.fix_id_column") }</span>
+						</button>
+						<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.fix_id_column_hint") }</p>
+					</div>
+				}
+			</div>
+		}
+		if v.Notice != "" {
+			<div data-notice="sheets" class="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+				<p>{ v.Notice }</p>
 			</div>
 		}
 		if len(v.Spreadsheets) == 0 {

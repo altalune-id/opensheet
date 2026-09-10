@@ -57,6 +57,7 @@ type Services struct {
 	Onboard *user.OnboardWorkflow
 	Read    *sheet.ReadWorkflow
 	Write   *sheet.WriteWorkflow
+	Fix     *sheet.FixWorkflow
 	Connect *credential.ConnectWorkflow
 
 	Authn    authn.Chain
@@ -234,6 +235,14 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		log,
 		reporter.Unexpected,
 	)
+	fixWorkflow := sheet.NewFixWorkflow(
+		spreadsheetsForSheet{svc: spreadsheets},
+		tokensForSheetWrite{svc: credentials},
+		credentialsForSheet{svc: credentials},
+		writers,
+		log,
+		reporter.Unexpected,
+	)
 	connectWorkflow := credential.NewConnectWorkflow(
 		credentialStore,
 		k.Sealer,
@@ -276,6 +285,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Onboard:          onboardWorkflow,
 		Read:             readWorkflow,
 		Write:            writeWorkflow,
+		Fix:              fixWorkflow,
 		Connect:          connectWorkflow,
 		Authn:            chain,
 		KeyAuthn:         keyAuthn,

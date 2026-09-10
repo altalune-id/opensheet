@@ -56,3 +56,16 @@ func IsInvalidRowIndexError(err error) bool {
 	_, ok := errors.AsType[*InvalidRowIndexError](err)
 	return ok
 }
+
+// InvalidRangeError reports that Range is not an A1 span of the form C1 or C1:D9.
+type InvalidRangeError struct{ Range string }
+
+func (e *InvalidRangeError) Error() string {
+	return fmt.Sprintf("gsheet: range %q: must be an A1 span within one tab", e.Range)
+}
+
+// IsInvalidRangeError reports whether err's chain contains a *InvalidRangeError.
+func IsInvalidRangeError(err error) bool {
+	_, ok := errors.AsType[*InvalidRangeError](err)
+	return ok
+}
