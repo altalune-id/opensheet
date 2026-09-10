@@ -45,6 +45,10 @@ type RowStore interface {
 	MarkContract(ctx context.Context, sheetID uuid.UUID, gen int64, contract ContractState) (bool, error)
 	// UpsertRow writes one row and bumps the generation, enrolling in the caller's transaction.
 	UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error
+	// RowByID returns one row with its tombstone state, reporting absence rather than a zero value.
+	RowByID(ctx context.Context, k SnapshotKey, rowID string) (ProjectedRow, error)
+	// ContractOf reports the contract state the sheet's last refresh persisted.
+	ContractOf(ctx context.Context, sheetID uuid.UUID) (ContractState, error)
 	// ListLive returns the live rows for one (sheet, tab) in row_index order.
 	ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error)
 	// Stats counts one tab's live rows and names its columns; an empty tab means the tab the projection holds most of.

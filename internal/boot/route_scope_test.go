@@ -74,6 +74,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/keys", nil},
 		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
 		{http.MethodGet, dbase + "/sheets/probe-sheet/capabilities", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet/rows/" + id, nil},
 		{http.MethodGet, dbase + "/spreadsheets/" + id + "/tabs", nil},
 
 		// NOTE: these two are the only tenant-scoped pages not mounted under /orgs/{org}/projects/{project}.

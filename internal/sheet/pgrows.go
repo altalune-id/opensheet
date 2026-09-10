@@ -44,9 +44,16 @@ type pgRowStats struct {
 }
 
 type pgProjectedRow struct {
-	RowID    string `alias:"sheet_rows.row_id"`
-	RowIndex int64  `alias:"sheet_rows.row_index"`
-	Data     string `alias:"sheet_rows.data"`
+	RowID     string     `alias:"sheet_rows.row_id"`
+	RowIndex  int64      `alias:"sheet_rows.row_index"`
+	Data      string     `alias:"sheet_rows.data"`
+	DeletedAt *time.Time `alias:"sheet_rows.deleted_at"`
+}
+
+type pgContractRow struct {
+	OK         bool   `alias:"sheets.contract_ok"`
+	Reason     string `alias:"sheets.contract_reason"`
+	SoftDelete bool   `alias:"sheets.soft_delete"`
 }
 
 // NOTE: FOR UPDATE outlives this call only when the caller already has a transaction enrolled; standalone it degrades to a read of the current generation.
@@ -157,6 +164,72 @@ func (s *postgresRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row Pro
 		return s.endTx(tx, owned, err)
 	}
 	return s.endTx(tx, owned, nil)
+}
+
+// NOTE: the tombstone travels with the row — create must refuse a tombstoned id and delete must tell a tombstone from an unknown id, so neither can be served by a live-only lookup.
+func (s *postgresRowStore) RowByID(ctx context.Context, k SnapshotKey, rowID string) (ProjectedRow, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	stmt := postgres.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data, s.rows.DeletedAt).
+		FROM(s.rows).
+		WHERE(s.rows.SheetID.EQ(postgres.UUID(k.SheetID)).
+			AND(s.rows.Tab.EQ(postgres.String(k.Tab))).
+			AND(s.rows.RowID.EQ(postgres.String(rowID))).
+			AND(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID)))).
+		LIMIT(1)
+	var scanned pgProjectedRow
+	if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+			return ProjectedRow{}, &RowNotFoundError{ID: rowID}
+		}
+		return ProjectedRow{}, fmt.Errorf("sheet.rows.postgres.RowByID: %w", qErr)
+	}
+	data, err := unmarshalRowData(scanned.Data)
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	return ProjectedRow{
+		RowID:     scanned.RowID,
+		RowIndex:  int(scanned.RowIndex),
+		Data:      data,
+		DeletedAt: utcOrNil(scanned.DeletedAt),
+	}, nil
+}
+
+func (s *postgresRowStore) ContractOf(ctx context.Context, sheetID uuid.UUID) (ContractState, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return ContractState{}, err
+	}
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return ContractState{}, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	stmt := postgres.SELECT(s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete).
+		FROM(s.sheets).
+		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
+			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID)))).
+		LIMIT(1)
+	var scanned pgContractRow
+	if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+			return ContractState{}, &NotFoundError{ID: sheetID.String()}
+		}
+		return ContractState{}, fmt.Errorf("sheet.rows.postgres.ContractOf: %w", qErr)
+	}
+	return ContractState(scanned), nil
 }
 
 func (s *postgresRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error) {

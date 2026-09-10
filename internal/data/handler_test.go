@@ -60,15 +60,31 @@ func (f *fakeSheets) BySlug(ctx context.Context, _, _ uuid.UUID, _ string) (*she
 	return f.ref, f.err
 }
 
+type rowByIDCall struct {
+	sheetID uuid.UUID
+	rowID   string
+}
+
 type fakeReader struct {
-	rows  sheet.Rows
-	err   error
-	calls []uuid.UUID
+	rows     sheet.Rows
+	err      error
+	calls    []uuid.UUID
+	row      sheet.Row
+	rowErr   error
+	rowCalls []rowByIDCall
 }
 
 func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error) {
 	f.calls = append(f.calls, sh.ID)
 	return f.rows, f.err
+}
+
+func (f *fakeReader) RowByID(_ context.Context, sh *sheet.Sheet, id string) (sheet.Row, error) {
+	f.rowCalls = append(f.rowCalls, rowByIDCall{sheetID: sh.ID, rowID: id})
+	if f.rowErr != nil {
+		return sheet.Row{}, f.rowErr
+	}
+	return f.row, nil
 }
 
 type fakeInspector struct {
@@ -217,11 +233,19 @@ func newRig() *rig {
 			Visibility: sheet.VisibilityKey,
 			CacheTTL:   time.Minute,
 		}},
-		reader: &fakeReader{rows: sheet.Rows{
-			Values:    []gsheet.Row{{"name": "ada", "role": "eng"}},
-			ETag:      "deadbeef",
-			FetchedAt: time.Now().UTC(),
-		}},
+		reader: &fakeReader{
+			rows: sheet.Rows{
+				Values:    []gsheet.Row{{"name": "ada", "role": "eng"}},
+				ETag:      "deadbeef",
+				FetchedAt: time.Now().UTC(),
+			},
+			row: sheet.Row{
+				Data:      gsheet.Row{"id": "r1", "name": "ada"},
+				Payload:   []byte(`{"id":"r1","name":"ada"}`),
+				ETag:      "rowtag",
+				FetchedAt: time.Now().UTC(),
+			},
+		},
 		inspector: &fakeInspector{info: sheet.TableInfo{
 			Columns:           []string{"id", "name"},
 			IDColumn:          true,
@@ -750,6 +774,75 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 		t.Fatalf("body %s is not a JSON object: %v", rec.Body.String(), err)
 	}
 	return out
+}
+
+func TestHandler_GetRowServesTheRowAndItsETag(t *testing.T) {
+	g := newRig()
+
+	rec := g.do(t, http.MethodGet, rowPath, keyHeader())
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `{"id":"r1","name":"ada"}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got := rec.Header().Get("Content-Type"); got != jsonType {
+		t.Errorf("Content-Type = %q, want %q", got, jsonType)
+	}
+	if got, want := rec.Header().Get("ETag"), `"rowtag"`; got != want {
+		t.Errorf("ETag = %q, want %q", got, want)
+	}
+	if len(g.reader.rowCalls) != 1 {
+		t.Fatalf("RowByID calls = %d, want 1", len(g.reader.rowCalls))
+	}
+	if got := g.reader.rowCalls[0].rowID; got != "42" {
+		t.Errorf("rowID = %q, want the path id 42", got)
+	}
+	if len(g.authz.calls) != 1 || g.authz.calls[0].scope != authn.ScopeSheetsRead {
+		t.Errorf("authorize calls = %#v, want one read-scoped call", g.authz.calls)
+	}
+}
+
+func TestHandler_GetRowWithAMatchingIfNoneMatchIsNotModified(t *testing.T) {
+	g := newRig()
+
+	rec := g.do(t, http.MethodGet, rowPath, http.Header{
+		"Authorization": {bearer},
+		"If-None-Match": {`"rowtag"`},
+	})
+
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("status = %d, want 304; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("body = %s, want empty on a 304", rec.Body.String())
+	}
+	if got, want := rec.Header().Get("ETag"), `"rowtag"`; got != want {
+		t.Errorf("ETag = %q, want %q", got, want)
+	}
+}
+
+func TestHandler_GetRowReportsAnUnknownIDAsNotFound(t *testing.T) {
+	g := newRig()
+	g.reader.rowErr = &sheet.RowNotFoundError{ID: "42"}
+
+	rec := g.do(t, http.MethodGet, rowPath, keyHeader())
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_GetRowReportsADriftedSheetAsAConflict(t *testing.T) {
+	g := newRig()
+	g.reader.rowErr = &sheet.ContractViolationError{Slug: "prices", Reason: "no id column"}
+
+	rec := g.do(t, http.MethodGet, rowPath, keyHeader())
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestHandler_AppendRequiresTheWriteScope(t *testing.T) {

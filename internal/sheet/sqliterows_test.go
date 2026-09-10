@@ -175,6 +175,82 @@ func TestSQLiteRowStore_ListLive_ExcludesTombstones(t *testing.T) {
 	}, got, "a tombstoned row is not live")
 }
 
+func TestSQLiteRowStore_RowByID_ReturnsTheRowWithItsTombstoneState(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	deletedAt := time.Date(2026, 9, 10, 4, 5, 6, 7000, time.UTC)
+	ok, err := store.Replace(f.ctx(), k, 0, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 3, Data: gsheet.Row{"id": "b"}, DeletedAt: &deletedAt},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	live, err := store.RowByID(f.ctx(), k, "a")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ProjectedRow{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}}, live)
+
+	tombstoned, err := store.RowByID(f.ctx(), k, "b")
+	require.NoError(t, err)
+	require.NotNil(t, tombstoned.DeletedAt,
+		"a tombstoned row must come back with its tombstone, not as absent")
+	assert.Equal(t, deletedAt, *tombstoned.DeletedAt)
+	assert.Equal(t, 3, tombstoned.RowIndex)
+}
+
+func TestSQLiteRowStore_RowByID_UnknownIDIsNotFound(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := store.Replace(f.ctx(), k, 0,
+		[]sheet.ProjectedRow{{RowID: "a", Data: gsheet.Row{"id": "a"}}}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	_, err = store.RowByID(f.ctx(), k, "nobody")
+	assert.True(t, sheet.IsRowNotFoundError(err), "want RowNotFoundError, got %T: %v", err, err)
+
+	_, err = store.RowByID(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: "Other"}, "a")
+	assert.True(t, sheet.IsRowNotFoundError(err), "the lookup must be scoped to one tab, got %T: %v", err, err)
+}
+
+func TestSQLiteRowStore_ContractOf_ReportsThePersistedState(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := store.Replace(f.ctx(), k, 0, nil, sheet.ContractState{OK: true, SoftDelete: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := store.ContractOf(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ContractState{OK: true, SoftDelete: true}, got)
+
+	ok, err = store.MarkContract(f.ctx(), sh.ID, 1, sheet.ContractState{Reason: "no id column"})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	drifted, err := store.ContractOf(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ContractState{Reason: "no id column"}, drifted,
+		"the drift a refresh persisted is what a row read must refuse on")
+}
+
+func TestSQLiteRowStore_ContractOf_UnknownSheetIsNotFound(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+
+	_, err := store.ContractOf(f.ctx(), uuid.Must(uuid.NewV7()))
+	assert.True(t, sheet.IsNotFoundError(err), "want NotFoundError, got %T: %v", err, err)
+}
+
 func TestSQLiteRowStore_DeletedAtIsStoredAsSortableText(t *testing.T) {
 	f := newSQLiteFixture(t)
 	store := newSQLiteRowStore(t, f)
@@ -271,6 +347,12 @@ func TestSQLiteRowStore_RequiresTenantScope(t *testing.T) {
 
 	err = store.UpsertRow(t.Context(), k, sheet.ProjectedRow{RowID: "a"})
 	assert.True(t, tenant.IsMissingError(err), "UpsertRow want MissingError, got %T: %v", err, err)
+
+	_, err = store.RowByID(t.Context(), k, "a")
+	assert.True(t, tenant.IsMissingError(err), "RowByID want MissingError, got %T: %v", err, err)
+
+	_, err = store.ContractOf(t.Context(), k.SheetID)
+	assert.True(t, tenant.IsMissingError(err), "ContractOf want MissingError, got %T: %v", err, err)
 
 	_, err = store.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)

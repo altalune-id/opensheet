@@ -23,6 +23,7 @@ import (
 // Reader reads the rows of one published sheet.
 type Reader interface {
 	Rows(ctx context.Context, sh *sheet.Sheet) (sheet.Rows, error)
+	RowByID(ctx context.Context, sh *sheet.Sheet, id string) (sheet.Row, error)
 }
 
 // Inspector reports what one published sheet's projection and contract state say about its table.
@@ -113,6 +114,7 @@ func NewHandler(p HandlerParams) http.Handler {
 	inner := http.NewServeMux()
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}", h.rows)
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/sheets/{slug}", h.appendRow)
+	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.rowByID)
 	inner.HandleFunc("PATCH /orgs/{org}/projects/{project}/sheets/{slug}/rows/{id}", h.patchRow)
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{slug}/capabilities", h.capabilities)
 	inner.HandleFunc("DELETE /orgs/{org}/projects/{project}/sheets/{slug}/cache", h.purge)
@@ -140,6 +142,27 @@ func (h *handler) rows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeRows(w, r, sc.sheet, rows)
+}
+
+func (h *handler) rowByID(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: resolve then authorize, as rows does.
+	r, sc, err := h.resolve(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if aErr := h.allowRead(r, sc); aErr != nil {
+		h.fail(w, r, aErr)
+		return
+	}
+	row, err := h.reader.RowByID(r.Context(), sc.sheet, r.PathValue("id"))
+	if err != nil {
+		h.fail(w, r, maskPublicDisabled(err))
+		return
+	}
+	h.writeCached(w, r, sc.sheet, row.Payload, cacheMeta{
+		etag: row.ETag, fetchedAt: row.FetchedAt, cached: row.Cached, stale: row.Stale,
+	})
 }
 
 // NOTE: answered from the projection and the sheets row, so polling it costs no Google read.
@@ -244,21 +267,35 @@ func (h *handler) writeRows(w http.ResponseWriter, r *http.Request, sh *sheet.Sh
 			body = marshaled
 		}
 	}
+	h.writeCached(w, r, sh, body, cacheMeta{
+		etag: rows.ETag, fetchedAt: rows.FetchedAt, cached: rows.Cached, stale: rows.Stale,
+	})
+}
 
+type cacheMeta struct {
+	etag      string
+	fetchedAt time.Time
+	cached    bool
+	stale     bool
+}
+
+func (h *handler) writeCached(
+	w http.ResponseWriter, r *http.Request, sh *sheet.Sheet, body []byte, meta cacheMeta,
+) {
 	head := w.Header()
 	head.Set("Content-Type", "application/json; charset=utf-8")
 	head.Set("Cache-Control", cacheControl(sh, h.defaultTTL))
-	if rows.ETag != "" {
-		head.Set("ETag", strconv.Quote(rows.ETag))
+	if meta.etag != "" {
+		head.Set("ETag", strconv.Quote(meta.etag))
 	}
-	if rows.Cached && !rows.FetchedAt.IsZero() {
-		head.Set("Age", strconv.Itoa(ageSeconds(rows.FetchedAt)))
+	if meta.cached && !meta.fetchedAt.IsZero() {
+		head.Set("Age", strconv.Itoa(ageSeconds(meta.fetchedAt)))
 	}
-	if rows.Stale {
+	if meta.stale {
 		head.Set(StaleHeader, "true")
 	}
 
-	if rows.ETag != "" && matchesETag(r.Header.Get("If-None-Match"), rows.ETag) {
+	if meta.etag != "" && matchesETag(r.Header.Get("If-None-Match"), meta.etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

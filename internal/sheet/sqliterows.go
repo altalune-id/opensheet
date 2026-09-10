@@ -31,9 +31,16 @@ func newSQLiteRowStore(sqlDB *sql.DB, tablePrefix string) *sqliteRowStore {
 }
 
 type sqliteProjectedRow struct {
-	RowID    string `alias:"sheet_rows.row_id"`
-	RowIndex int64  `alias:"sheet_rows.row_index"`
-	Data     string `alias:"sheet_rows.data"`
+	RowID     string  `alias:"sheet_rows.row_id"`
+	RowIndex  int64   `alias:"sheet_rows.row_index"`
+	Data      string  `alias:"sheet_rows.data"`
+	DeletedAt *string `alias:"sheet_rows.deleted_at"`
+}
+
+type sqliteContractRow struct {
+	OK         int64  `alias:"sheets.contract_ok"`
+	Reason     string `alias:"sheets.contract_reason"`
+	SoftDelete int64  `alias:"sheets.soft_delete"`
 }
 
 type sqliteRowStats struct {
@@ -161,6 +168,78 @@ func (s *sqliteRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row Proje
 		}
 		return s.bumpGeneration(ctx, tx, tc, k.SheetID)
 	})
+}
+
+// NOTE: the tombstone travels with the row — create must refuse a tombstoned id and delete must tell a tombstone from an unknown id, so neither can be served by a live-only lookup.
+func (s *sqliteRowStore) RowByID(ctx context.Context, k SnapshotKey, rowID string) (ProjectedRow, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	var out ProjectedRow
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data, s.rows.DeletedAt).
+			FROM(s.rows).
+			WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+				AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+				AND(s.rows.RowID.EQ(sqlite.String(rowID))).
+				AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
+			LIMIT(1)
+		var scanned sqliteProjectedRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+				return &RowNotFoundError{ID: rowID}
+			}
+			return fmt.Errorf("sheet.rows.sqlite.RowByID: %w", qErr)
+		}
+		data, dErr := unmarshalRowData(scanned.Data)
+		if dErr != nil {
+			return dErr
+		}
+		deletedAt, tErr := sqliteTombstone(scanned.DeletedAt)
+		if tErr != nil {
+			return tErr
+		}
+		out = ProjectedRow{
+			RowID:     scanned.RowID,
+			RowIndex:  int(scanned.RowIndex),
+			Data:      data,
+			DeletedAt: deletedAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	return out, nil
+}
+
+func (s *sqliteRowStore) ContractOf(ctx context.Context, sheetID uuid.UUID) (ContractState, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return ContractState{}, err
+	}
+	var out ContractState
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete).
+			FROM(s.sheets).
+			WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+				AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
+			LIMIT(1)
+		var scanned sqliteContractRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+				return &NotFoundError{ID: sheetID.String()}
+			}
+			return fmt.Errorf("sheet.rows.sqlite.ContractOf: %w", qErr)
+		}
+		out = ContractState{OK: scanned.OK != 0, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete != 0}
+		return nil
+	})
+	if err != nil {
+		return ContractState{}, err
+	}
+	return out, nil
 }
 
 func (s *sqliteRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error) {
@@ -398,6 +477,18 @@ func sqliteRowValues(tc tenant.Context, k SnapshotKey, rows []ProjectedRow) ([][
 		})
 	}
 	return out, nil
+}
+
+func sqliteTombstone(raw *string) (*time.Time, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil //nolint:nilnil // absent nullable timestamp
+	}
+	at, err := time.Parse(time.RFC3339Nano, *raw)
+	if err != nil {
+		return nil, fmt.Errorf("sheet.rows.sqlite: parse deleted_at: %w", err)
+	}
+	utc := at.UTC()
+	return &utc, nil
 }
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {

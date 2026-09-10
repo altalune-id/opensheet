@@ -302,6 +302,8 @@ type SheetRows struct {
 
 	ReplaceErr      error
 	MarkContractErr error
+	RowByIDErr      error
+	ContractOfErr   error
 	ListLiveErr     error
 	StatsErr        error
 }
@@ -322,6 +324,13 @@ func (f *SheetRows) Seed(k sheet.SnapshotKey, rows []sheet.ProjectedRow) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.data[k] = cloneProjected(rows)
+}
+
+// SeedContract stores a sheet's contract state, standing in for what a refresh persisted.
+func (f *SheetRows) SeedContract(sheetID uuid.UUID, contract sheet.ContractState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.states[sheetID] = contract
 }
 
 // Bump advances a sheet's generation, standing in for a write that landed mid-fetch.
@@ -413,6 +422,29 @@ func (f *SheetRows) UpsertRow(_ context.Context, k sheet.SnapshotKey, row sheet.
 	f.data[k] = append(kept, cloneRow(row))
 	f.gens[k.SheetID]++
 	return nil
+}
+
+func (f *SheetRows) RowByID(_ context.Context, k sheet.SnapshotKey, rowID string) (sheet.ProjectedRow, error) {
+	if f.RowByIDErr != nil {
+		return sheet.ProjectedRow{}, f.RowByIDErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, row := range f.data[k] {
+		if row.RowID == rowID {
+			return cloneRow(row), nil
+		}
+	}
+	return sheet.ProjectedRow{}, &sheet.RowNotFoundError{ID: rowID}
+}
+
+func (f *SheetRows) ContractOf(_ context.Context, sheetID uuid.UUID) (sheet.ContractState, error) {
+	if f.ContractOfErr != nil {
+		return sheet.ContractState{}, f.ContractOfErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.states[sheetID], nil
 }
 
 func (f *SheetRows) ListLive(_ context.Context, k sheet.SnapshotKey) ([]sheet.ProjectedRow, error) {

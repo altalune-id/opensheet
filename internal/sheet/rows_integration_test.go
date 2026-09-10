@@ -209,6 +209,74 @@ func TestPgRowStore_ListLive_ExcludesTombstones(t *testing.T) {
 	}, got, "a tombstoned row is not live")
 }
 
+func TestPgRowStore_RowByID_ReturnsTheRowWithItsTombstoneState(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	deletedAt := time.Date(2026, 9, 10, 4, 5, 6, 0, time.UTC)
+	ok, err := f.rows.Replace(ctx, k, 0, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 3, Data: gsheet.Row{"id": "b"}, DeletedAt: &deletedAt},
+	}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	live, err := f.rows.RowByID(ctx, k, "a")
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ProjectedRow{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}}, live)
+
+	tombstoned, err := f.rows.RowByID(ctx, k, "b")
+	require.NoError(t, err)
+	require.NotNil(t, tombstoned.DeletedAt,
+		"a tombstoned row must come back with its tombstone, not as absent")
+	assert.True(t, tombstoned.DeletedAt.Equal(deletedAt), "DeletedAt = %v, want %v", tombstoned.DeletedAt, deletedAt)
+	assert.Equal(t, 3, tombstoned.RowIndex)
+}
+
+func TestPgRowStore_RowByID_UnknownIDIsNotFound(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0,
+		[]sheet.ProjectedRow{{RowID: "a", Data: gsheet.Row{"id": "a"}}}, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	_, err = f.rows.RowByID(ctx, k, "nobody")
+	assert.True(t, sheet.IsRowNotFoundError(err), "want RowNotFoundError, got %T: %v", err, err)
+
+	_, err = f.rows.RowByID(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "Other"}, "a")
+	assert.True(t, sheet.IsRowNotFoundError(err), "the lookup must be scoped to one tab, got %T: %v", err, err)
+}
+
+func TestPgRowStore_ContractOf_ReportsThePersistedState(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, nil, sheet.ContractState{OK: true, SoftDelete: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.rows.ContractOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ContractState{OK: true, SoftDelete: true}, got)
+
+	ok, err = f.rows.MarkContract(ctx, sh.ID, 1, sheet.ContractState{Reason: "no id column"})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	drifted, err := f.rows.ContractOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, sheet.ContractState{Reason: "no id column"}, drifted,
+		"the drift a refresh persisted is what a row read must refuse on")
+}
+
 func TestPgRowStore_ReplaceIsScopedToOneTab(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
@@ -290,6 +358,14 @@ func TestPgRowStore_IsTenantScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "org B must read zero rows from org A's sheet")
 
+	_, err = f.rows.RowByID(ctxB, k, "a")
+	assert.True(t, sheet.IsRowNotFoundError(err),
+		"org B must not read org A's row by id, got %T: %v", err, err)
+
+	_, err = f.rows.ContractOf(ctxB, sh.ID)
+	assert.True(t, sheet.IsNotFoundError(err),
+		"org B must not read org A's contract state, got %T: %v", err, err)
+
 	statsForB, err := f.rows.Stats(ctxB, sh.ID, "Rates")
 	require.NoError(t, err)
 	assert.Equal(t, sheet.TableStats{Tab: "Rates"}, statsForB, "org B must count zero rows in org A's sheet")
@@ -325,6 +401,12 @@ func TestPgRowStore_RequiresTenantScope(t *testing.T) {
 
 	err = f.rows.UpsertRow(t.Context(), k, sheet.ProjectedRow{RowID: "a"})
 	assert.True(t, tenant.IsMissingError(err), "UpsertRow want MissingError, got %T: %v", err, err)
+
+	_, err = f.rows.RowByID(t.Context(), k, "a")
+	assert.True(t, tenant.IsMissingError(err), "RowByID want MissingError, got %T: %v", err, err)
+
+	_, err = f.rows.ContractOf(t.Context(), k.SheetID)
+	assert.True(t, tenant.IsMissingError(err), "ContractOf want MissingError, got %T: %v", err, err)
 
 	_, err = f.rows.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
