@@ -112,6 +112,7 @@ const (
 	CodeSheetHintNotApplicable     = "SHT037"
 	CodeSheetHintOperand           = "SHT038"
 	CodeSheetInvalidSort           = "SHT039"
+	CodeSheetSortDepth             = "SHT040"
 	CodeSheetUnknownSortColumn     = "SHT041"
 
 	CodeAPIKeyNotFound          = "KEY001"

@@ -53,7 +53,15 @@ const (
 
 const rowSortForm = "column:asc or column:desc, optionally with a num. or date. hint on the direction"
 
-const rowCursorVersion = 1
+const (
+	rowCursorVersion       = 1
+	rowSortedCursorVersion = 2
+)
+
+const (
+	reasonUnsortedCursorOnSortedRead = "it came from an unsorted read and this read is sorted"
+	reasonSortedCursorOnUnsortedRead = "it came from a sorted read and this read is unsorted"
+)
 
 // RowClause is one validated predicate over a column the projection stores.
 type RowClause struct {
@@ -72,10 +80,14 @@ type RowSort struct {
 	Desc   bool
 }
 
-// RowCursor is the keyset position an opaque ?cursor= carries.
+// RowCursor is the keyset position an opaque ?cursor= carries. NOTE: Version is filled by DecodeRowCursor; each encoder writes its own.
 type RowCursor struct {
-	Digest   string
-	RowIndex int
+	Digest    string
+	RowIndex  int
+	NullRank  int
+	SortValue *string
+	Page      int
+	Version   int
 }
 
 // RowWindow is the validated page a filtered read returns.
@@ -91,10 +103,19 @@ type RowQuery struct {
 	Window  RowWindow
 }
 
-type rowCursorEnvelope struct {
+type unsortedRowCursorEnvelope struct {
 	Version  int    `json:"v"`
 	Digest   string `json:"d"`
 	RowIndex *int   `json:"r"`
+}
+
+type rowCursorEnvelope struct {
+	Version   int     `json:"v"`
+	Digest    string  `json:"d"`
+	RowIndex  *int    `json:"r"`
+	NullRank  *int    `json:"n"`
+	SortValue *string `json:"s"`
+	Page      *int    `json:"p"`
 }
 
 // ParseRowWindow validates ?limit= and ?cursor= without reading the projection.
@@ -311,13 +332,13 @@ func escapeLikeValue(value string) string {
 	return strings.ReplaceAll(escaped, "_", RowLikeEscape+"_")
 }
 
-// EncodeRowCursor renders the opaque keyset position a next-page link carries.
+// EncodeRowCursor renders the opaque keyset position an unsorted next-page link carries.
 func EncodeRowCursor(c RowCursor) (string, error) {
 	if c.Digest == "" || c.RowIndex < 0 {
 		return "", fmt.Errorf("sheet.cursor: encode digest=%q row_index=%d", c.Digest, c.RowIndex)
 	}
 	rowIndex := c.RowIndex
-	raw, err := json.Marshal(rowCursorEnvelope{
+	raw, err := json.Marshal(unsortedRowCursorEnvelope{
 		Version: rowCursorVersion, Digest: c.Digest, RowIndex: &rowIndex,
 	})
 	if err != nil {
@@ -326,7 +347,43 @@ func EncodeRowCursor(c RowCursor) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// DecodeRowCursor reads an opaque cursor. NOTE: whether the digest still matches is the route's decision, not the codec's.
+// EncodeSortedRowCursor renders the opaque keyset position a sorted next-page link carries. NOTE: SortValue rides as JSON null when the cell is null, never as "", or a text or date walk drops the rows after the first null.
+func EncodeSortedRowCursor(c RowCursor) (string, error) {
+	if c.Digest == "" || c.RowIndex < 0 || c.Page < 0 || (c.NullRank != 0 && c.NullRank != 1) {
+		return "", fmt.Errorf("sheet.cursor: encode sorted digest=%q row_index=%d null_rank=%d page=%d",
+			c.Digest, c.RowIndex, c.NullRank, c.Page)
+	}
+	rowIndex, nullRank, page := c.RowIndex, c.NullRank, c.Page
+	raw, err := json.Marshal(rowCursorEnvelope{
+		Version:  rowSortedCursorVersion,
+		Digest:   c.Digest,
+		RowIndex: &rowIndex,
+		NullRank: &nullRank,
+		// NOTE: no omitempty — a nil SortValue must reach the wire as null and decode back to nil.
+		SortValue: c.SortValue,
+		Page:      &page,
+	})
+	if err != nil {
+		return "", fmt.Errorf("sheet.cursor: encode sorted: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// CheckRowCursorVersion refuses a cursor whose version does not pair with the sortedness of the read presenting it.
+func CheckRowCursorVersion(c *RowCursor, sorted bool) error {
+	if c == nil {
+		return nil
+	}
+	if sorted && c.Version != rowSortedCursorVersion {
+		return &InvalidCursorError{Reason: reasonUnsortedCursorOnSortedRead}
+	}
+	if !sorted && c.Version != rowCursorVersion {
+		return &InvalidCursorError{Reason: reasonSortedCursorOnUnsortedRead}
+	}
+	return nil
+}
+
+// DecodeRowCursor reads an opaque cursor of either version and reports which one it read. NOTE: whether the digest still matches is the route's decision, not the codec's.
 func DecodeRowCursor(raw string) (RowCursor, error) {
 	body, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
@@ -336,7 +393,7 @@ func DecodeRowCursor(raw string) (RowCursor, error) {
 	if jErr := json.Unmarshal(body, &env); jErr != nil {
 		return RowCursor{}, &InvalidCursorError{Reason: "not a cursor"}
 	}
-	if env.Version != rowCursorVersion {
+	if env.Version != rowCursorVersion && env.Version != rowSortedCursorVersion {
 		return RowCursor{}, &InvalidCursorError{
 			Reason: fmt.Sprintf("unsupported version %d", env.Version),
 		}
@@ -347,5 +404,16 @@ func DecodeRowCursor(raw string) (RowCursor, error) {
 	if env.RowIndex == nil || *env.RowIndex < 0 {
 		return RowCursor{}, &InvalidCursorError{Reason: "no row index"}
 	}
-	return RowCursor{Digest: env.Digest, RowIndex: *env.RowIndex}, nil
+	out := RowCursor{Digest: env.Digest, RowIndex: *env.RowIndex, Version: env.Version}
+	if env.Version == rowCursorVersion {
+		return out, nil
+	}
+	if env.NullRank == nil || (*env.NullRank != 0 && *env.NullRank != 1) {
+		return RowCursor{}, &InvalidCursorError{Reason: "no null rank"}
+	}
+	if env.Page == nil || *env.Page < 0 {
+		return RowCursor{}, &InvalidCursorError{Reason: "no page count"}
+	}
+	out.NullRank, out.SortValue, out.Page = *env.NullRank, env.SortValue, *env.Page
+	return out, nil
 }

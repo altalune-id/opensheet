@@ -393,9 +393,9 @@ func TestParseRowWindow_RefusesAMalformedCursor(t *testing.T) {
 
 func TestRowCursor_RoundTrips(t *testing.T) {
 	for _, want := range []RowCursor{
-		{Digest: "abc", RowIndex: 0},
-		{Digest: "abc", RowIndex: 142},
-		{Digest: strings.Repeat("f", 64), RowIndex: 999999},
+		{Digest: "abc", RowIndex: 0, Version: 1},
+		{Digest: "abc", RowIndex: 142, Version: 1},
+		{Digest: strings.Repeat("f", 64), RowIndex: 999999, Version: 1},
 	} {
 		raw, err := EncodeRowCursor(want)
 		if err != nil {
@@ -912,5 +912,204 @@ func TestMaxSortPagesOf_ZeroAndNegativeFallBackToTheDefault(t *testing.T) {
 	}
 	if DefaultMaxSortPages != 20 {
 		t.Errorf("DefaultMaxSortPages = %d, want 20 — it pairs with sheets.maxSortPages", DefaultMaxSortPages)
+	}
+}
+
+func TestSortedRowCursor_RoundTripsEveryField(t *testing.T) {
+	sortValue := "42"
+	for _, want := range []RowCursor{
+		{Digest: "abc", RowIndex: 0, NullRank: 0, SortValue: &sortValue, Page: 1, Version: 2},
+		{Digest: "abc", RowIndex: 17, NullRank: 1, SortValue: nil, Page: 3, Version: 2},
+		{Digest: strings.Repeat("f", 64), RowIndex: 999999, NullRank: 0, SortValue: &sortValue, Page: 20, Version: 2},
+	} {
+		raw, err := EncodeSortedRowCursor(want)
+		if err != nil {
+			t.Fatalf("EncodeSortedRowCursor(%+v) error = %v, want nil", want, err)
+		}
+		if strings.ContainsAny(raw, "+/=") {
+			t.Errorf("EncodeSortedRowCursor() = %q, want a raw URL-safe encoding", raw)
+		}
+		got, err := DecodeRowCursor(raw)
+		if err != nil {
+			t.Fatalf("DecodeRowCursor(%q) error = %v, want nil", raw, err)
+		}
+		if got.Digest != want.Digest || got.RowIndex != want.RowIndex ||
+			got.NullRank != want.NullRank || got.Page != want.Page || got.Version != want.Version {
+			t.Errorf("DecodeRowCursor() = %+v, want %+v", got, want)
+		}
+		if (got.SortValue == nil) != (want.SortValue == nil) {
+			t.Fatalf("SortValue = %v, want %v", got.SortValue, want.SortValue)
+		}
+		if got.SortValue != nil && *got.SortValue != *want.SortValue {
+			t.Errorf("SortValue = %q, want %q", *got.SortValue, *want.SortValue)
+		}
+	}
+}
+
+// An absent sort value on the wire as "" collapses the tie-break arm of a text
+// or date walk, which drops every row after the first null.
+func TestEncodeSortedRowCursor_AbsentSortValueIsJSONNull(t *testing.T) {
+	raw, err := EncodeSortedRowCursor(RowCursor{Digest: "abc", RowIndex: 4, NullRank: 1, Page: 1})
+	if err != nil {
+		t.Fatalf("EncodeSortedRowCursor() error = %v, want nil", err)
+	}
+	body, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v, want nil", err)
+	}
+	if !strings.Contains(string(body), `"s":null`) {
+		t.Errorf("envelope = %s, want it to carry \"s\":null", body)
+	}
+	if strings.Contains(string(body), `"s":""`) {
+		t.Errorf("envelope = %s, want no empty-string sort value", body)
+	}
+	got, err := DecodeRowCursor(raw)
+	if err != nil {
+		t.Fatalf("DecodeRowCursor() error = %v, want nil", err)
+	}
+	if got.SortValue != nil {
+		t.Errorf("SortValue = %q, want nil", *got.SortValue)
+	}
+}
+
+// A blank cell is a real sort value under a text sort, so it must stay a
+// non-nil pointer and never merge with the absent case.
+func TestEncodeSortedRowCursor_EmptySortValueStaysNonNil(t *testing.T) {
+	blank := ""
+	raw, err := EncodeSortedRowCursor(RowCursor{Digest: "abc", RowIndex: 1, SortValue: &blank, Page: 1})
+	if err != nil {
+		t.Fatalf("EncodeSortedRowCursor() error = %v, want nil", err)
+	}
+	body, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v, want nil", err)
+	}
+	if !strings.Contains(string(body), `"s":""`) {
+		t.Errorf("envelope = %s, want it to carry \"s\":\"\"", body)
+	}
+	got, err := DecodeRowCursor(raw)
+	if err != nil {
+		t.Fatalf("DecodeRowCursor() error = %v, want nil", err)
+	}
+	if got.SortValue == nil {
+		t.Fatal("SortValue = nil, want a pointer to the empty string")
+	}
+	if *got.SortValue != "" {
+		t.Errorf("SortValue = %q, want %q", *got.SortValue, "")
+	}
+}
+
+func TestDecodeRowCursor_ReportsTheVersionItRead(t *testing.T) {
+	unsorted, err := EncodeRowCursor(RowCursor{Digest: "abc", RowIndex: 7})
+	if err != nil {
+		t.Fatalf("EncodeRowCursor() error = %v, want nil", err)
+	}
+	got, err := DecodeRowCursor(unsorted)
+	if err != nil {
+		t.Fatalf("DecodeRowCursor() error = %v, want nil", err)
+	}
+	if got.Version != 1 {
+		t.Errorf("Version = %d, want 1", got.Version)
+	}
+	sorted, err := EncodeSortedRowCursor(RowCursor{Digest: "abc", RowIndex: 7, Page: 1})
+	if err != nil {
+		t.Fatalf("EncodeSortedRowCursor() error = %v, want nil", err)
+	}
+	got, err = DecodeRowCursor(sorted)
+	if err != nil {
+		t.Fatalf("DecodeRowCursor() error = %v, want nil", err)
+	}
+	if got.Version != 2 {
+		t.Errorf("Version = %d, want 2", got.Version)
+	}
+}
+
+func TestDecodeRowCursor_MalformedSortedEnvelope(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		raw  string
+	}{
+		{name: "version three", body: `{"v":3,"d":"a","r":1,"n":0,"s":null,"p":1}`},
+		{name: "version zero", body: `{"v":0,"d":"a","r":1,"n":0,"s":null,"p":1}`},
+		{name: "padded base64", raw: base64.StdEncoding.EncodeToString([]byte(`{"v":2,"d":"ab","r":1,"n":0,"s":null,"p":1}`))},
+		{name: "not json", body: `{"v":2,`},
+		{name: "digest missing", body: `{"v":2,"r":1,"n":0,"s":null,"p":1}`},
+		{name: "row index missing", body: `{"v":2,"d":"a","n":0,"s":null,"p":1}`},
+		{name: "null rank missing", body: `{"v":2,"d":"a","r":1,"s":null,"p":1}`},
+		{name: "null rank two", body: `{"v":2,"d":"a","r":1,"n":2,"s":null,"p":1}`},
+		{name: "null rank negative", body: `{"v":2,"d":"a","r":1,"n":-1,"s":null,"p":1}`},
+		{name: "null rank not a number", body: `{"v":2,"d":"a","r":1,"n":"0","s":null,"p":1}`},
+		{name: "page missing", body: `{"v":2,"d":"a","r":1,"n":0,"s":null}`},
+		{name: "page negative", body: `{"v":2,"d":"a","r":1,"n":0,"s":null,"p":-1}`},
+		{name: "sort value not a string", body: `{"v":2,"d":"a","r":1,"n":0,"s":42,"p":1}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := tt.raw
+			if tt.body != "" {
+				raw = base64.RawURLEncoding.EncodeToString([]byte(tt.body))
+			}
+			got, err := DecodeRowCursor(raw)
+			if !IsInvalidCursorError(err) {
+				t.Fatalf("DecodeRowCursor(%q) = %+v, %v, want InvalidCursorError", raw, got, err)
+			}
+		})
+	}
+}
+
+func TestEncodeSortedRowCursor_RefusesAnUnusableCursor(t *testing.T) {
+	for _, c := range []RowCursor{
+		{Digest: "", RowIndex: 1, Page: 1},
+		{Digest: "abc", RowIndex: -1, Page: 1},
+		{Digest: "abc", RowIndex: 1, Page: -1},
+		{Digest: "abc", RowIndex: 1, NullRank: 2, Page: 1},
+		{Digest: "abc", RowIndex: 1, NullRank: -1, Page: 1},
+	} {
+		raw, err := EncodeSortedRowCursor(c)
+		if err == nil {
+			t.Fatalf("EncodeSortedRowCursor(%+v) = %q, want an error", c, raw)
+		}
+		if IsInvalidCursorError(err) {
+			t.Errorf("EncodeSortedRowCursor(%+v) error = %v, want an internal failure, not a client refusal", c, err)
+		}
+	}
+}
+
+func TestCheckRowCursorVersion_PairsTheVersionWithTheSortedness(t *testing.T) {
+	if err := CheckRowCursorVersion(nil, true); err != nil {
+		t.Errorf("CheckRowCursorVersion(nil, true) error = %v, want nil", err)
+	}
+	if err := CheckRowCursorVersion(nil, false); err != nil {
+		t.Errorf("CheckRowCursorVersion(nil, false) error = %v, want nil", err)
+	}
+	unsorted := &RowCursor{Digest: "a", RowIndex: 1, Version: 1}
+	sorted := &RowCursor{Digest: "a", RowIndex: 1, Page: 1, Version: 2}
+	if err := CheckRowCursorVersion(unsorted, false); err != nil {
+		t.Errorf("CheckRowCursorVersion(v1, unsorted) error = %v, want nil", err)
+	}
+	if err := CheckRowCursorVersion(sorted, true); err != nil {
+		t.Errorf("CheckRowCursorVersion(v2, sorted) error = %v, want nil", err)
+	}
+	onSorted := CheckRowCursorVersion(unsorted, true)
+	if !IsInvalidCursorError(onSorted) {
+		t.Fatalf("CheckRowCursorVersion(v1, sorted) error = %v, want InvalidCursorError", onSorted)
+	}
+	onUnsorted := CheckRowCursorVersion(sorted, false)
+	if !IsInvalidCursorError(onUnsorted) {
+		t.Fatalf("CheckRowCursorVersion(v2, unsorted) error = %v, want InvalidCursorError", onUnsorted)
+	}
+	if onSorted.Error() == onUnsorted.Error() {
+		t.Errorf("both directions report %q, want a reason distinguishing them", onSorted)
+	}
+	var a, b *InvalidCursorError
+	if !errors.As(onSorted, &a) || !errors.As(onUnsorted, &b) {
+		t.Fatal("errors.As did not reach the InvalidCursorError")
+	}
+	if msg := a.ToAppError().Message(); !strings.Contains(msg, "unsorted read and this read is sorted") {
+		t.Errorf("v1-on-sorted message = %q, want it to say which way round it is", msg)
+	}
+	if msg := b.ToAppError().Message(); !strings.Contains(msg, "sorted read and this read is unsorted") {
+		t.Errorf("v2-on-unsorted message = %q, want it to say which way round it is", msg)
 	}
 }

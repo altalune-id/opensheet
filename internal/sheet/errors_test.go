@@ -383,6 +383,39 @@ func TestInvalidSortError(t *testing.T) {
 	}
 }
 
+func TestSortDepthError(t *testing.T) {
+	e := &SortDepthError{Pages: 20}
+	if msg := e.Error(); !strings.Contains(msg, "20") {
+		t.Errorf("Error() = %q, want it to carry the cap", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetSortDepth)
+	if got := e.ToAppError().Message(); !strings.Contains(got, "20") {
+		t.Errorf("message = %q, want it to name the cap", got)
+	}
+	if got := e.ToAppError().HTTPStatus(); got != http.StatusBadRequest {
+		t.Errorf("HTTPStatus = %d, want %d", got, http.StatusBadRequest)
+	}
+	if !IsSortDepthError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsSortDepthError does not see through a wrap")
+	}
+	if IsSortDepthError(&InvalidSortError{}) {
+		t.Error("IsSortDepthError matched the wrong type")
+	}
+}
+
+// SHT034 covers both cursor/sortedness directions, and the data-plane envelope
+// carries no meta, so the message is the only thing that can tell them apart.
+func TestInvalidCursorError_MessageTellsTheTwoPairingDirectionsApart(t *testing.T) {
+	onSorted := (&InvalidCursorError{Reason: reasonUnsortedCursorOnSortedRead}).ToAppError().Message()
+	onUnsorted := (&InvalidCursorError{Reason: reasonSortedCursorOnUnsortedRead}).ToAppError().Message()
+	if onSorted == onUnsorted {
+		t.Fatalf("both directions render %q", onSorted)
+	}
+	if got := (&InvalidCursorError{}).ToAppError().Message(); !strings.Contains(got, "start the walk again") {
+		t.Errorf("message with no reason = %q, want the restart advice", got)
+	}
+}
+
 func TestUnknownSortColumnError(t *testing.T) {
 	e := &UnknownSortColumnError{Column: "qty", Tab: "Sheet1"}
 	msg := e.Error()

@@ -984,11 +984,15 @@ func (e *InvalidCursorError) Error() string {
 	return "sheet: cursor: " + reason
 }
 
-// ToAppError maps InvalidCursorError to the canonical InvalidArgument envelope.
+// ToAppError maps InvalidCursorError to the canonical InvalidArgument envelope. NOTE: the reason is interpolated because SHT034 also covers both cursor/sortedness directions and the data-plane envelope carries no meta.
 func (e *InvalidCursorError) ToAppError() *apperror.AppError {
+	message := "This page cursor cannot be read: start the walk again without one"
+	if e.Reason != "" {
+		message = "This page cursor cannot be read (" + e.Reason + "): start the walk again without one"
+	}
 	return apperror.New(
 		apperror.CodeSheetInvalidCursor,
-		"This page cursor cannot be read: start the walk again without one",
+		message,
 		codes.InvalidArgument,
 		&apperrorv1.ErrorDetail{
 			Code: apperror.CodeSheetInvalidCursor,
@@ -1135,6 +1139,34 @@ func (e *InvalidSortError) ToAppError() *apperror.AppError {
 // IsInvalidSortError reports whether err's tree contains an *InvalidSortError.
 func IsInvalidSortError(err error) bool {
 	_, ok := errors.AsType[*InvalidSortError](err)
+	return ok
+}
+
+// SortDepthError signals a sorted walk asking for a page beyond the configured depth.
+type SortDepthError struct {
+	Pages int
+}
+
+func (e *SortDepthError) Error() string {
+	return fmt.Sprintf("sheet: sorted walk deeper than %d pages", e.Pages)
+}
+
+// ToAppError maps SortDepthError to the canonical InvalidArgument envelope.
+func (e *SortDepthError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetSortDepth,
+		fmt.Sprintf("A sorted read walks at most %d pages: filter the rows down instead of paging further", e.Pages),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetSortDepth,
+			Meta: map[string]string{"pages": strconv.Itoa(e.Pages)},
+		},
+	)
+}
+
+// IsSortDepthError reports whether err's tree contains a *SortDepthError.
+func IsSortDepthError(err error) bool {
+	_, ok := errors.AsType[*SortDepthError](err)
 	return ok
 }
 
