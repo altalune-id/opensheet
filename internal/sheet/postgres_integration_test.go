@@ -220,7 +220,9 @@ func TestPostgres_Sheet_SaveAndByID(t *testing.T) {
 	assert.Equal(t, "prices", got.Slug)
 	assert.Equal(t, sheet.VisibilityPublic, got.Visibility)
 	assert.Equal(t, 90*time.Second, got.CacheTTL, "cache_ttl_secs must come back as seconds, not nanoseconds")
-	assert.True(t, got.CreatedAt.Equal(want.CreatedAt), "CreatedAt = %v, want %v", got.CreatedAt, want.CreatedAt)
+	// NOTE: timestamptz keeps microseconds and rounds half-up, so a nanosecond-resolution clock never round-trips exactly; on a coarser clock it does, which is why an equality assertion passes on macOS and fails on Linux.
+	assert.WithinDuration(t, want.CreatedAt, got.CreatedAt, time.Microsecond,
+		"CreatedAt = %v, want %v within a microsecond", got.CreatedAt, want.CreatedAt)
 }
 
 func TestPostgres_Sheet_CacheTTLRoundTripsInSeconds(t *testing.T) {
