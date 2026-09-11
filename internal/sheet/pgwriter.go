@@ -20,7 +20,7 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 			sh.Tab, sh.Slug, string(sh.Visibility), secs, sh.Writable,
 			sh.CreatedAt.UTC(), sh.UpdatedAt.UTC(),
 			sh.Generation, pgNullableTime(sh.ValidatedAt), sh.ContractOK, sh.ContractReason,
-			sh.SoftDelete,
+			sh.SoftDelete, sh.ContentDigest,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(

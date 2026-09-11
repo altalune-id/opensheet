@@ -50,6 +50,7 @@ type pgSheetRow struct {
 	ContractOK     bool       `alias:"sheets.contract_ok"`
 	ContractReason string     `alias:"sheets.contract_reason"`
 	SoftDelete     bool       `alias:"sheets.soft_delete"`
+	ContentDigest  string     `alias:"sheets.content_digest"`
 }
 
 func (r *pgSheetRow) toSheet() *Sheet {
@@ -71,6 +72,7 @@ func (r *pgSheetRow) toSheet() *Sheet {
 		ContractOK:     r.ContractOK,
 		ContractReason: r.ContractReason,
 		SoftDelete:     r.SoftDelete,
+		ContentDigest:  r.ContentDigest,
 	}
 }
 

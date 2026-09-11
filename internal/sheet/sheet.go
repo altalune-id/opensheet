@@ -49,6 +49,7 @@ type Sheet struct {
 	ContractOK     bool
 	ContractReason string
 	SoftDelete     bool
+	ContentDigest  string
 }
 
 // NewParams is the input to New.

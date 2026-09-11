@@ -38,12 +38,12 @@ func (w *ReadWorkflow) RowByID(ctx context.Context, sh *Sheet, id string) (Row, 
 	}
 
 	// NOTE: read after the refresh, never off sh — under drift the refresh skips projection, and sh.ContractOK is the pre-refresh verdict.
-	contract, err := w.rows.ContractOf(ctx, sh.ID)
+	state, err := w.rows.StateOf(ctx, sh.ID)
 	if err != nil {
-		return Row{}, recordSpanError(span, w.passthrough(ctx, "sheet.RowByID: contract state", err, sh))
+		return Row{}, recordSpanError(span, w.passthrough(ctx, "sheet.RowByID: sheet state", err, sh))
 	}
-	if !contract.OK {
-		return Row{}, recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: contract.Reason})
+	if !state.Contract.OK {
+		return Row{}, recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: state.Contract.Reason})
 	}
 
 	key, err := w.rowKey(ctx, sh)
@@ -193,12 +193,12 @@ func (w *WriteWorkflow) ReplaceRow(
 	if !sh.Writable {
 		return WrittenRow{}, recordSpanError(span, &NotWritableError{SheetID: sh.ID.String(), Slug: sh.Slug})
 	}
-	contract, err := w.rows.ContractOf(ctx, sh.ID)
+	state, err := w.rows.StateOf(ctx, sh.ID)
 	if err != nil {
-		return WrittenRow{}, recordSpanError(span, w.passthrough(ctx, "sheet.ReplaceRow: contract state", err, sh))
+		return WrittenRow{}, recordSpanError(span, w.passthrough(ctx, "sheet.ReplaceRow: sheet state", err, sh))
 	}
-	if !contract.OK {
-		return WrittenRow{}, recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: contract.Reason})
+	if !state.Contract.OK {
+		return WrittenRow{}, recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: state.Contract.Reason})
 	}
 
 	tgt, err := w.target(ctx, sh)
@@ -400,12 +400,12 @@ func (w *WriteWorkflow) SoftDeleteRow(ctx context.Context, sh *Sheet, id, ifMatc
 	if !sh.SoftDelete {
 		return recordSpanError(span, &SoftDeleteUnsupportedError{Slug: sh.Slug, Tab: strings.TrimSpace(sh.Tab)})
 	}
-	contract, err := w.rows.ContractOf(ctx, sh.ID)
+	state, err := w.rows.StateOf(ctx, sh.ID)
 	if err != nil {
-		return recordSpanError(span, w.passthrough(ctx, "sheet.SoftDeleteRow: contract state", err, sh))
+		return recordSpanError(span, w.passthrough(ctx, "sheet.SoftDeleteRow: sheet state", err, sh))
 	}
-	if !contract.OK {
-		return recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: contract.Reason})
+	if !state.Contract.OK {
+		return recordSpanError(span, &ContractViolationError{Slug: sh.Slug, Reason: state.Contract.Reason})
 	}
 
 	// NOTE: the tombstone check precedes every precondition, because a retry of a delete that already

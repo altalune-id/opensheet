@@ -474,6 +474,7 @@ func TestPostgres_Sheet_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	sh.ValidatedAt = &validatedAt
 	sh.ContractReason = "checked"
 	sh.SoftDelete = true
+	sh.ContentDigest = "deadbeef"
 	require.NoError(t, f.store.Save(ctx, sh))
 
 	got, err := f.store.ByID(ctx, sh.ID)
@@ -485,6 +486,8 @@ func TestPostgres_Sheet_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	assert.Equal(t, "checked", got.ContractReason)
 	assert.True(t, got.SoftDelete,
 		"soft_delete must have a matching alias field on pgSheetRow, or the column reads back false forever")
+	assert.Equal(t, "deadbeef", got.ContentDigest,
+		"content_digest must have a matching alias field on pgSheetRow, or every digest comparison trivially matches")
 }
 
 func TestPostgres_Sheet_SoftDeleteSurvivesAnUpsert(t *testing.T) {
@@ -517,9 +520,11 @@ func TestPostgres_Sheet_UpdateDoesNotResetGeneration(t *testing.T) {
 	})
 	require.NoError(t, err)
 	sh.Generation = 7
+	sh.ContentDigest = "settled"
 	require.NoError(t, f.store.Save(ctx, sh))
 
 	sh.Generation = 0
+	sh.ContentDigest = "stale"
 	sh.Retab("Harga")
 	require.NoError(t, f.store.Save(ctx, sh))
 
@@ -527,4 +532,6 @@ func TestPostgres_Sheet_UpdateDoesNotResetGeneration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Harga", got.Tab, "the upsert must still apply the metadata edit")
 	assert.EqualValues(t, 7, got.Generation, "generation must not be in MutableColumns")
+	assert.Equal(t, "settled", got.ContentDigest,
+		"a metadata edit must not write back the digest it loaded, or an outstanding cursor is refused for nothing")
 }

@@ -503,6 +503,7 @@ func TestSQLiteStore_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	sh.ValidatedAt = &validatedAt
 	sh.ContractReason = "checked"
 	sh.SoftDelete = true
+	sh.ContentDigest = "deadbeef"
 	if err := f.store.Save(ctx, sh); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -528,6 +529,10 @@ func TestSQLiteStore_SaveRoundTripsTheProjectionColumns(t *testing.T) {
 	}
 	if !got.SoftDelete {
 		t.Error("SoftDelete = false, want true: sqliteSheetRow needs a matching alias field, or the column reads back false forever")
+	}
+	if got.ContentDigest != "deadbeef" {
+		t.Errorf("ContentDigest = %q, want %q: sqliteSheetRow needs a matching alias field, or every digest comparison trivially matches",
+			got.ContentDigest, "deadbeef")
 	}
 }
 
@@ -573,11 +578,13 @@ func TestSQLiteStore_UpdateDoesNotResetGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sh.Generation = 7
+	sh.ContentDigest = "settled"
 	if err := f.store.Save(ctx, sh); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
 	sh.Generation = 0
+	sh.ContentDigest = "stale"
 	sh.Retab("Harga")
 	if err := f.store.Save(ctx, sh); err != nil {
 		t.Fatalf("re-Save: %v", err)
@@ -592,5 +599,8 @@ func TestSQLiteStore_UpdateDoesNotResetGeneration(t *testing.T) {
 	}
 	if got.Generation != 7 {
 		t.Errorf("Generation = %d, want 7: generation must not be in MutableColumns", got.Generation)
+	}
+	if got.ContentDigest != "settled" {
+		t.Errorf("ContentDigest = %q, want %q: a metadata edit must not write back the digest it loaded", got.ContentDigest, "settled")
 	}
 }

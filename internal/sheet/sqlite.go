@@ -44,6 +44,7 @@ type sqliteSheetRow struct {
 	ContractOK     int64   `alias:"sheets.contract_ok"`
 	ContractReason string  `alias:"sheets.contract_reason"`
 	SoftDelete     int64   `alias:"sheets.soft_delete"`
+	ContentDigest  string  `alias:"sheets.content_digest"`
 }
 
 func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
@@ -93,6 +94,7 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 		ContractOK:     r.ContractOK != 0,
 		ContractReason: r.ContractReason,
 		SoftDelete:     r.SoftDelete != 0,
+		ContentDigest:  r.ContentDigest,
 	}, nil
 }
 
@@ -135,6 +137,7 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			contractOK,
 			sh.ContractReason,
 			softDelete,
+			sh.ContentDigest,
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(

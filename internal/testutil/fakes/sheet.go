@@ -298,12 +298,13 @@ type SheetRows struct {
 	data     map[sheet.SnapshotKey][]sheet.ProjectedRow
 	gens     map[uuid.UUID]int64
 	states   map[uuid.UUID]sheet.ContractState
+	digests  map[uuid.UUID]string
 	replaces int
 
 	ReplaceErr      error
 	MarkContractErr error
 	RowByIDErr      error
-	ContractOfErr   error
+	StateOfErr      error
 	ListLiveErr     error
 	StatsErr        error
 }
@@ -311,9 +312,10 @@ type SheetRows struct {
 // NewSheetRows returns an empty in-memory sheet.RowStore.
 func NewSheetRows() *SheetRows {
 	return &SheetRows{
-		data:   map[sheet.SnapshotKey][]sheet.ProjectedRow{},
-		gens:   map[uuid.UUID]int64{},
-		states: map[uuid.UUID]sheet.ContractState{},
+		data:    map[sheet.SnapshotKey][]sheet.ProjectedRow{},
+		gens:    map[uuid.UUID]int64{},
+		states:  map[uuid.UUID]sheet.ContractState{},
+		digests: map[uuid.UUID]string{},
 	}
 }
 
@@ -374,11 +376,16 @@ func (f *SheetRows) LockSheet(_ context.Context, sheetID uuid.UUID) (int64, erro
 	return f.gens[sheetID], nil
 }
 
+// NOTE: the generation moves only when the digest moved, exactly as both drivers do — the fake-backed read path asserts that behaviour.
 func (f *SheetRows) Replace(
 	_ context.Context, k sheet.SnapshotKey, gen int64, rows []sheet.ProjectedRow, contract sheet.ContractState,
 ) (bool, error) {
 	if f.ReplaceErr != nil {
 		return false, f.ReplaceErr
+	}
+	digest, err := sheet.RowsDigest(rows)
+	if err != nil {
+		return false, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -386,7 +393,10 @@ func (f *SheetRows) Replace(
 		return false, nil
 	}
 	f.data[k] = cloneProjected(rows)
-	f.gens[k.SheetID]++
+	if digest != f.digests[k.SheetID] {
+		f.gens[k.SheetID]++
+	}
+	f.digests[k.SheetID] = digest
 	f.states[k.SheetID] = contract
 	f.replaces++
 	return true, nil
@@ -438,13 +448,17 @@ func (f *SheetRows) RowByID(_ context.Context, k sheet.SnapshotKey, rowID string
 	return sheet.ProjectedRow{}, &sheet.RowNotFoundError{ID: rowID}
 }
 
-func (f *SheetRows) ContractOf(_ context.Context, sheetID uuid.UUID) (sheet.ContractState, error) {
-	if f.ContractOfErr != nil {
-		return sheet.ContractState{}, f.ContractOfErr
+func (f *SheetRows) StateOf(_ context.Context, sheetID uuid.UUID) (sheet.SheetState, error) {
+	if f.StateOfErr != nil {
+		return sheet.SheetState{}, f.StateOfErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.states[sheetID], nil
+	return sheet.SheetState{
+		Contract:   f.states[sheetID],
+		Digest:     f.digests[sheetID],
+		Generation: f.gens[sheetID],
+	}, nil
 }
 
 func (f *SheetRows) ListLive(_ context.Context, k sheet.SnapshotKey) ([]sheet.ProjectedRow, error) {

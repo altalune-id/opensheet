@@ -148,7 +148,7 @@ func TestReadWorkflow_RowByID_ProjectionFailureIsAnIncident(t *testing.T) {
 		name string
 		set  func(*fakes.SheetRows)
 	}{
-		{"contract read", func(f *fakes.SheetRows) { f.ContractOfErr = errors.New("contract read failed") }},
+		{"contract read", func(f *fakes.SheetRows) { f.StateOfErr = errors.New("contract read failed") }},
 		{"row read", func(f *fakes.SheetRows) { f.RowByIDErr = errors.New("row read failed") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

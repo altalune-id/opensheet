@@ -34,7 +34,8 @@ func newPostgresRowStore(pc *tenant.PgConn, schema, tablePrefix string) *postgre
 }
 
 type pgGenerationRow struct {
-	Generation int64 `alias:"sheets.generation"`
+	Generation    int64  `alias:"sheets.generation"`
+	ContentDigest string `alias:"sheets.content_digest"`
 }
 
 type pgRowStats struct {
@@ -50,10 +51,12 @@ type pgProjectedRow struct {
 	DeletedAt *time.Time `alias:"sheet_rows.deleted_at"`
 }
 
-type pgContractRow struct {
-	OK         bool   `alias:"sheets.contract_ok"`
-	Reason     string `alias:"sheets.contract_reason"`
-	SoftDelete bool   `alias:"sheets.soft_delete"`
+type pgSheetStateRow struct {
+	OK            bool   `alias:"sheets.contract_ok"`
+	Reason        string `alias:"sheets.contract_reason"`
+	SoftDelete    bool   `alias:"sheets.soft_delete"`
+	ContentDigest string `alias:"sheets.content_digest"`
+	Generation    int64  `alias:"sheets.generation"`
 }
 
 // NOTE: FOR UPDATE outlives this call only when the caller already has a transaction enrolled; standalone it degrades to a read of the current generation.
@@ -66,7 +69,7 @@ func (s *postgresRowStore) LockSheet(ctx context.Context, sheetID uuid.UUID) (in
 	if err != nil {
 		return 0, err
 	}
-	gen, err := s.lockGeneration(ctx, tx, tc, sheetID)
+	gen, _, err := s.lockGeneration(ctx, tx, tc, sheetID)
 	if err != nil {
 		return 0, s.endTx(tx, owned, err)
 	}
@@ -84,11 +87,15 @@ func (s *postgresRowStore) Replace(
 	if err != nil {
 		return false, err
 	}
+	digest, err := RowsDigest(rows)
+	if err != nil {
+		return false, err
+	}
 	tx, owned, err := s.txAcquire(ctx)
 	if err != nil {
 		return false, err
 	}
-	current, err := s.lockGeneration(ctx, tx, tc, k.SheetID)
+	current, stored, err := s.lockGeneration(ctx, tx, tc, k.SheetID)
 	if err != nil {
 		return false, s.endTx(tx, owned, err)
 	}
@@ -101,7 +108,7 @@ func (s *postgresRowStore) Replace(
 	if err := s.insertRows(ctx, tx, values); err != nil {
 		return false, s.endTx(tx, owned, err)
 	}
-	if err := s.commitRefresh(ctx, tx, tc, k.SheetID, contract); err != nil {
+	if err := s.commitRefresh(ctx, tx, tc, k.SheetID, contract, digest, digest != stored); err != nil {
 		return false, s.endTx(tx, owned, err)
 	}
 	return true, s.endTx(tx, owned, nil)
@@ -118,7 +125,7 @@ func (s *postgresRowStore) MarkContract(
 	if err != nil {
 		return false, err
 	}
-	current, err := s.lockGeneration(ctx, tx, tc, sheetID)
+	current, _, err := s.lockGeneration(ctx, tx, tc, sheetID)
 	if err != nil {
 		return false, s.endTx(tx, owned, err)
 	}
@@ -205,31 +212,38 @@ func (s *postgresRowStore) RowByID(ctx context.Context, k SnapshotKey, rowID str
 	}, nil
 }
 
-func (s *postgresRowStore) ContractOf(ctx context.Context, sheetID uuid.UUID) (ContractState, error) {
+func (s *postgresRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (SheetState, error) {
 	tc, err := tenant.From(ctx)
 	if err != nil {
-		return ContractState{}, err
+		return SheetState{}, err
 	}
 	tx, owned, err := s.txAcquire(ctx)
 	if err != nil {
-		return ContractState{}, err
+		return SheetState{}, err
 	}
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete).
+	stmt := postgres.SELECT(
+		s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+		s.sheets.ContentDigest, s.sheets.Generation,
+	).
 		FROM(s.sheets).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID)))).
 		LIMIT(1)
-	var scanned pgContractRow
+	var scanned pgSheetStateRow
 	if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
 		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
-			return ContractState{}, &NotFoundError{ID: sheetID.String()}
+			return SheetState{}, &NotFoundError{ID: sheetID.String()}
 		}
-		return ContractState{}, fmt.Errorf("sheet.rows.postgres.ContractOf: %w", qErr)
+		return SheetState{}, fmt.Errorf("sheet.rows.postgres.StateOf: %w", qErr)
 	}
-	return ContractState(scanned), nil
+	return SheetState{
+		Contract:   ContractState{OK: scanned.OK, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete},
+		Digest:     scanned.ContentDigest,
+		Generation: scanned.Generation,
+	}, nil
 }
 
 func (s *postgresRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error) {
@@ -361,8 +375,8 @@ func (s *postgresRowStore) PurgeSheet(ctx context.Context, sheetID uuid.UUID) er
 
 func (s *postgresRowStore) lockGeneration(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
-) (int64, error) {
-	stmt := postgres.SELECT(s.sheets.Generation).
+) (gen int64, digest string, err error) {
+	stmt := postgres.SELECT(s.sheets.Generation, s.sheets.ContentDigest).
 		FROM(s.sheets).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID)))).
@@ -371,11 +385,11 @@ func (s *postgresRowStore) lockGeneration(
 	var row pgGenerationRow
 	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-			return 0, &NotFoundError{ID: sheetID.String()}
+			return 0, "", &NotFoundError{ID: sheetID.String()}
 		}
-		return 0, fmt.Errorf("sheet.rows.postgres: lock sheet: %w", err)
+		return 0, "", fmt.Errorf("sheet.rows.postgres: lock sheet: %w", err)
 	}
-	return row.Generation, nil
+	return row.Generation, row.ContentDigest, nil
 }
 
 func (s *postgresRowStore) deleteTab(ctx context.Context, tx *sql.Tx, tc tenant.Context, k SnapshotKey) error {
@@ -416,20 +430,23 @@ func (s *postgresRowStore) bumpGeneration(
 	return nil
 }
 
+// NOTE: the generation moves only when the digest moved — a refresh that refetched identical rows must not invalidate an outstanding cursor or an If-None-Match.
 func (s *postgresRowStore) commitRefresh(
-	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
+	contract ContractState, digest string, bump bool,
 ) error {
-	stmt := s.sheets.UPDATE(
-		s.sheets.Generation, s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason,
-		s.sheets.SoftDelete,
-	).
-		SET(
-			s.sheets.Generation.ADD(postgres.Int(1)),
-			postgres.TimestampzT(time.Now().UTC()),
-			postgres.Bool(contract.OK),
-			postgres.String(contract.Reason),
-			postgres.Bool(contract.SoftDelete),
-		).
+	sets := []any{
+		s.sheets.ValidatedAt.SET(postgres.TimestampzT(time.Now().UTC())),
+		s.sheets.ContractOK.SET(postgres.Bool(contract.OK)),
+		s.sheets.ContractReason.SET(postgres.String(contract.Reason)),
+		s.sheets.SoftDelete.SET(postgres.Bool(contract.SoftDelete)),
+		s.sheets.ContentDigest.SET(postgres.String(digest)),
+	}
+	if bump {
+		sets = append(sets, s.sheets.Generation.SET(s.sheets.Generation.ADD(postgres.Int(1))))
+	}
+	stmt := s.sheets.UPDATE().
+		SET(sets[0], sets[1:]...).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {

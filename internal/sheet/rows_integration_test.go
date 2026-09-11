@@ -253,7 +253,7 @@ func TestPgRowStore_RowByID_UnknownIDIsNotFound(t *testing.T) {
 	assert.True(t, sheet.IsRowNotFoundError(err), "the lookup must be scoped to one tab, got %T: %v", err, err)
 }
 
-func TestPgRowStore_ContractOf_ReportsThePersistedState(t *testing.T) {
+func TestPgRowStore_StateOf_ReportsThePersistedState(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)
 	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
@@ -263,18 +263,22 @@ func TestPgRowStore_ContractOf_ReportsThePersistedState(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	got, err := f.rows.ContractOf(ctx, sh.ID)
+	got, err := f.rows.StateOf(ctx, sh.ID)
 	require.NoError(t, err)
-	assert.Equal(t, sheet.ContractState{OK: true, SoftDelete: true}, got)
+	assert.Equal(t, sheet.ContractState{OK: true, SoftDelete: true}, got.Contract)
+	assert.NotEmpty(t, got.Digest, "a refresh must persist the digest of the rows it wrote")
+	assert.EqualValues(t, 1, got.Generation)
 
 	ok, err = f.rows.MarkContract(ctx, sh.ID, 1, sheet.ContractState{Reason: "no id column"})
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	drifted, err := f.rows.ContractOf(ctx, sh.ID)
+	drifted, err := f.rows.StateOf(ctx, sh.ID)
 	require.NoError(t, err)
-	assert.Equal(t, sheet.ContractState{Reason: "no id column"}, drifted,
+	assert.Equal(t, sheet.ContractState{Reason: "no id column"}, drifted.Contract,
 		"the drift a refresh persisted is what a row read must refuse on")
+	assert.Equal(t, got.Digest, drifted.Digest, "marking drift must leave the digest alone")
+	assert.Equal(t, got.Generation, drifted.Generation)
 }
 
 func TestPgRowStore_ReplaceIsScopedToOneTab(t *testing.T) {
@@ -362,9 +366,9 @@ func TestPgRowStore_IsTenantScoped(t *testing.T) {
 	assert.True(t, sheet.IsRowNotFoundError(err),
 		"org B must not read org A's row by id, got %T: %v", err, err)
 
-	_, err = f.rows.ContractOf(ctxB, sh.ID)
+	_, err = f.rows.StateOf(ctxB, sh.ID)
 	assert.True(t, sheet.IsNotFoundError(err),
-		"org B must not read org A's contract state, got %T: %v", err, err)
+		"org B must not read org A's sheet state, got %T: %v", err, err)
 
 	statsForB, err := f.rows.Stats(ctxB, sh.ID, "Rates")
 	require.NoError(t, err)
@@ -405,8 +409,8 @@ func TestPgRowStore_RequiresTenantScope(t *testing.T) {
 	_, err = f.rows.RowByID(t.Context(), k, "a")
 	assert.True(t, tenant.IsMissingError(err), "RowByID want MissingError, got %T: %v", err, err)
 
-	_, err = f.rows.ContractOf(t.Context(), k.SheetID)
-	assert.True(t, tenant.IsMissingError(err), "ContractOf want MissingError, got %T: %v", err, err)
+	_, err = f.rows.StateOf(t.Context(), k.SheetID)
+	assert.True(t, tenant.IsMissingError(err), "StateOf want MissingError, got %T: %v", err, err)
 
 	_, err = f.rows.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
@@ -575,4 +579,128 @@ func TestPgRowStore_Stats_UnprojectedSheetCountsNothing(t *testing.T) {
 	got, err := f.rows.Stats(ctx, sh.ID, "Rates")
 	require.NoError(t, err)
 	assert.Equal(t, sheet.TableStats{Tab: "Rates"}, got, "nothing projected is not an error")
+}
+
+func pgRefreshedRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+		{RowID: "b", RowIndex: 2, Data: gsheet.Row{"id": "b", "name": "bob"}},
+	}
+}
+
+// TestPgRowStore_Refresh_DoesNotBumpTheGenerationWhenNothingChanged is why the bump is conditional: a 1000-page keyset walk spans several TTL windows, and a bump per window makes it uncompletable.
+func TestPgRowStore_Refresh_DoesNotBumpTheGenerationWhenNothingChanged(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	first, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, first.Generation)
+	require.NotEmpty(t, first.Digest)
+	firstSheet, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	require.NotNil(t, firstSheet.ValidatedAt)
+
+	ok, err = f.rows.Replace(ctx, k, first.Generation, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	second, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, first.Generation, second.Generation,
+		"a refresh that refetched identical rows must not move the generation")
+	assert.Equal(t, first.Digest, second.Digest)
+
+	secondSheet, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	require.NotNil(t, secondSheet.ValidatedAt)
+	assert.True(t, secondSheet.ValidatedAt.After(*firstSheet.ValidatedAt),
+		"the freshness gate still has to advance, or every page refetches from Google")
+}
+
+func TestPgRowStore_Refresh_BumpsWhenACellChanged(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	first, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+
+	edited := pgRefreshedRows()
+	edited[1].Data = gsheet.Row{"id": "b", "name": "Bob"}
+	ok, err = f.rows.Replace(ctx, k, first.Generation, edited, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	second, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, first.Generation+1, second.Generation)
+	assert.NotEqual(t, first.Digest, second.Digest)
+}
+
+func TestPgRowStore_Refresh_BumpsWhenARowIsTombstoned(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	first, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	tombstoned := pgRefreshedRows()
+	tombstoned[1].DeletedAt = &deletedAt
+	ok, err = f.rows.Replace(ctx, k, first.Generation, tombstoned, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	second, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, first.Generation+1, second.Generation,
+		"a tombstone changes no row_id, no row_index and no cell, so only a tombstone-aware digest moves here")
+	assert.NotEqual(t, first.Digest, second.Digest)
+}
+
+// TestPgRowStore_Replace_StaleRefreshCannotResurrectATombstonedRow is the interleaving a tombstone-blind digest breaks: the earlier of two refreshes at one generation would apply last and undo the delete.
+func TestPgRowStore_Replace_StaleRefreshCannotResurrectATombstonedRow(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	settled, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	tombstoned := pgRefreshedRows()
+	tombstoned[1].DeletedAt = &deletedAt
+
+	ok, err = f.rows.Replace(ctx, k, settled.Generation, tombstoned, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok, "the refresh that saw the tombstone applies first")
+
+	ok, err = f.rows.Replace(ctx, k, settled.Generation, pgRefreshedRows(), sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.False(t, ok, "the refresh whose fetch predates the tombstone must be discarded")
+
+	live, err := f.rows.ListLive(ctx, k)
+	require.NoError(t, err)
+	assert.Equal(t, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
+	}, live, "the deleted row must stay deleted")
 }

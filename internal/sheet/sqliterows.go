@@ -37,10 +37,12 @@ type sqliteProjectedRow struct {
 	DeletedAt *string `alias:"sheet_rows.deleted_at"`
 }
 
-type sqliteContractRow struct {
-	OK         int64  `alias:"sheets.contract_ok"`
-	Reason     string `alias:"sheets.contract_reason"`
-	SoftDelete int64  `alias:"sheets.soft_delete"`
+type sqliteSheetStateRow struct {
+	OK            int64  `alias:"sheets.contract_ok"`
+	Reason        string `alias:"sheets.contract_reason"`
+	SoftDelete    int64  `alias:"sheets.soft_delete"`
+	ContentDigest string `alias:"sheets.content_digest"`
+	Generation    int64  `alias:"sheets.generation"`
 }
 
 type sqliteRowStats struct {
@@ -50,7 +52,8 @@ type sqliteRowStats struct {
 }
 
 type sqliteGenerationRow struct {
-	Generation int64 `alias:"sheets.generation"`
+	Generation    int64  `alias:"sheets.generation"`
+	ContentDigest string `alias:"sheets.content_digest"`
 }
 
 // NOTE: sqlite is single-writer, so a read of the generation already has the exclusivity FOR UPDATE buys on postgres.
@@ -61,7 +64,7 @@ func (s *sqliteRowStore) LockSheet(ctx context.Context, sheetID uuid.UUID) (int6
 	}
 	var gen int64
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		g, gErr := s.generation(ctx, tx, tc, sheetID)
+		g, _, gErr := s.generation(ctx, tx, tc, sheetID)
 		if gErr != nil {
 			return gErr
 		}
@@ -85,9 +88,13 @@ func (s *sqliteRowStore) Replace(
 	if err != nil {
 		return false, err
 	}
+	digest, err := RowsDigest(rows)
+	if err != nil {
+		return false, err
+	}
 	applied := false
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		current, gErr := s.generation(ctx, tx, tc, k.SheetID)
+		current, stored, gErr := s.generation(ctx, tx, tc, k.SheetID)
 		if gErr != nil {
 			return gErr
 		}
@@ -100,7 +107,7 @@ func (s *sqliteRowStore) Replace(
 		if iErr := s.insertRows(ctx, tx, values); iErr != nil {
 			return iErr
 		}
-		if uErr := s.commitRefresh(ctx, tx, tc, k.SheetID, contract); uErr != nil {
+		if uErr := s.commitRefresh(ctx, tx, tc, k.SheetID, contract, digest, digest != stored); uErr != nil {
 			return uErr
 		}
 		applied = true
@@ -121,7 +128,7 @@ func (s *sqliteRowStore) MarkContract(
 	}
 	applied := false
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		current, gErr := s.generation(ctx, tx, tc, sheetID)
+		current, _, gErr := s.generation(ctx, tx, tc, sheetID)
 		if gErr != nil {
 			return gErr
 		}
@@ -214,30 +221,39 @@ func (s *sqliteRowStore) RowByID(ctx context.Context, k SnapshotKey, rowID strin
 	return out, nil
 }
 
-func (s *sqliteRowStore) ContractOf(ctx context.Context, sheetID uuid.UUID) (ContractState, error) {
+func (s *sqliteRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (SheetState, error) {
 	tc, err := tenant.From(ctx)
 	if err != nil {
-		return ContractState{}, err
+		return SheetState{}, err
 	}
-	var out ContractState
+	var out SheetState
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt := sqlite.SELECT(s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete).
+		stmt := sqlite.SELECT(
+			s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+			s.sheets.ContentDigest, s.sheets.Generation,
+		).
 			FROM(s.sheets).
 			WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 				AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
 			LIMIT(1)
-		var scanned sqliteContractRow
+		var scanned sqliteSheetStateRow
 		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
 			if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
 				return &NotFoundError{ID: sheetID.String()}
 			}
-			return fmt.Errorf("sheet.rows.sqlite.ContractOf: %w", qErr)
+			return fmt.Errorf("sheet.rows.sqlite.StateOf: %w", qErr)
 		}
-		out = ContractState{OK: scanned.OK != 0, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete != 0}
+		out = SheetState{
+			Contract: ContractState{
+				OK: scanned.OK != 0, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete != 0,
+			},
+			Digest:     scanned.ContentDigest,
+			Generation: scanned.Generation,
+		}
 		return nil
 	})
 	if err != nil {
-		return ContractState{}, err
+		return SheetState{}, err
 	}
 	return out, nil
 }
@@ -353,8 +369,8 @@ func (s *sqliteRowStore) PurgeSheet(ctx context.Context, sheetID uuid.UUID) erro
 
 func (s *sqliteRowStore) generation(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
-) (int64, error) {
-	stmt := sqlite.SELECT(s.sheets.Generation).
+) (gen int64, digest string, err error) {
+	stmt := sqlite.SELECT(s.sheets.Generation, s.sheets.ContentDigest).
 		FROM(s.sheets).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
@@ -362,11 +378,11 @@ func (s *sqliteRowStore) generation(
 	var row sqliteGenerationRow
 	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-			return 0, &NotFoundError{ID: sheetID.String()}
+			return 0, "", &NotFoundError{ID: sheetID.String()}
 		}
-		return 0, fmt.Errorf("sheet.rows.sqlite: read generation: %w", err)
+		return 0, "", fmt.Errorf("sheet.rows.sqlite: read generation: %w", err)
 	}
-	return row.Generation, nil
+	return row.Generation, row.ContentDigest, nil
 }
 
 func (s *sqliteRowStore) deleteTab(ctx context.Context, tx *sql.Tx, tc tenant.Context, k SnapshotKey) error {
@@ -403,20 +419,23 @@ func (s *sqliteRowStore) bumpGeneration(
 	return nil
 }
 
+// NOTE: the generation moves only when the digest moved — a refresh that refetched identical rows must not invalidate an outstanding cursor or an If-None-Match.
 func (s *sqliteRowStore) commitRefresh(
-	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
+	contract ContractState, digest string, bump bool,
 ) error {
-	stmt := s.sheets.UPDATE(
-		s.sheets.Generation, s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason,
-		s.sheets.SoftDelete,
-	).
-		SET(
-			s.sheets.Generation.ADD(sqlite.Int(1)),
-			sqlite.String(sqliteent.SQLiteTime(time.Now())),
-			sqlite.Int(boolToInt(contract.OK)),
-			sqlite.String(contract.Reason),
-			sqlite.Int(boolToInt(contract.SoftDelete)),
-		).
+	sets := []any{
+		s.sheets.ValidatedAt.SET(sqlite.String(sqliteent.SQLiteTime(time.Now()))),
+		s.sheets.ContractOK.SET(sqlite.Int(boolToInt(contract.OK))),
+		s.sheets.ContractReason.SET(sqlite.String(contract.Reason)),
+		s.sheets.SoftDelete.SET(sqlite.Int(boolToInt(contract.SoftDelete))),
+		s.sheets.ContentDigest.SET(sqlite.String(digest)),
+	}
+	if bump {
+		sets = append(sets, s.sheets.Generation.SET(s.sheets.Generation.ADD(sqlite.Int(1))))
+	}
+	stmt := s.sheets.UPDATE().
+		SET(sets[0], sets[1:]...).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {

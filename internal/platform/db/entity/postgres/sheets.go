@@ -22,6 +22,7 @@ type Sheets struct {
 	ContractOK     postgres.ColumnBool
 	ContractReason postgres.ColumnString
 	SoftDelete     postgres.ColumnBool
+	ContentDigest  postgres.ColumnString
 
 	AllColumns     postgres.ColumnList
 	MutableColumns postgres.ColumnList
@@ -49,10 +50,12 @@ func NewSheets(schema, tablePrefix string) *Sheets {
 		contractOK     = postgres.BoolColumn("contract_ok")
 		contractReason = postgres.StringColumn("contract_reason")
 		softDelete     = postgres.BoolColumn("soft_delete")
+		contentDigest  = postgres.StringColumn("content_digest")
 		all            = postgres.ColumnList{
 			id, orgID, projectID, spreadsheetID, tab, slug,
 			visibility, cacheTTLSecs, writable, createdAt, updatedAt,
 			generation, validatedAt, contractOK, contractReason, softDelete,
+			contentDigest,
 		}
 		// NOTE: generation is deliberately absent — an upsert must never reset the staleness guard or the write lock.
 		mutable = postgres.ColumnList{
@@ -79,6 +82,7 @@ func NewSheets(schema, tablePrefix string) *Sheets {
 		ContractOK:     contractOK,
 		ContractReason: contractReason,
 		SoftDelete:     softDelete,
+		ContentDigest:  contentDigest,
 		AllColumns:     all,
 		MutableColumns: mutable,
 	}
