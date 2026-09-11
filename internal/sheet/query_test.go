@@ -3,7 +3,9 @@ package sheet
 import (
 	"encoding/base64"
 	"errors"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -476,5 +478,230 @@ func TestEncodeRowCursor_RefusesAnUnusableCursor(t *testing.T) {
 		if IsInvalidCursorError(err) {
 			t.Errorf("EncodeRowCursor(%+v) error = %v, want an internal failure, not a client refusal", c, err)
 		}
+	}
+}
+
+func TestParseRowClauses_EveryHintOnEveryHintableOperator(t *testing.T) {
+	operands := map[RowHint]string{RowHintNum: "10", RowHintDate: "2026-09-11"}
+	for _, hint := range []RowHint{RowHintNum, RowHintDate} {
+		for _, op := range []RowOp{RowOpEq, RowOpNe, RowOpGt, RowOpGte, RowOpLt, RowOpLte} {
+			clause := "id:" + string(hint) + "." + string(op) + ":" + operands[hint]
+			t.Run(clause, func(t *testing.T) {
+				got, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+				if err != nil {
+					t.Fatalf("ParseRowClauses(%q) error = %v, want nil", clause, err)
+				}
+				if len(got) != 1 {
+					t.Fatalf("ParseRowClauses(%q) = %d clauses, want 1", clause, len(got))
+				}
+				c := got[0]
+				if c.Column != "id" || c.Op != op || c.Hint != hint || c.Value != operands[hint] {
+					t.Errorf("clause = {%q %q %q %q}, want {id %q %q %q}",
+						c.Column, c.Op, c.Hint, c.Value, op, hint, operands[hint])
+				}
+			})
+		}
+	}
+}
+
+func TestParseRowClauses_RefusesAHintOnANonHintableOperator(t *testing.T) {
+	for _, hint := range []RowHint{RowHintNum, RowHintDate} {
+		for _, tail := range []string{
+			"contains:x", "starts:x", "in:a,b", "empty", "present", "empty:x", "present:x",
+		} {
+			clause := "note:" + string(hint) + "." + tail
+			t.Run(clause, func(t *testing.T) {
+				_, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+				if !IsHintNotApplicableError(err) {
+					t.Fatalf("ParseRowClauses(%q) error = %v, want HintNotApplicableError", clause, err)
+				}
+				hintErr, _ := errors.AsType[*HintNotApplicableError](err)
+				if hintErr.Hint != hint || hintErr.Column != "note" {
+					t.Errorf("error = {%q %q %q}, want column note and hint %q",
+						hintErr.Column, hintErr.Op, hintErr.Hint, hint)
+				}
+			})
+		}
+	}
+}
+
+// The operator token splits on the first "." and the prefix is checked against
+// the known hints FIRST: a known hint on a text-only operator is SHT037, while
+// an unknown prefix stays 3a's SHT031 and never becomes a hint error.
+func TestParseRowClauses_HintCheckPrecedesTheOperatorLookup(t *testing.T) {
+	t.Run("known hint, non-hintable operator", func(t *testing.T) {
+		_, err := ParseRowClauses([]string{"note:num.contains:x"}, testColumns(), "Sheet1")
+		if !IsHintNotApplicableError(err) {
+			t.Fatalf("error = %v, want HintNotApplicableError", err)
+		}
+		if IsInvalidClauseError(err) {
+			t.Error("num.contains fell through to the unknown-operator refusal")
+		}
+	})
+	t.Run("unknown prefix", func(t *testing.T) {
+		_, err := ParseRowClauses([]string{"note:foo.bar:x"}, testColumns(), "Sheet1")
+		if !IsInvalidClauseError(err) {
+			t.Fatalf("error = %v, want InvalidClauseError", err)
+		}
+		if IsHintNotApplicableError(err) {
+			t.Error("the hint check fired on an unknown prefix")
+		}
+		clauseErr, _ := errors.AsType[*InvalidClauseError](err)
+		if want := `unknown operator "foo.bar"`; clauseErr.Reason != want {
+			t.Errorf("Reason = %q, want %q", clauseErr.Reason, want)
+		}
+	})
+	t.Run("known hint, unknown operator", func(t *testing.T) {
+		_, err := ParseRowClauses([]string{"note:num.nope:x"}, testColumns(), "Sheet1")
+		if !IsInvalidClauseError(err) {
+			t.Fatalf("error = %v, want InvalidClauseError", err)
+		}
+		clauseErr, _ := errors.AsType[*InvalidClauseError](err)
+		if want := `unknown operator "nope"`; clauseErr.Reason != want {
+			t.Errorf("Reason = %q, want %q", clauseErr.Reason, want)
+		}
+	})
+}
+
+func TestParseRowClauses_RefusesANumOperandTheGrammarDoesNotAdmit(t *testing.T) {
+	for _, value := range []string{
+		"abc", "1abc", "3.5xyz", " 7", "7 ", " 7 ", ".5", "5.", "--1", "1.2.3", "1e3",
+		"NaN", "Infinity", "-", "+7", "0x10", "1,000",
+		"9007199254740993",
+		"1234567890123456",
+		"123456789012345.101",
+		strings.Repeat("9", 309),
+		strings.Repeat("9", 16386),
+	} {
+		t.Run(truncateForName(value), func(t *testing.T) {
+			clause := "id:num.gt:" + value
+			_, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+			if !IsHintOperandError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want HintOperandError", clause, err)
+			}
+			opErr, _ := errors.AsType[*HintOperandError](err)
+			if opErr.Hint != RowHintNum || opErr.Value != value || opErr.Column != "id" {
+				t.Errorf("error = {%q %q} hint %q, want column id and the refused value",
+					opErr.Column, truncateForName(opErr.Value), opErr.Hint)
+			}
+		})
+	}
+}
+
+// 15 significant digits is the bound both engines agree on; 16 is not, so the
+// pair either side of it is the case that matters.
+func TestParseRowClauses_NumOperandAtTheSignificanceBoundary(t *testing.T) {
+	accepted := []string{"123456789012345", "0.123456789012345", "-123456789012345", "000000000000001"}
+	for _, value := range accepted {
+		t.Run("accepted "+value, func(t *testing.T) {
+			got, err := ParseRowClauses([]string{"id:num.lte:" + value}, testColumns(), "Sheet1")
+			if err != nil {
+				t.Fatalf("ParseRowClauses(num.lte:%s) error = %v, want nil", value, err)
+			}
+			if got[0].Value != value {
+				t.Errorf("Value = %q, want %q", got[0].Value, value)
+			}
+		})
+	}
+	for _, value := range []string{
+		"1234567890123456", "0.1234567890123456", "-1234567890123456", "000123456789012345",
+	} {
+		t.Run("refused "+value, func(t *testing.T) {
+			_, err := ParseRowClauses([]string{"id:num.lte:" + value}, testColumns(), "Sheet1")
+			if !IsHintOperandError(err) {
+				t.Fatalf("ParseRowClauses(num.lte:%s) error = %v, want HintOperandError", value, err)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_RefusesADateOperandTheGrammarDoesNotAdmit(t *testing.T) {
+	for _, value := range []string{
+		"abc", "2026", "2026-9-11", "01/02/2026", "11-09-2026",
+		"2026-09-11 00:00:00", "2026-09-11T00:00:00", "2026-09-11t00:00:00Z",
+		"2026-09-11T00:00:00.5Z", "2026-09-11T10:00:00+07:00", "2026-09-11T00:00Z",
+		" 2026-09-11", "2026-09-11 ",
+	} {
+		t.Run(value, func(t *testing.T) {
+			clause := "created_at:date.gte:" + value
+			_, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+			if !IsHintOperandError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want HintOperandError", clause, err)
+			}
+			opErr, _ := errors.AsType[*HintOperandError](err)
+			if opErr.Hint != RowHintDate || opErr.Value != value || opErr.Column != "created_at" {
+				t.Errorf("error = {%q %q} hint %q, want created_at and the refused value",
+					opErr.Column, opErr.Value, opErr.Hint)
+			}
+		})
+	}
+}
+
+// A hinted value keeps 3a's right to contain colons, so SplitN(clause, ":", 3)
+// must stay exactly as it is.
+func TestParseRowClauses_AHintedValueMayContainColons(t *testing.T) {
+	const want = "2026-09-11T00:00:00Z"
+	got, err := ParseRowClauses([]string{"created_at:date.gte:" + want}, testColumns(), "Sheet1")
+	if err != nil {
+		t.Fatalf("ParseRowClauses() error = %v, want nil", err)
+	}
+	c := got[0]
+	if c.Column != "created_at" || c.Op != RowOpGte || c.Hint != RowHintDate || c.Value != want {
+		t.Errorf("clause = {%q %q %q %q}, want {created_at gte date %q}",
+			c.Column, c.Op, c.Hint, c.Value, want)
+	}
+}
+
+// Every 3a clause must still parse with no hint, so no shipped request changes meaning.
+func TestParseRowClauses_UnhintedClausesCarryNoHint(t *testing.T) {
+	for _, clause := range []string{
+		"note:eq:open", "note:ne:open", "note:gt:a", "note:gte:a", "note:lt:z", "note:lte:z",
+		"note:contains:ada", "note:starts:ad", "note:in:a,b,c", "note:empty", "note:present",
+		"note:eq:num.gt", "note:eq:10", "created_at:gte:2026-09-11T00:00:00Z",
+	} {
+		t.Run(clause, func(t *testing.T) {
+			got, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+			if err != nil {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want nil", clause, err)
+			}
+			if got[0].Hint != RowHintNone {
+				t.Errorf("Hint = %q, want none — an unhinted clause stays text", got[0].Hint)
+			}
+		})
+	}
+}
+
+// 3a refuses an unreadable operator before it resolves the column; the hint
+// refusals join that grammar phase rather than sitting behind it.
+func TestParseRowClauses_HintRefusalsPrecedeColumnResolution(t *testing.T) {
+	_, err := ParseRowClauses([]string{"statuz:num.contains:x"}, testColumns(), "Sheet1")
+	if !IsHintNotApplicableError(err) {
+		t.Fatalf("error = %v, want HintNotApplicableError", err)
+	}
+	_, err = ParseRowClauses([]string{"statuz:num.gt:abc"}, testColumns(), "Sheet1")
+	if !IsHintOperandError(err) {
+		t.Fatalf("error = %v, want HintOperandError", err)
+	}
+}
+
+func truncateForName(v string) string {
+	if len(v) <= 24 {
+		return v
+	}
+	return v[:24] + "…(" + strconv.Itoa(len(v)) + " chars)"
+}
+
+// The float ParseNum yields is deliberately not carried on the clause: a second
+// representation beside Value can drift from it, and a driver calls
+// ParseNum(c.Value) at bind time instead.
+func TestRowClause_CarriesNoSecondRepresentationOfTheValue(t *testing.T) {
+	want := []string{"Column", "Op", "Hint", "Value", "Values", "Pattern"}
+	rt := reflect.TypeFor[RowClause]()
+	got := make([]string, 0, rt.NumField())
+	for i := range rt.NumField() {
+		got = append(got, rt.Field(i).Name)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("RowClause fields = %v, want %v", got, want)
 	}
 }

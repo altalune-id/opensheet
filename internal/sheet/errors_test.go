@@ -297,3 +297,67 @@ func TestStaleCursorError(t *testing.T) {
 		t.Errorf("HTTPStatus = %d, want %d — the walk must restart, not be retried", got, http.StatusConflict)
 	}
 }
+
+func TestHintNotApplicableError(t *testing.T) {
+	e := &HintNotApplicableError{Column: "qty", Op: RowOpContains, Hint: RowHintNum}
+	msg := e.Error()
+	if !strings.Contains(msg, "qty") || !strings.Contains(msg, "contains") || !strings.Contains(msg, "num") {
+		t.Errorf("Error() = %q, want it to carry the column, the operator and the hint", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetHintNotApplicable)
+	if !IsHintNotApplicableError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsHintNotApplicableError does not see through a wrap")
+	}
+	if IsHintNotApplicableError(&HintOperandError{}) {
+		t.Error("IsHintNotApplicableError matched the wrong type")
+	}
+}
+
+func TestHintOperandError(t *testing.T) {
+	e := &HintOperandError{Column: "qty", Hint: RowHintNum, Value: "abc"}
+	msg := e.Error()
+	if !strings.Contains(msg, "qty") || !strings.Contains(msg, "abc") || !strings.Contains(msg, "num") {
+		t.Errorf("Error() = %q, want it to carry the column, the value and the hint", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetHintOperand)
+	if !IsHintOperandError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsHintOperandError does not see through a wrap")
+	}
+	if IsHintOperandError(&HintNotApplicableError{}) {
+		t.Error("IsHintOperandError matched the wrong type")
+	}
+}
+
+// The data-plane envelope is {code, message} and the message is all a client
+// reads, so the two hint refusals must be distinguishable from the message alone.
+func TestHintErrors_MessagesTellTheTwoRefusalsApart(t *testing.T) {
+	notApplicable := (&HintNotApplicableError{Column: "qty", Op: RowOpContains, Hint: RowHintNum}).
+		ToAppError().Error()
+	badOperand := (&HintOperandError{Column: "qty", Hint: RowHintNum, Value: "abc"}).
+		ToAppError().Error()
+	if notApplicable == badOperand {
+		t.Fatalf("both refusals render %q", notApplicable)
+	}
+	if !strings.Contains(notApplicable, "contains") {
+		t.Errorf("SHT037 message = %q, want the operator that cannot be hinted", notApplicable)
+	}
+	if !strings.Contains(badOperand, "abc") {
+		t.Errorf("SHT038 message = %q, want the operand the grammar refused", badOperand)
+	}
+	for _, msg := range []string{notApplicable, badOperand} {
+		if !strings.Contains(msg, "qty") || !strings.Contains(msg, "num") {
+			t.Errorf("message = %q, want the column and the hint", msg)
+		}
+	}
+}
+
+func TestHintErrorsMapToHTTP400(t *testing.T) {
+	for _, e := range []interface{ ToAppError() *apperror.AppError }{
+		&HintNotApplicableError{Column: "qty", Op: RowOpIn, Hint: RowHintDate},
+		&HintOperandError{Column: "qty", Hint: RowHintDate, Value: "01/02/2026"},
+	} {
+		if got := e.ToAppError().HTTPStatus(); got != http.StatusBadRequest {
+			t.Errorf("%T HTTPStatus = %d, want %d", e, got, http.StatusBadRequest)
+		}
+	}
+}

@@ -109,6 +109,8 @@ const (
 	CodeSheetInvalidCursor         = "SHT034"
 	CodeSheetUnknownQueryParam     = "SHT035"
 	CodeSheetStaleCursor           = "SHT036"
+	CodeSheetHintNotApplicable     = "SHT037"
+	CodeSheetHintOperand           = "SHT038"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

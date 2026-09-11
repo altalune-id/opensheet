@@ -1030,3 +1030,73 @@ func IsStaleCursorError(err error) bool {
 	_, ok := errors.AsType[*StaleCursorError](err)
 	return ok
 }
+
+// HintNotApplicableError signals a num. or date. hint on an operator that compares text only.
+type HintNotApplicableError struct {
+	Column string
+	Op     RowOp
+	Hint   RowHint
+}
+
+func (e *HintNotApplicableError) Error() string {
+	return fmt.Sprintf("sheet: column %q: operator %q takes no %s hint", e.Column, e.Op, e.Hint)
+}
+
+// ToAppError maps HintNotApplicableError to the canonical InvalidArgument envelope.
+func (e *HintNotApplicableError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetHintNotApplicable,
+		fmt.Sprintf("Column %q: the %s type hint does not apply to the %q operator",
+			e.Column, e.Hint, e.Op),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetHintNotApplicable,
+			Meta: map[string]string{
+				"column": e.Column,
+				"op":     string(e.Op),
+				"hint":   string(e.Hint),
+			},
+		},
+	)
+}
+
+// IsHintNotApplicableError reports whether err's tree contains a *HintNotApplicableError.
+func IsHintNotApplicableError(err error) bool {
+	_, ok := errors.AsType[*HintNotApplicableError](err)
+	return ok
+}
+
+// HintOperandError signals a filter value the hinted grammar refuses.
+type HintOperandError struct {
+	Column string
+	Hint   RowHint
+	Value  string
+}
+
+func (e *HintOperandError) Error() string {
+	return fmt.Sprintf("sheet: column %q: %q is not a %s", e.Column, e.Value, e.Hint)
+}
+
+// ToAppError maps HintOperandError to the canonical InvalidArgument envelope.
+func (e *HintOperandError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetHintOperand,
+		fmt.Sprintf("Column %q: the filter value %q does not match the %s grammar",
+			e.Column, e.Value, e.Hint),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetHintOperand,
+			Meta: map[string]string{
+				"column": e.Column,
+				"hint":   string(e.Hint),
+				"value":  e.Value,
+			},
+		},
+	)
+}
+
+// IsHintOperandError reports whether err's tree contains a *HintOperandError.
+func IsHintOperandError(err error) bool {
+	_, ok := errors.AsType[*HintOperandError](err)
+	return ok
+}

@@ -27,6 +27,16 @@ const (
 	RowOpPresent RowOp = "present"
 )
 
+// RowHint is the comparison domain a clause asks for.
+type RowHint string
+
+// The comparison domains a hinted clause can name. NOTE: a hint rides the operator (qty:num.gt:10) because a fourth colon-separated field would break the value's right to contain colons.
+const (
+	RowHintNone RowHint = ""
+	RowHintNum  RowHint = "num"
+	RowHintDate RowHint = "date"
+)
+
 // RowLikeEscape is the escape character a Pattern carries; SQLite has no default one, so a driver must bind it into an explicit ESCAPE clause.
 const RowLikeEscape = `\`
 
@@ -39,6 +49,7 @@ const rowCursorVersion = 1
 type RowClause struct {
 	Column  string
 	Op      RowOp
+	Hint    RowHint
 	Value   string
 	Values  []string
 	Pattern string
@@ -124,12 +135,16 @@ func parseRowClause(raw string, columns []string, tab string, del int) (RowClaus
 	if parts[1] == "" {
 		return RowClause{}, &InvalidClauseError{Clause: raw, Reason: "no operator"}
 	}
-	op := RowOp(parts[1])
+	hint, token := splitRowHint(parts[1])
+	op := RowOp(token)
 	takesValue, known := rowOpTakesValue(op)
 	if !known {
 		return RowClause{}, &InvalidClauseError{
-			Clause: raw, Reason: fmt.Sprintf("unknown operator %q", parts[1]),
+			Clause: raw, Reason: fmt.Sprintf("unknown operator %q", token),
 		}
+	}
+	if hint != RowHintNone && !rowOpTakesHint(op) {
+		return RowClause{}, &HintNotApplicableError{Column: parts[0], Op: op, Hint: hint}
 	}
 	if !takesValue && len(parts) == 3 {
 		return RowClause{}, &InvalidClauseError{
@@ -145,6 +160,9 @@ func parseRowClause(raw string, columns []string, tab string, del int) (RowClaus
 			Clause: raw, Reason: fmt.Sprintf("operator %q needs a value", op),
 		}
 	}
+	if !hintAcceptsOperand(hint, value) {
+		return RowClause{}, &HintOperandError{Column: parts[0], Hint: hint, Value: value}
+	}
 	col, err := columnOf(columns, parts[0], tab)
 	if err != nil {
 		return RowClause{}, err
@@ -152,7 +170,7 @@ func parseRowClause(raw string, columns []string, tab string, del int) (RowClaus
 	if col == del {
 		return RowClause{}, &UnqueryableColumnError{Column: parts[0], Tab: tab}
 	}
-	clause := RowClause{Column: columns[col], Op: op, Value: value}
+	clause := RowClause{Column: columns[col], Op: op, Hint: hint, Value: value}
 	switch op {
 	case RowOpIn:
 		clause.Values = splitInList(value)
@@ -168,6 +186,42 @@ func parseRowClause(raw string, columns []string, tab string, del int) (RowClaus
 	default:
 	}
 	return clause, nil
+}
+
+// NOTE: the operator token is split on the first "." and the prefix is checked against the known hints first, so col:foo.bar stays 3a's unknown-operator refusal rather than becoming a hint error.
+func splitRowHint(token string) (hint RowHint, op string) {
+	prefix, rest, found := strings.Cut(token, ".")
+	if !found {
+		return RowHintNone, token
+	}
+	switch RowHint(prefix) {
+	case RowHintNum, RowHintDate:
+		return RowHint(prefix), rest
+	default:
+		return RowHintNone, token
+	}
+}
+
+func rowOpTakesHint(op RowOp) bool {
+	switch op {
+	case RowOpEq, RowOpNe, RowOpGt, RowOpGte, RowOpLt, RowOpLte:
+		return true
+	default:
+		return false
+	}
+}
+
+// NOTE: the float ParseNum yields is deliberately not kept on the clause; a driver calls ParseNum again at bind time, so no second representation can drift from Value.
+func hintAcceptsOperand(hint RowHint, value string) bool {
+	switch hint {
+	case RowHintNum:
+		_, ok := ParseNum(value)
+		return ok
+	case RowHintDate:
+		return MatchesDateShape(value)
+	default:
+		return true
+	}
 }
 
 func rowOpTakesValue(op RowOp) (takesValue, known bool) {
