@@ -34,6 +34,15 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/opensheet:edge
             ghcr.io/${{ github.repository_owner }}/opensheet:${{ steps.sha.outputs.sha }}
+          # NOTE: image.source is what links the GHCR package to this repo;
+          # without it the package stays attached to whichever repo published first.
+          labels: |
+            org.opencontainers.image.title=opensheet
+            org.opencontainers.image.version=edge-${{ steps.sha.outputs.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.licenses=Apache-2.0
           build-args: |
             VERSION=edge-${{ steps.sha.outputs.sha }}
             COMMIT=${{ github.sha }}
