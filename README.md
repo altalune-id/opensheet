@@ -103,6 +103,51 @@ response rather than writing again. `PATCH`, `PUT` and `DELETE` on a row honour
 an absent header is last-write-wins. `PUT` and `DELETE` are idempotent by
 construction and need no key, and a delete of an already-deleted row is `204`.
 
+The whole-tab `GET` takes three query parameters, and any one of them switches it
+from serving the stored snapshot verbatim to querying the row projection:
+
+```
+?where=col:op:value   # repeated; every clause ANDs
+?limit=100            # 1 to sheets.maxQueryRows
+?cursor=<opaque>      # the keyset position carried by a Link header
+```
+
+The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts`,
+`in`, `empty` and `present`. Every comparison is text: `contains` and `starts`
+are case-insensitive substring and prefix matches with `%` and `_` treated
+literally, `in` takes a comma-separated list, and `empty`/`present` take no
+value, so they are written `col:empty` with no trailing colon. Ordering is
+lexical, which is right for ISO-8601 dates and zero-padded numbers and wrong for
+unpadded ones (`"10" < "3"`); typed comparison and `?sort=` are not implemented.
+A clause splits on the first two colons only, so a value may contain colons.
+
+An unknown column, an unknown operator, a `limit` outside the cap and a
+malformed `cursor` are each `400`. So is an unrecognised query parameter, rather
+than being ignored, so a typo cannot silently serve the whole tab. Zero matches
+is `200 []`.
+
+Pagination is keyset over the tab's row order. A page with a successor carries
+`Link: <?…&cursor=…>; rel="next"` — a relative URI-reference — and the absence of
+that header is the only end-of-walk signal. `limit` is bounded by
+`sheets.maxQueryRows` (default 1000), which is also the default when `limit` is
+absent: a filtered read is never unbounded, because `sheets.maxPayloadBytes` does
+not apply to it. The cursor carries the content digest it was issued against, so
+a sheet edited mid-walk refuses it with `409` rather than silently skipping or
+repeating rows, while a TTL refresh that changed nothing leaves the digest alone
+and the walk continues.
+
+A filtered read has its own `ETag`, hashed from the sheet's generation and the
+canonical query, so it can never collide with an unfiltered tag, and clause order
+does not move it. `If-None-Match` returns `304` with that `ETag` and
+`Cache-Control` but **no** `Link`: the tag is evaluated before the query runs, so
+no next cursor exists yet, and a walking client already holds one from the
+preceding `200`.
+
+The two paths part company on an over-cap tab. `sheets.maxPayloadBytes` bounds
+the stored snapshot, not a filtered body, and the projection is written before
+the payload is marshalled — so a tab over that cap is fully queryable while the
+unfiltered read of the same sheet still returns `413`.
+
 `…/capabilities` is authorized like the rows `GET` (`sheets:read`, or public
 visibility) and is answered from the row projection and the `sheets` row alone —
 no Google call — so it is cheap to poll. It reports the tab's columns, whether it
