@@ -360,7 +360,7 @@ func (s *sqliteRowStore) queryPredicate(
 	return where, nil
 }
 
-// NOTE: the null rank leads in both directions, as a boolean key rather than NULLS LAST, because it is what the cursor compares against; and row_index breaks every tie ascending in both directions, since a keyset over a non-total order repeats or skips rows.
+// NOTE: nulls sort last in both directions, spelled NULLS LAST because Postgres ASC is nulls-last and SQLite ASC is nulls-first; and row_index breaks every tie ascending in both directions, since a keyset over a non-total order repeats or skips rows.
 func sqliteRowOrder(
 	data sqlite.ColumnString, rowIndex sqlite.ColumnInteger, sort *RowSort,
 ) ([]sqlite.OrderByClause, error) {
@@ -375,7 +375,7 @@ func sqliteRowOrder(
 	if sort.Desc {
 		value = cell.DESC()
 	}
-	return []sqlite.OrderByClause{cell.IS_NULL().ASC(), value, rowIndex.ASC()}, nil
+	return []sqlite.OrderByClause{value.NULLS_LAST(), rowIndex.ASC()}, nil
 }
 
 // NOTE: a sorted keyset REPLACES the row_index arm rather than ANDing onto it — the sorted order reaches rows whose row_index sits below the cursor's, and an AND would silently drop every one of them.

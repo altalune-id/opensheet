@@ -49,8 +49,8 @@ func sqliteRenderedOrderBy(t *testing.T, sort *RowSort) string {
 	return renderedOrderBy(t, query)
 }
 
-// TestRowOrder_IsThreeKeysWithTheNullRankFirstAndRowIndexLast is the witness a walk cannot give: with the tiebreaker dropped SQLite still returns tied rows in rowid order, so a page sequence cannot see the order stop being total.
-func TestRowOrder_IsThreeKeysWithTheNullRankFirstAndRowIndexLast(t *testing.T) {
+// TestRowOrder_IsTheSortKeyNullsLastThenRowIndexAscending is the witness a walk cannot give: with the tiebreaker dropped SQLite still returns tied rows in rowid order, so a page sequence cannot see the order stop being total.
+func TestRowOrder_IsTheSortKeyNullsLastThenRowIndexAscending(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
@@ -66,17 +66,19 @@ func TestRowOrder_IsThreeKeysWithTheNullRankFirstAndRowIndexLast(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := "ASC"
-			wantASC, wantDESC := 3, 0
+			wantASC, wantDESC := 2, 0
 			if tc.sort.Desc {
 				dir = "DESC"
-				wantASC, wantDESC = 2, 1
+				wantASC, wantDESC = 1, 1
 			}
-			shape := regexp.MustCompile(`(?s)^.+ IS NULL ASC, .+ ` + dir + `, sheet_rows\.row_index ASC$`)
+			shape := regexp.MustCompile(`(?s)^.+ ` + dir + ` NULLS LAST, sheet_rows\.row_index ASC$`)
 			for driver, order := range map[string]string{
 				"postgres": pgRenderedOrderBy(t, &tc.sort),
 				"sqlite":   sqliteRenderedOrderBy(t, &tc.sort),
 			} {
-				assert.Regexp(t, shape, order, "%s: the null rank leads and row_index breaks every tie", driver)
+				assert.Regexp(t, shape, order, "%s: the sort key carries NULLS LAST and row_index breaks every tie", driver)
+				assert.Equal(t, 1, strings.Count(order, "NULLS LAST"), "%s: %s", driver, order)
+				assert.Equal(t, 0, strings.Count(order, "NULLS FIRST"), "%s: %s", driver, order)
 				assert.Equal(t, wantASC, strings.Count(order, " ASC"), "%s: %s", driver, order)
 				assert.Equal(t, wantDESC, strings.Count(order, " DESC"), "%s: %s", driver, order)
 			}
