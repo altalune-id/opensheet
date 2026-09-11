@@ -877,3 +877,129 @@ func IsPreconditionFailedError(err error) bool {
 	_, ok := errors.AsType[*PreconditionFailedError](err)
 	return ok
 }
+
+// InvalidClauseError signals a ?where= clause the filter grammar cannot read.
+type InvalidClauseError struct {
+	Clause string
+	Reason string
+}
+
+func (e *InvalidClauseError) Error() string {
+	reason := e.Reason
+	if reason == "" {
+		reason = "invalid"
+	}
+	return fmt.Sprintf("sheet: filter %q: %s", e.Clause, reason)
+}
+
+// ToAppError maps InvalidClauseError to the canonical InvalidArgument envelope.
+func (e *InvalidClauseError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetInvalidClause,
+		"This filter cannot be read: a clause is written column:operator:value",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidClause,
+			Meta: map[string]string{"clause": e.Clause, "reason": e.Reason},
+		},
+	)
+}
+
+// IsInvalidClauseError reports whether err's tree contains an *InvalidClauseError.
+func IsInvalidClauseError(err error) bool {
+	_, ok := errors.AsType[*InvalidClauseError](err)
+	return ok
+}
+
+// UnqueryableColumnError signals a filter on a column the projection does not store.
+type UnqueryableColumnError struct {
+	Column string
+	Tab    string
+}
+
+func (e *UnqueryableColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: column %q cannot be filtered on", e.Tab, e.Column)
+}
+
+// ToAppError maps UnqueryableColumnError to the canonical InvalidArgument envelope.
+func (e *UnqueryableColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetUnqueryableColumn,
+		"This column cannot be filtered on",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetUnqueryableColumn,
+			Meta: map[string]string{"column": e.Column, "tab": e.Tab},
+		},
+	)
+}
+
+// IsUnqueryableColumnError reports whether err's tree contains an *UnqueryableColumnError.
+func IsUnqueryableColumnError(err error) bool {
+	_, ok := errors.AsType[*UnqueryableColumnError](err)
+	return ok
+}
+
+// InvalidLimitError signals a ?limit= that is not a whole number of rows within the configured cap.
+type InvalidLimitError struct {
+	Limit   string
+	MaxRows int
+}
+
+func (e *InvalidLimitError) Error() string {
+	return fmt.Sprintf("sheet: limit %q: not a whole number of rows from 1 to %d", e.Limit, e.MaxRows)
+}
+
+// ToAppError maps InvalidLimitError to the canonical InvalidArgument envelope.
+func (e *InvalidLimitError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetInvalidLimit,
+		fmt.Sprintf("Ask for a whole number of rows from 1 to %d", e.MaxRows),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidLimit,
+			Meta: map[string]string{
+				"limit":    e.Limit,
+				"max_rows": strconv.Itoa(e.MaxRows),
+			},
+		},
+	)
+}
+
+// IsInvalidLimitError reports whether err's tree contains an *InvalidLimitError.
+func IsInvalidLimitError(err error) bool {
+	_, ok := errors.AsType[*InvalidLimitError](err)
+	return ok
+}
+
+// InvalidCursorError signals a ?cursor= this version did not issue.
+type InvalidCursorError struct {
+	Reason string
+}
+
+func (e *InvalidCursorError) Error() string {
+	reason := e.Reason
+	if reason == "" {
+		reason = "invalid"
+	}
+	return "sheet: cursor: " + reason
+}
+
+// ToAppError maps InvalidCursorError to the canonical InvalidArgument envelope.
+func (e *InvalidCursorError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetInvalidCursor,
+		"This page cursor cannot be read: start the walk again without one",
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidCursor,
+			Meta: map[string]string{"reason": e.Reason},
+		},
+	)
+}
+
+// IsInvalidCursorError reports whether err's tree contains an *InvalidCursorError.
+func IsInvalidCursorError(err error) bool {
+	_, ok := errors.AsType[*InvalidCursorError](err)
+	return ok
+}

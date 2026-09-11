@@ -1,0 +1,480 @@
+package sheet
+
+import (
+	"encoding/base64"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+)
+
+func testColumns() []string {
+	return []string{"id", "note", "Status", "created_at"}
+}
+
+func TestParseRowClauses_EveryOperator(t *testing.T) {
+	tests := []struct {
+		name        string
+		clause      string
+		wantColumn  string
+		wantOp      RowOp
+		wantValue   string
+		wantValues  []string
+		wantPattern string
+	}{
+		{name: "eq", clause: "note:eq:open", wantColumn: "note", wantOp: RowOpEq, wantValue: "open"},
+		{name: "ne", clause: "note:ne:open", wantColumn: "note", wantOp: RowOpNe, wantValue: "open"},
+		{name: "gt", clause: "note:gt:a", wantColumn: "note", wantOp: RowOpGt, wantValue: "a"},
+		{name: "gte", clause: "note:gte:a", wantColumn: "note", wantOp: RowOpGte, wantValue: "a"},
+		{name: "lt", clause: "note:lt:z", wantColumn: "note", wantOp: RowOpLt, wantValue: "z"},
+		{name: "lte", clause: "note:lte:z", wantColumn: "note", wantOp: RowOpLte, wantValue: "z"},
+		{
+			name: "contains", clause: "note:contains:ada", wantColumn: "note",
+			wantOp: RowOpContains, wantValue: "ada", wantPattern: "%ada%",
+		},
+		{
+			name: "starts", clause: "note:starts:ad", wantColumn: "note",
+			wantOp: RowOpStarts, wantValue: "ad", wantPattern: "ad%",
+		},
+		{
+			name: "in", clause: "note:in:a,b,c", wantColumn: "note",
+			wantOp: RowOpIn, wantValue: "a,b,c", wantValues: []string{"a", "b", "c"},
+		},
+		{name: "empty", clause: "note:empty", wantColumn: "note", wantOp: RowOpEmpty},
+		{name: "present", clause: "note:present", wantColumn: "note", wantOp: RowOpPresent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRowClauses([]string{tt.clause}, testColumns(), "Sheet1")
+			if err != nil {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want nil", tt.clause, err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("ParseRowClauses(%q) = %d clauses, want 1", tt.clause, len(got))
+			}
+			c := got[0]
+			if c.Column != tt.wantColumn || c.Op != tt.wantOp || c.Value != tt.wantValue {
+				t.Errorf("clause = {%q %q %q}, want {%q %q %q}",
+					c.Column, c.Op, c.Value, tt.wantColumn, tt.wantOp, tt.wantValue)
+			}
+			if !slices.Equal(c.Values, tt.wantValues) {
+				t.Errorf("Values = %q, want %q", c.Values, tt.wantValues)
+			}
+			if c.Pattern != tt.wantPattern {
+				t.Errorf("Pattern = %q, want %q", c.Pattern, tt.wantPattern)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_ANDsEveryClause(t *testing.T) {
+	got, err := ParseRowClauses(
+		[]string{"Status:eq:open", "note:contains:ada"}, testColumns(), "Sheet1")
+	if err != nil {
+		t.Fatalf("ParseRowClauses() error = %v, want nil", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ParseRowClauses() = %d clauses, want 2", len(got))
+	}
+	if got[0].Op != RowOpEq || got[1].Op != RowOpContains {
+		t.Errorf("clause order = %q,%q, want eq,contains", got[0].Op, got[1].Op)
+	}
+}
+
+func TestParseRowClauses_NoClausesIsNotAnError(t *testing.T) {
+	got, err := ParseRowClauses(nil, testColumns(), "Sheet1")
+	if err != nil || got != nil {
+		t.Fatalf("ParseRowClauses(nil) = %v, %v, want nil, nil", got, err)
+	}
+}
+
+// The projection keys its rows with the tab's own header spelling, so the clause
+// must carry that spelling and not the caller's, or the bound field name misses.
+func TestParseRowClauses_CarriesTheKnownColumnSpelling(t *testing.T) {
+	got, err := ParseRowClauses([]string{"status:eq:open"}, testColumns(), "Sheet1")
+	if err != nil {
+		t.Fatalf("ParseRowClauses() error = %v, want nil", err)
+	}
+	if got[0].Column != "Status" {
+		t.Errorf("Column = %q, want %q", got[0].Column, "Status")
+	}
+}
+
+func TestParseRowClauses_SplitsOnTheFirstTwoColonsOnly(t *testing.T) {
+	const want = "2026-09-11T00:00:00Z"
+	got, err := ParseRowClauses([]string{"created_at:gte:" + want}, testColumns(), "Sheet1")
+	if err != nil {
+		t.Fatalf("ParseRowClauses() error = %v, want nil", err)
+	}
+	if got[0].Column != "created_at" || got[0].Op != RowOpGte || got[0].Value != want {
+		t.Errorf("clause = {%q %q %q}, want {created_at gte %q}",
+			got[0].Column, got[0].Op, got[0].Value, want)
+	}
+}
+
+func TestParseRowClauses_RefusesMalformedClauses(t *testing.T) {
+	tests := []struct {
+		clause     string
+		wantReason string
+	}{
+		{clause: "", wantReason: "expected column:operator"},
+		{clause: "note", wantReason: "expected column:operator"},
+		{clause: "note:", wantReason: "no operator"},
+		{clause: "note::open", wantReason: "no operator"},
+		{clause: ":eq:open", wantReason: "no column"},
+		{clause: "   :eq:open", wantReason: "no column"},
+		{clause: "::", wantReason: "no column"},
+		{clause: "note:nope:open", wantReason: `unknown operator "nope"`},
+		{clause: "note:EQ:open", wantReason: `unknown operator "EQ"`},
+		{clause: "note:eq ", wantReason: `unknown operator "eq "`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.clause, func(t *testing.T) {
+			_, err := ParseRowClauses([]string{tt.clause}, testColumns(), "Sheet1")
+			if !IsInvalidClauseError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want InvalidClauseError", tt.clause, err)
+			}
+			clauseErr, _ := errors.AsType[*InvalidClauseError](err)
+			if !strings.Contains(clauseErr.Reason, tt.wantReason) {
+				t.Errorf("Reason = %q, want it to carry %q", clauseErr.Reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_RefusesAMissingValue(t *testing.T) {
+	for _, clause := range []string{
+		"note:eq", "note:eq:", "note:ne:", "note:gt:", "note:gte:", "note:lt:", "note:lte:",
+		"note:contains:", "note:starts:", "note:in:", "note:in",
+	} {
+		t.Run(clause, func(t *testing.T) {
+			_, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+			if !IsInvalidClauseError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want InvalidClauseError", clause, err)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_RefusesAValueOnEmptyAndPresent(t *testing.T) {
+	for _, clause := range []string{"note:empty:x", "note:present:x", "note:empty:", "note:present:"} {
+		t.Run(clause, func(t *testing.T) {
+			_, err := ParseRowClauses([]string{clause}, testColumns(), "Sheet1")
+			if !IsInvalidClauseError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want InvalidClauseError", clause, err)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_RefusesAnUnknownColumn(t *testing.T) {
+	_, err := ParseRowClauses([]string{"statuz:eq:open"}, testColumns(), "Sheet1")
+	if !IsUnknownColumnError(err) {
+		t.Fatalf("ParseRowClauses() error = %v, want UnknownColumnError", err)
+	}
+}
+
+// capabilities advertises deleted_at whenever soft delete is on, but projectRows
+// strips it from data, so a caller that believes capabilities must be refused.
+func TestParseRowClauses_RefusesDeletedAtInEitherSpelling(t *testing.T) {
+	tests := []struct {
+		name    string
+		columns []string
+		clause  string
+	}{
+		{name: "snake case header", columns: []string{"id", "deleted_at"}, clause: "deleted_at:present"},
+		{name: "spaced header", columns: []string{"id", "Deleted At"}, clause: "Deleted At:present"},
+		{name: "mixed case request", columns: []string{"id", "Deleted_At"}, clause: "deleted_at:eq:x"},
+		{name: "hyphenated header", columns: []string{"id", "deleted-at"}, clause: "deleted-at:empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseRowClauses([]string{tt.clause}, tt.columns, "Sheet1")
+			if !IsUnqueryableColumnError(err) {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want UnqueryableColumnError", tt.clause, err)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_RefusesADuplicateDeletedAtColumn(t *testing.T) {
+	_, err := ParseRowClauses([]string{"id:eq:a"}, []string{"id", "deleted_at", "Deleted At"}, "Sheet1")
+	if !IsDuplicateColumnError(err) {
+		t.Fatalf("ParseRowClauses() error = %v, want DuplicateColumnError", err)
+	}
+}
+
+// IN () is a syntax error on Postgres and matches nothing on SQLite, so an empty
+// list can never reach a driver.
+func TestParseRowClauses_InList(t *testing.T) {
+	tests := []struct {
+		name   string
+		clause string
+		want   []string
+	}{
+		{name: "one value", clause: "note:in:a", want: []string{"a"}},
+		{name: "three values", clause: "note:in:a,b,c", want: []string{"a", "b", "c"}},
+		{name: "trailing comma", clause: "note:in:a,", want: []string{"a"}},
+		{name: "interior blank", clause: "note:in:a,,b", want: []string{"a", "b"}},
+		{name: "spaces are values", clause: "note:in:a, b", want: []string{"a", " b"}},
+		{name: "colons survive", clause: "note:in:a:b,c", want: []string{"a:b", "c"}},
+		{name: "empty list", clause: "note:in:,"},
+		{name: "all blank", clause: "note:in:,,,"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRowClauses([]string{tt.clause}, testColumns(), "Sheet1")
+			if tt.want == nil {
+				if !IsInvalidClauseError(err) {
+					t.Fatalf("ParseRowClauses(%q) error = %v, want InvalidClauseError", tt.clause, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want nil", tt.clause, err)
+			}
+			if !slices.Equal(got[0].Values, tt.want) {
+				t.Errorf("Values = %q, want %q", got[0].Values, tt.want)
+			}
+		})
+	}
+}
+
+// A value must reach LIKE as literal text: an unescaped % is a wildcard and an
+// unescaped _ matches any single character.
+func TestParseRowClauses_ContainsTreatsMetacharactersLiterally(t *testing.T) {
+	esc := RowLikeEscape
+	tests := []struct {
+		name   string
+		clause string
+		want   string
+	}{
+		{name: "percent", clause: "note:contains:100%", want: "%100" + esc + "%%"},
+		{name: "underscore", clause: "note:contains:_", want: "%" + esc + "_%"},
+		{name: "escape character", clause: "note:contains:" + esc, want: "%" + esc + esc + "%"},
+		{
+			name: "escaped percent", clause: "note:contains:" + esc + "%",
+			want: "%" + esc + esc + esc + "%%",
+		},
+		{name: "starts percent", clause: "note:starts:100%", want: "100" + esc + "%%"},
+		{name: "starts underscore", clause: "note:starts:_x", want: esc + "_x%"},
+		{name: "plain", clause: "note:contains:ada", want: "%ada%"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRowClauses([]string{tt.clause}, testColumns(), "Sheet1")
+			if err != nil {
+				t.Fatalf("ParseRowClauses(%q) error = %v, want nil", tt.clause, err)
+			}
+			if got[0].Pattern != tt.want {
+				t.Errorf("Pattern = %q, want %q", got[0].Pattern, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRowClauses_LeavesOtherOperatorValuesVerbatim(t *testing.T) {
+	got, err := ParseRowClauses([]string{"note:eq:100%_" + RowLikeEscape}, testColumns(), "Sheet1")
+	if err != nil {
+		t.Fatalf("ParseRowClauses() error = %v, want nil", err)
+	}
+	if got[0].Value != "100%_"+RowLikeEscape {
+		t.Errorf("Value = %q, want it verbatim", got[0].Value)
+	}
+	if got[0].Pattern != "" {
+		t.Errorf("Pattern = %q, want empty for eq", got[0].Pattern)
+	}
+}
+
+func TestParseRowWindow_Limit(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit string
+		want  int
+	}{
+		{name: "absent defaults to the cap", limit: "", want: 1000},
+		{name: "blank defaults to the cap", limit: "   ", want: 1000},
+		{name: "one", limit: "1", want: 1},
+		{name: "below the cap", limit: "999", want: 999},
+		{name: "at the cap", limit: "1000", want: 1000},
+		{name: "padded", limit: " 10 ", want: 10},
+		{name: "over the cap", limit: "1001"},
+		{name: "far over the cap", limit: "1000000"},
+		{name: "zero", limit: "0"},
+		{name: "negative", limit: "-1"},
+		{name: "not a number", limit: "abc"},
+		{name: "fractional", limit: "3.5"},
+		{name: "hex", limit: "0x10"},
+		{name: "overflows int64", limit: "99999999999999999999999"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRowWindow(tt.limit, "", 1000)
+			if tt.want == 0 {
+				if !IsInvalidLimitError(err) {
+					t.Fatalf("ParseRowWindow(%q) error = %v, want InvalidLimitError", tt.limit, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRowWindow(%q) error = %v, want nil", tt.limit, err)
+			}
+			if got.Limit != tt.want {
+				t.Errorf("Limit = %d, want %d", got.Limit, tt.want)
+			}
+			if got.Cursor != nil {
+				t.Errorf("Cursor = %+v, want nil", got.Cursor)
+			}
+		})
+	}
+}
+
+func TestParseRowWindow_LimitRefusalNamesTheCap(t *testing.T) {
+	_, err := ParseRowWindow("5000", "", 1000)
+	if !IsInvalidLimitError(err) {
+		t.Fatalf("ParseRowWindow() error = %v, want InvalidLimitError", err)
+	}
+	if !strings.Contains(err.Error(), "1000") {
+		t.Errorf("Error() = %q, want it to name the 1000 row cap", err.Error())
+	}
+	limitErr, ok := errors.AsType[*InvalidLimitError](err)
+	if !ok {
+		t.Fatal("error does not carry *InvalidLimitError")
+	}
+	if limitErr.MaxRows != 1000 {
+		t.Errorf("MaxRows = %d, want 1000", limitErr.MaxRows)
+	}
+	if msg := limitErr.ToAppError().Message(); !strings.Contains(msg, "1000") {
+		t.Errorf("AppError message = %q, want it to name the cap", msg)
+	}
+}
+
+// A filtered read can never be unbounded, so an unset cap falls back rather than
+// meaning "no limit" the way sheets.maxPayloadBytes does.
+func TestParseRowWindow_UnsetCapFallsBackToTheDefault(t *testing.T) {
+	for _, maxRows := range []int{0, -1} {
+		got, err := ParseRowWindow("", "", maxRows)
+		if err != nil {
+			t.Fatalf("ParseRowWindow(maxRows=%d) error = %v, want nil", maxRows, err)
+		}
+		if got.Limit != DefaultMaxQueryRows {
+			t.Errorf("Limit = %d, want %d", got.Limit, DefaultMaxQueryRows)
+		}
+		if _, err := ParseRowWindow("1001", "", maxRows); !IsInvalidLimitError(err) {
+			t.Errorf("ParseRowWindow(1001, maxRows=%d) error = %v, want InvalidLimitError", maxRows, err)
+		}
+	}
+}
+
+func TestParseRowWindow_CarriesTheDecodedCursor(t *testing.T) {
+	raw, err := EncodeRowCursor(RowCursor{Digest: "abc", RowIndex: 142})
+	if err != nil {
+		t.Fatalf("EncodeRowCursor() error = %v, want nil", err)
+	}
+	got, err := ParseRowWindow("10", raw, 1000)
+	if err != nil {
+		t.Fatalf("ParseRowWindow() error = %v, want nil", err)
+	}
+	if got.Cursor == nil {
+		t.Fatal("Cursor = nil, want the decoded cursor")
+	}
+	if got.Cursor.Digest != "abc" || got.Cursor.RowIndex != 142 {
+		t.Errorf("Cursor = %+v, want {abc 142}", *got.Cursor)
+	}
+}
+
+func TestParseRowWindow_RefusesAMalformedCursor(t *testing.T) {
+	if _, err := ParseRowWindow("", "!!!not base64!!!", 1000); !IsInvalidCursorError(err) {
+		t.Fatalf("ParseRowWindow() error = %v, want InvalidCursorError", err)
+	}
+}
+
+func TestRowCursor_RoundTrips(t *testing.T) {
+	for _, want := range []RowCursor{
+		{Digest: "abc", RowIndex: 0},
+		{Digest: "abc", RowIndex: 142},
+		{Digest: strings.Repeat("f", 64), RowIndex: 999999},
+	} {
+		raw, err := EncodeRowCursor(want)
+		if err != nil {
+			t.Fatalf("EncodeRowCursor(%+v) error = %v, want nil", want, err)
+		}
+		if strings.ContainsAny(raw, "+/=") {
+			t.Errorf("EncodeRowCursor() = %q, want a raw URL-safe encoding", raw)
+		}
+		got, err := DecodeRowCursor(raw)
+		if err != nil {
+			t.Fatalf("DecodeRowCursor(%q) error = %v, want nil", raw, err)
+		}
+		if got != want {
+			t.Errorf("DecodeRowCursor() = %+v, want %+v", got, want)
+		}
+	}
+}
+
+// row_index 0 is the first data row, so a missing "r" must not decode as it.
+func TestDecodeRowCursor_Malformed(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		raw  string
+	}{
+		{name: "empty", raw: ""},
+		{name: "not base64", raw: "!!!"},
+		{name: "padded base64", raw: base64.StdEncoding.EncodeToString([]byte(`{"v":1,"d":"ab","r":1}`))},
+		{name: "not json", body: "not json"},
+		{name: "json array", body: `[1,2,3]`},
+		{name: "json null", body: `null`},
+		{name: "version zero", body: `{"v":0,"d":"a","r":1}`},
+		{name: "version two", body: `{"v":2,"d":"a","r":1}`},
+		{name: "version missing", body: `{"d":"a","r":1}`},
+		{name: "digest missing", body: `{"v":1,"r":1}`},
+		{name: "digest empty", body: `{"v":1,"d":"","r":1}`},
+		{name: "row index missing", body: `{"v":1,"d":"a"}`},
+		{name: "row index negative", body: `{"v":1,"d":"a","r":-1}`},
+		{name: "row index not a number", body: `{"v":1,"d":"a","r":"1"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := tt.raw
+			if tt.body != "" {
+				raw = base64.RawURLEncoding.EncodeToString([]byte(tt.body))
+			}
+			got, err := DecodeRowCursor(raw)
+			if !IsInvalidCursorError(err) {
+				t.Fatalf("DecodeRowCursor(%q) = %+v, %v, want InvalidCursorError", raw, got, err)
+			}
+		})
+	}
+}
+
+// The digest match is the route's 409, not the codec's business, so decoding
+// must not care which digest the cursor names.
+func TestDecodeRowCursor_DoesNotJudgeTheDigest(t *testing.T) {
+	raw, err := EncodeRowCursor(RowCursor{Digest: "stale", RowIndex: 7})
+	if err != nil {
+		t.Fatalf("EncodeRowCursor() error = %v, want nil", err)
+	}
+	got, err := DecodeRowCursor(raw)
+	if err != nil {
+		t.Fatalf("DecodeRowCursor() error = %v, want nil", err)
+	}
+	if got.Digest != "stale" {
+		t.Errorf("Digest = %q, want %q", got.Digest, "stale")
+	}
+}
+
+func TestEncodeRowCursor_RefusesAnUnusableCursor(t *testing.T) {
+	for _, c := range []RowCursor{
+		{Digest: "", RowIndex: 1},
+		{Digest: "abc", RowIndex: -1},
+	} {
+		raw, err := EncodeRowCursor(c)
+		if err == nil {
+			t.Fatalf("EncodeRowCursor(%+v) = %q, want an error", c, raw)
+		}
+		if IsInvalidCursorError(err) {
+			t.Errorf("EncodeRowCursor(%+v) error = %v, want an internal failure, not a client refusal", c, err)
+		}
+	}
+}

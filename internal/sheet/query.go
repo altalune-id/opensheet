@@ -1,0 +1,240 @@
+package sheet
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// RowOp is one text comparison a ?where= clause can name.
+type RowOp string
+
+// The text operators a filtered read understands.
+const (
+	RowOpEq       RowOp = "eq"
+	RowOpNe       RowOp = "ne"
+	RowOpGt       RowOp = "gt"
+	RowOpGte      RowOp = "gte"
+	RowOpLt       RowOp = "lt"
+	RowOpLte      RowOp = "lte"
+	RowOpContains RowOp = "contains"
+	RowOpStarts   RowOp = "starts"
+	RowOpIn       RowOp = "in"
+	// NOTE: RowOpEmpty means `cell IS NULL OR cell = ''` and RowOpPresent is its negation; the NULL arm keeps ne the complement of eq for a row missing the key.
+	RowOpEmpty   RowOp = "empty"
+	RowOpPresent RowOp = "present"
+)
+
+// RowLikeEscape is the escape character a Pattern carries; SQLite has no default one, so a driver must bind it into an explicit ESCAPE clause.
+const RowLikeEscape = `\`
+
+// DefaultMaxQueryRows bounds a filtered read when sheets.maxQueryRows is unset.
+const DefaultMaxQueryRows = 1000
+
+const rowCursorVersion = 1
+
+// RowClause is one validated predicate over a column the projection stores.
+type RowClause struct {
+	Column  string
+	Op      RowOp
+	Value   string
+	Values  []string
+	Pattern string
+}
+
+// RowCursor is the keyset position an opaque ?cursor= carries.
+type RowCursor struct {
+	Digest   string
+	RowIndex int
+}
+
+// RowWindow is the validated page a filtered read returns.
+type RowWindow struct {
+	Limit  int
+	Cursor *RowCursor
+}
+
+// RowQuery is a validated row filter and the window it pages with. NOTE: the window is parsed before the freshness gate and the clauses after it, because the column list a clause validates against does not exist until the projection has been written.
+type RowQuery struct {
+	Clauses []RowClause
+	Window  RowWindow
+}
+
+type rowCursorEnvelope struct {
+	Version  int    `json:"v"`
+	Digest   string `json:"d"`
+	RowIndex *int   `json:"r"`
+}
+
+// ParseRowWindow validates ?limit= and ?cursor= without reading the projection.
+func ParseRowWindow(limit, cursor string, maxRows int) (RowWindow, error) {
+	capRows := maxRows
+	if capRows <= 0 {
+		capRows = DefaultMaxQueryRows
+	}
+	window := RowWindow{Limit: capRows}
+	if asked := strings.TrimSpace(limit); asked != "" {
+		n, err := strconv.Atoi(asked)
+		if err != nil || n <= 0 || n > capRows {
+			return RowWindow{}, &InvalidLimitError{Limit: limit, MaxRows: capRows}
+		}
+		window.Limit = n
+	}
+	if strings.TrimSpace(cursor) == "" {
+		return window, nil
+	}
+	decoded, err := DecodeRowCursor(cursor)
+	if err != nil {
+		return RowWindow{}, err
+	}
+	window.Cursor = &decoded
+	return window, nil
+}
+
+// ParseRowClauses validates repeated ?where= clauses against the columns the tab's projection stores.
+func ParseRowClauses(where, columns []string, tab string) ([]RowClause, error) {
+	if len(where) == 0 {
+		return nil, nil
+	}
+	del, err := deletedAtColumnOf(columns, tab)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RowClause, 0, len(where))
+	for _, raw := range where {
+		clause, cErr := parseRowClause(raw, columns, tab, del)
+		if cErr != nil {
+			return nil, cErr
+		}
+		out = append(out, clause)
+	}
+	return out, nil
+}
+
+func parseRowClause(raw string, columns []string, tab string, del int) (RowClause, error) {
+	parts := strings.SplitN(raw, ":", 3)
+	if len(parts) < 2 {
+		return RowClause{}, &InvalidClauseError{Clause: raw, Reason: "expected column:operator[:value]"}
+	}
+	if strings.TrimSpace(parts[0]) == "" {
+		return RowClause{}, &InvalidClauseError{Clause: raw, Reason: "no column"}
+	}
+	if parts[1] == "" {
+		return RowClause{}, &InvalidClauseError{Clause: raw, Reason: "no operator"}
+	}
+	op := RowOp(parts[1])
+	takesValue, known := rowOpTakesValue(op)
+	if !known {
+		return RowClause{}, &InvalidClauseError{
+			Clause: raw, Reason: fmt.Sprintf("unknown operator %q", parts[1]),
+		}
+	}
+	if !takesValue && len(parts) == 3 {
+		return RowClause{}, &InvalidClauseError{
+			Clause: raw, Reason: fmt.Sprintf("operator %q takes no value", op),
+		}
+	}
+	value := ""
+	if len(parts) == 3 {
+		value = parts[2]
+	}
+	if takesValue && value == "" {
+		return RowClause{}, &InvalidClauseError{
+			Clause: raw, Reason: fmt.Sprintf("operator %q needs a value", op),
+		}
+	}
+	col, err := columnOf(columns, parts[0], tab)
+	if err != nil {
+		return RowClause{}, err
+	}
+	if col == del {
+		return RowClause{}, &UnqueryableColumnError{Column: parts[0], Tab: tab}
+	}
+	clause := RowClause{Column: columns[col], Op: op, Value: value}
+	switch op {
+	case RowOpIn:
+		clause.Values = splitInList(value)
+		if len(clause.Values) == 0 {
+			return RowClause{}, &InvalidClauseError{
+				Clause: raw, Reason: "operator \"in\" needs at least one value",
+			}
+		}
+	case RowOpContains:
+		clause.Pattern = "%" + escapeLikeValue(value) + "%"
+	case RowOpStarts:
+		clause.Pattern = escapeLikeValue(value) + "%"
+	default:
+	}
+	return clause, nil
+}
+
+func rowOpTakesValue(op RowOp) (takesValue, known bool) {
+	switch op {
+	case RowOpEmpty, RowOpPresent:
+		return false, true
+	case RowOpEq, RowOpNe, RowOpGt, RowOpGte, RowOpLt, RowOpLte, RowOpContains, RowOpStarts, RowOpIn:
+		return true, true
+	default:
+		return false, false
+	}
+}
+
+// NOTE: a blank item is dropped rather than bound, so a trailing comma is harmless and IN () can never reach a driver — it is a syntax error on Postgres and matches nothing on SQLite.
+func splitInList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func escapeLikeValue(value string) string {
+	escaped := strings.ReplaceAll(value, RowLikeEscape, RowLikeEscape+RowLikeEscape)
+	escaped = strings.ReplaceAll(escaped, "%", RowLikeEscape+"%")
+	return strings.ReplaceAll(escaped, "_", RowLikeEscape+"_")
+}
+
+// EncodeRowCursor renders the opaque keyset position a next-page link carries.
+func EncodeRowCursor(c RowCursor) (string, error) {
+	if c.Digest == "" || c.RowIndex < 0 {
+		return "", fmt.Errorf("sheet.cursor: encode digest=%q row_index=%d", c.Digest, c.RowIndex)
+	}
+	rowIndex := c.RowIndex
+	raw, err := json.Marshal(rowCursorEnvelope{
+		Version: rowCursorVersion, Digest: c.Digest, RowIndex: &rowIndex,
+	})
+	if err != nil {
+		return "", fmt.Errorf("sheet.cursor: encode: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// DecodeRowCursor reads an opaque cursor. NOTE: whether the digest still matches is the route's decision, not the codec's.
+func DecodeRowCursor(raw string) (RowCursor, error) {
+	body, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return RowCursor{}, &InvalidCursorError{Reason: "not base64"}
+	}
+	var env rowCursorEnvelope
+	if jErr := json.Unmarshal(body, &env); jErr != nil {
+		return RowCursor{}, &InvalidCursorError{Reason: "not a cursor"}
+	}
+	if env.Version != rowCursorVersion {
+		return RowCursor{}, &InvalidCursorError{
+			Reason: fmt.Sprintf("unsupported version %d", env.Version),
+		}
+	}
+	if env.Digest == "" {
+		return RowCursor{}, &InvalidCursorError{Reason: "no content digest"}
+	}
+	if env.RowIndex == nil || *env.RowIndex < 0 {
+		return RowCursor{}, &InvalidCursorError{Reason: "no row index"}
+	}
+	return RowCursor{Digest: env.Digest, RowIndex: *env.RowIndex}, nil
+}

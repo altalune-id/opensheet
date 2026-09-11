@@ -140,6 +140,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("sheets.publicEnabled", false)
 	v.SetDefault("sheets.maxPayloadBytes", int64(8388608))
+	v.SetDefault("sheets.maxQueryRows", 1000)
 
 	v.SetDefault("google.timeout", "15s")
 

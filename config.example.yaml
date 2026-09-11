@@ -216,6 +216,8 @@ session:
 sheets:
   # env: OPENSHEET_SHEETS_MAX_PAYLOAD_BYTES
   maxPayloadBytes: 8388608
+  # env: OPENSHEET_SHEETS_MAX_QUERY_ROWS
+  maxQueryRows: 1000
   # [bootstrap] env: OPENSHEET_SHEETS_PUBLIC_ENABLED
   publicEnabled: false
 

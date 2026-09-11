@@ -160,6 +160,10 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT028` | `apperror.CodeSheetBatchTooLarge`         | Sheet Batch Too Large         |
 | `SHT029` | `apperror.CodeSheetSoftDeleteUnsupported` | Sheet Soft Delete Unsupported |
 | `SHT030` | `apperror.CodeSheetPreconditionFailed`    | Sheet Precondition Failed     |
+| `SHT031` | `apperror.CodeSheetInvalidClause`         | Sheet Invalid Filter Clause   |
+| `SHT032` | `apperror.CodeSheetUnqueryableColumn`     | Sheet Unqueryable Column      |
+| `SHT033` | `apperror.CodeSheetInvalidLimit`          | Sheet Invalid Row Limit       |
+| `SHT034` | `apperror.CodeSheetInvalidCursor`         | Sheet Invalid Page Cursor     |
 
 ## KEY — API keys
 

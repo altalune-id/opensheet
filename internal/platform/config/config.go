@@ -107,6 +107,7 @@ func (c CacheConfig) Resolve(dbDriver db.Driver) CacheDriver {
 type SheetsConfig struct {
 	PublicEnabled   bool  `yaml:"publicEnabled"   mapstructure:"publicEnabled"   awareness:"bootstrap"`
 	MaxPayloadBytes int64 `yaml:"maxPayloadBytes" mapstructure:"maxPayloadBytes" awareness:"-"         validate:"gte=0"`
+	MaxQueryRows    int   `yaml:"maxQueryRows"    mapstructure:"maxQueryRows"    awareness:"-"         validate:"gte=0"`
 }
 
 // ComplianceConfig gates the T&C acceptance flow. When RequireAcceptance is true, signed-in users with no TermsAcceptedAt are redirected to /welcome until they check the box.

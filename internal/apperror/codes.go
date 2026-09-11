@@ -103,6 +103,10 @@ const (
 	CodeSheetBatchTooLarge         = "SHT028"
 	CodeSheetSoftDeleteUnsupported = "SHT029"
 	CodeSheetPreconditionFailed    = "SHT030"
+	CodeSheetInvalidClause         = "SHT031"
+	CodeSheetUnqueryableColumn     = "SHT032"
+	CodeSheetInvalidLimit          = "SHT033"
+	CodeSheetInvalidCursor         = "SHT034"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

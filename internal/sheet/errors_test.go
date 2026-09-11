@@ -213,3 +213,70 @@ func TestSoftDeleteUnsupportedError_MapsTo422AndNamesTheRemedy(t *testing.T) {
 		t.Errorf("Message() = %q, want it to name the column a client must add", got)
 	}
 }
+
+func TestInvalidClauseError(t *testing.T) {
+	e := &InvalidClauseError{Clause: "note:nope:x", Reason: `unknown operator "nope"`}
+	msg := e.Error()
+	if !strings.Contains(msg, "note:nope:x") || !strings.Contains(msg, "nope") {
+		t.Errorf("Error() = %q, want it to carry the clause and the reason", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetInvalidClause)
+	if !IsInvalidClauseError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsInvalidClauseError does not see through a wrap")
+	}
+	if got := (&InvalidClauseError{}).Error(); !strings.Contains(got, "invalid") {
+		t.Errorf("Error() with no reason = %q, want a fallback reason", got)
+	}
+}
+
+func TestUnqueryableColumnError(t *testing.T) {
+	e := &UnqueryableColumnError{Column: "deleted_at", Tab: "Sheet1"}
+	msg := e.Error()
+	if !strings.Contains(msg, "deleted_at") || !strings.Contains(msg, "Sheet1") {
+		t.Errorf("Error() = %q, want it to carry the column and the tab", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetUnqueryableColumn)
+	if !IsUnqueryableColumnError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsUnqueryableColumnError does not see through a wrap")
+	}
+}
+
+func TestInvalidLimitError(t *testing.T) {
+	e := &InvalidLimitError{Limit: "5000", MaxRows: 1000}
+	msg := e.Error()
+	if !strings.Contains(msg, "5000") || !strings.Contains(msg, "1000") {
+		t.Errorf("Error() = %q, want it to carry the limit and the cap", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetInvalidLimit)
+	if !IsInvalidLimitError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsInvalidLimitError does not see through a wrap")
+	}
+}
+
+func TestInvalidCursorError(t *testing.T) {
+	e := &InvalidCursorError{Reason: "unsupported version 2"}
+	if msg := e.Error(); !strings.Contains(msg, "unsupported version 2") {
+		t.Errorf("Error() = %q, want it to carry the reason", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetInvalidCursor)
+	if !IsInvalidCursorError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsInvalidCursorError does not see through a wrap")
+	}
+	if got := (&InvalidCursorError{}).Error(); !strings.Contains(got, "invalid") {
+		t.Errorf("Error() with no reason = %q, want a fallback reason", got)
+	}
+}
+
+func TestNewFilterErrorsMapToHTTP400(t *testing.T) {
+	for _, e := range []interface{ ToAppError() *apperror.AppError }{
+		&InvalidClauseError{Clause: "x", Reason: "y"},
+		&UnqueryableColumnError{Column: "deleted_at", Tab: "Sheet1"},
+		&InvalidLimitError{Limit: "0", MaxRows: 1000},
+		&InvalidCursorError{Reason: "not base64"},
+	} {
+		ae := e.ToAppError()
+		if got := ae.HTTPStatus(); got != http.StatusBadRequest {
+			t.Errorf("%T HTTPStatus = %d, want %d", e, got, http.StatusBadRequest)
+		}
+	}
+}
