@@ -164,6 +164,8 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT032` | `apperror.CodeSheetUnqueryableColumn`     | Sheet Unqueryable Column      |
 | `SHT033` | `apperror.CodeSheetInvalidLimit`          | Sheet Invalid Row Limit       |
 | `SHT034` | `apperror.CodeSheetInvalidCursor`         | Sheet Invalid Page Cursor     |
+| `SHT035` | `apperror.CodeSheetUnknownQueryParam`     | Sheet Unknown Query Parameter |
+| `SHT036` | `apperror.CodeSheetStaleCursor`           | Sheet Stale Page Cursor       |
 
 ## KEY — API keys
 

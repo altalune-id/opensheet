@@ -2,6 +2,9 @@ package sheet
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/opensheet/gworkspace/gsheet"
+	"altalune.id/opensheet/internal/gwerr"
 )
 
 // Row is one row of a published tab, carrying the cache provenance and the tag a conditional read revalidates against.
@@ -522,4 +526,200 @@ func refuseTakenID(rows [][]string, idCol int, id string) error {
 		return nil
 	}
 	return &DuplicateIDError{ID: id, Count: count}
+}
+
+// RowFilter is the filtered read one request asks for, before any of it is validated.
+type RowFilter struct {
+	Where       []string
+	Limit       string
+	Cursor      string
+	IfNoneMatch string
+}
+
+// FilteredRows is one page of a filtered read, the tag it revalidates against, and the cursor its next page needs.
+type FilteredRows struct {
+	// SECURITY: Payload is the exact bytes ETag hashes. Read it, never mutate it.
+	Payload     []byte
+	ETag        string
+	NextCursor  string
+	NotModified bool
+	FetchedAt   time.Time
+	Cached      bool
+	Stale       bool
+}
+
+// QueryRows returns one page of the live rows of sh's tab matching f, from the projection, refreshing it first when it has gone stale.
+func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (FilteredRows, error) {
+	ctx, span := tracer.Start(ctx, "sheet.QueryRows",
+		trace.WithAttributes(
+			attribute.String("sheet.id", sh.ID.String()),
+			attribute.String("sheet.slug", sh.Slug),
+		))
+	defer span.End()
+
+	// SECURITY: the capability is re-checked on every read, exactly as the whole-tab read does.
+	if sh.Visibility == VisibilityPublic && !w.caps.PublicSheetsEnabled() {
+		return FilteredRows{}, recordSpanError(span, &PublicDisabledError{Slug: sh.Slug})
+	}
+	// NOTE: the window is parsed before the freshness gate so a malformed limit or cursor costs no Google call, and the clauses after it because the column list they validate against does not exist until the projection has been written.
+	window, err := ParseRowWindow(f.Limit, f.Cursor, w.maxQueryRows)
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span, err)
+	}
+	age, err := w.freshen(ctx, sh)
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span, err)
+	}
+
+	stats, err := w.rows.Stats(ctx, sh.ID, strings.TrimSpace(sh.Tab))
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span, w.passthrough(ctx, "sheet.QueryRows: table stats", err, sh))
+	}
+	key := SnapshotKey{SheetID: sh.ID, Tab: stats.Tab}
+	span.SetAttributes(attribute.String("sheet.tab", key.Tab))
+
+	// NOTE: a tab with no live row names no column and can match no clause, so the clauses are left unvalidated rather than refused one by one — the empty page is the answer a wholly tombstoned tab must give.
+	var clauses []RowClause
+	if len(stats.Columns) > 0 {
+		clauses, err = ParseRowClauses(f.Where, stats.Columns, key.Tab)
+		if err != nil {
+			return FilteredRows{}, recordSpanError(span, err)
+		}
+	}
+
+	// NOTE: read after the refresh, never off sh, whose generation and digest are captured when the sheet is resolved and never updated in memory.
+	state, err := w.rows.StateOf(ctx, sh.ID)
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span, w.passthrough(ctx, "sheet.QueryRows: sheet state", err, sh))
+	}
+	if !state.Contract.OK {
+		return FilteredRows{}, recordSpanError(span,
+			&ContractViolationError{Slug: sh.Slug, Reason: state.Contract.Reason})
+	}
+	if window.Cursor != nil && window.Cursor.Digest != state.Digest {
+		return FilteredRows{}, recordSpanError(span, &StaleCursorError{Slug: sh.Slug})
+	}
+
+	q := RowQuery{Clauses: clauses, Window: window}
+	out := FilteredRows{
+		ETag:      rowQueryETag(state.Generation, q),
+		FetchedAt: age.fetchedAt,
+		Cached:    age.cached,
+		Stale:     age.stale,
+	}
+	// NOTE: evaluated after the freshness gate, because the tag hashes a generation a refresh may have moved.
+	if MatchesETag(f.IfNoneMatch, out.ETag) {
+		out.NotModified = true
+		return out, nil
+	}
+
+	page, err := w.rows.Query(ctx, key, q)
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span,
+			w.passthrough(ctx, "sheet.QueryRows: query the projection", err, sh))
+	}
+	if out.Payload, err = json.Marshal(liveValues(page.Rows)); err != nil {
+		return FilteredRows{}, recordSpanError(span,
+			w.unexpected(ctx, "sheet.QueryRows: serialize", err, "sheet_id", sh.ID, "tab", key.Tab))
+	}
+	if !page.More {
+		return out, nil
+	}
+	next, err := EncodeRowCursor(RowCursor{
+		Digest: state.Digest, RowIndex: page.Rows[len(page.Rows)-1].RowIndex,
+	})
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span,
+			w.unexpected(ctx, "sheet.QueryRows: encode the next cursor", err, "sheet_id", sh.ID, "tab", key.Tab))
+	}
+	out.NextCursor = next
+	return out, nil
+}
+
+type projectionAge struct {
+	fetchedAt time.Time
+	cached    bool
+	stale     bool
+}
+
+// NOTE: the gate is validated_at, never the snapshot — a write purges the snapshot and a tab over maxPayloadBytes never had one, so gating on it would mean one full Google fetch per page of a walk.
+func (w *ReadWorkflow) freshen(ctx context.Context, sh *Sheet) (projectionAge, error) {
+	age := projectionAge{cached: true}
+	if sh.ValidatedAt != nil {
+		age.fetchedAt = *sh.ValidatedAt
+	}
+	if !w.projectionExpired(sh) {
+		return age, nil
+	}
+	err := w.project(ctx, sh)
+	if err == nil {
+		return projectionAge{fetchedAt: time.Now().UTC()}, nil
+	}
+	// NOTE: the projection outlives a Google outage, so a filtered read answers from it rather than failing — but only once some refresh has computed a digest, since a cursor cannot be issued without one.
+	if sh.ContentDigest == "" || !isGoogleFailure(err) {
+		return projectionAge{}, err
+	}
+	w.log.WarnContext(ctx, "sheet: querying a projection Google could not refresh",
+		"sheet_id", sh.ID, "err", err)
+	age.stale = true
+	return age, nil
+}
+
+func (w *ReadWorkflow) projectionExpired(sh *Sheet) bool {
+	// NOTE: a row write clears the digest, and a cursor can never be issued from a cleared one, so the next filtered read refreshes to recompute it.
+	if sh.ValidatedAt == nil || sh.ContentDigest == "" {
+		return true
+	}
+	return !sh.ValidatedAt.Add(ttlOf(sh, w.defaultTTL)).After(time.Now().UTC())
+}
+
+// NOTE: a distinct singleflight key, because fetch discards its type assertion — sharing the whole-tab key would hand a concurrent unfiltered caller a zero Rows, and so an empty body with no ETag.
+func (w *ReadWorkflow) project(ctx context.Context, sh *Sheet) error {
+	src, err := w.sources.SourceFor(ctx, sh.SpreadsheetID)
+	if err != nil {
+		return w.passthrough(ctx, "sheet.QueryRows: source", err, sh)
+	}
+	client, err := w.client(ctx, sh, src)
+	if err != nil {
+		return err
+	}
+	tab := strings.TrimSpace(sh.Tab)
+	if tab == "" {
+		tab, err = client.FirstTab(ctx, src.GoogleFileID)
+		if err != nil {
+			return w.passthrough(ctx, "sheet.QueryRows: first tab", gwerr.AppError(err), sh)
+		}
+	}
+	key := SnapshotKey{SheetID: sh.ID, Tab: tab}
+	_, err, _ = w.flight.Do("q\x00"+key.SheetID.String()+"\x00"+key.Tab, func() (any, error) {
+		_, rErr := w.reproject(ctx, client, sh, src, key, false)
+		return nil, rErr
+	})
+	if err != nil {
+		w.markReauth(ctx, sh, src, err)
+	}
+	return err
+}
+
+// NOTE: the generation is a content-change counter after a refresh that changed nothing stops bumping it, and unlike the snapshot tag it is present even for a tab over maxPayloadBytes, which has no snapshot at all.
+func rowQueryETag(generation int64, q RowQuery) string {
+	clauses := make([]string, 0, len(q.Clauses))
+	for _, c := range q.Clauses {
+		clauses = append(clauses, c.Column+":"+string(c.Op)+":"+c.Value)
+	}
+	slices.Sort(clauses)
+	var b strings.Builder
+	b.WriteString("q\x00")
+	b.WriteString(strconv.FormatInt(generation, 10))
+	b.WriteString("\x00")
+	b.WriteString(strconv.Itoa(q.Window.Limit))
+	if q.Window.Cursor != nil {
+		b.WriteString("\x00")
+		b.WriteString(strconv.Itoa(q.Window.Cursor.RowIndex))
+	}
+	for _, c := range clauses {
+		b.WriteString("\x00")
+		b.WriteString(c)
+	}
+	return etagOf([]byte(b.String()))
 }

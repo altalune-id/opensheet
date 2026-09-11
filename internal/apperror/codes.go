@@ -107,6 +107,8 @@ const (
 	CodeSheetUnqueryableColumn     = "SHT032"
 	CodeSheetInvalidLimit          = "SHT033"
 	CodeSheetInvalidCursor         = "SHT034"
+	CodeSheetUnknownQueryParam     = "SHT035"
+	CodeSheetStaleCursor           = "SHT036"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"

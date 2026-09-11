@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,17 +67,30 @@ type rowByIDCall struct {
 }
 
 type fakeReader struct {
-	rows     sheet.Rows
-	err      error
-	calls    []uuid.UUID
-	row      sheet.Row
-	rowErr   error
-	rowCalls []rowByIDCall
+	rows      sheet.Rows
+	err       error
+	calls     []uuid.UUID
+	row       sheet.Row
+	rowErr    error
+	rowCalls  []rowByIDCall
+	page      sheet.FilteredRows
+	pageErr   error
+	pageCalls []sheet.RowFilter
 }
 
 func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error) {
 	f.calls = append(f.calls, sh.ID)
 	return f.rows, f.err
+}
+
+func (f *fakeReader) QueryRows(
+	_ context.Context, _ *sheet.Sheet, filter sheet.RowFilter,
+) (sheet.FilteredRows, error) {
+	f.pageCalls = append(f.pageCalls, filter)
+	if f.pageErr != nil {
+		return sheet.FilteredRows{}, f.pageErr
+	}
+	return f.page, nil
 }
 
 func (f *fakeReader) RowByID(_ context.Context, sh *sheet.Sheet, id string) (sheet.Row, error) {
@@ -427,6 +441,142 @@ func TestHandler_GetServesTheSnapshotBytesVerbatimSoTheETagStillDescribesTheBody
 	}
 	if got := rec.Body.String(); got != string(stored) {
 		t.Errorf("body = %s, want the stored payload %s", got, stored)
+	}
+}
+
+func TestHandler_GetRefusesAnUnrecognisedQueryParameter(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?wher=status:eq:open", nil)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetUnknownQueryParam) {
+		t.Errorf("body = %s, want it to name %s", got, apperror.CodeSheetUnknownQueryParam)
+	}
+	if len(g.reader.calls) != 0 || len(g.reader.pageCalls) != 0 {
+		t.Error("a typo reached the reader, so it would have served every row")
+	}
+}
+
+func TestHandler_GetTakesTheFastPathWhenOnlyTheLocaleIsNamed(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	stored := []byte(`[{"role":"eng","name":"ada"}]`)
+	g.reader.rows.Payload = stored
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?lang=id", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != string(stored) {
+		t.Errorf("body = %s, want the stored payload %s", got, stored)
+	}
+	if len(g.reader.pageCalls) != 0 {
+		t.Error("the locale parameter took the filtered path")
+	}
+	if len(g.reader.calls) != 1 {
+		t.Errorf("whole-tab reads = %d, want 1", len(g.reader.calls))
+	}
+	if rec.Header().Get("Link") != "" {
+		t.Errorf("Link = %q, want none on the unfiltered path", rec.Header().Get("Link"))
+	}
+}
+
+func TestHandler_GetFilteredServesThePageAndLinksTheNextOne(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.page = sheet.FilteredRows{
+		Payload:    []byte(`[{"id":"a","status":"open"}]`),
+		ETag:       "pagetag",
+		NextCursor: "CURSOR2",
+		FetchedAt:  time.Now().UTC(),
+	}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?where=status:eq:open&limit=1", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `[{"id":"a","status":"open"}]`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+	if got, want := rec.Header().Get("ETag"), `"pagetag"`; got != want {
+		t.Errorf("ETag = %q, want %q", got, want)
+	}
+	want := `<?cursor=CURSOR2&limit=1&where=status%3Aeq%3Aopen>; rel="next"`
+	if got := rec.Header().Get("Link"); got != want {
+		t.Errorf("Link = %q, want %q", got, want)
+	}
+	if len(g.reader.calls) != 0 {
+		t.Error("a filtered read took the whole-tab path")
+	}
+	if len(g.reader.pageCalls) != 1 {
+		t.Fatalf("filtered reads = %d, want 1", len(g.reader.pageCalls))
+	}
+	if got, want := g.reader.pageCalls[0].Where, []string{"status:eq:open"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Where = %#v, want %#v", got, want)
+	}
+	if g.reader.pageCalls[0].Limit != "1" {
+		t.Errorf("Limit = %q, want %q", g.reader.pageCalls[0].Limit, "1")
+	}
+}
+
+func TestHandler_GetFilteredOmitsTheLinkOnTheLastPage(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.page = sheet.FilteredRows{Payload: []byte(`[]`), ETag: "pagetag"}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?where=status:eq:shut", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "[]" {
+		t.Errorf("body = %s, want [] for zero matches", rec.Body.String())
+	}
+	if got := rec.Header().Get("Link"); got != "" {
+		t.Errorf("Link = %q, want none when no page follows", got)
+	}
+}
+
+// NOTE: the header is set before writeCached's conditional branch, so a page that carries a cursor
+// still advertises it on a 304. The workflow skips the query on a tag match, so in practice it has none.
+func TestHandler_GetFilteredLinkRidesThe304(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.page = sheet.FilteredRows{ETag: "pagetag", NextCursor: "CURSOR2", NotModified: true}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?limit=1",
+		http.Header{"If-None-Match": []string{`"pagetag"`}})
+
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("status = %d, want 304; body=%s", rec.Code, rec.Body.String())
+	}
+	want := `<?cursor=CURSOR2&limit=1>; rel="next"`
+	if got := rec.Header().Get("Link"); got != want {
+		t.Errorf("Link = %q, want %q", got, want)
+	}
+	if len(g.reader.pageCalls) != 1 || g.reader.pageCalls[0].IfNoneMatch != `"pagetag"` {
+		t.Errorf("pageCalls = %#v, want the conditional header carried down", g.reader.pageCalls)
+	}
+}
+
+func TestHandler_GetFilteredRefusalKeepsItsStatus(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.pageErr = &sheet.StaleCursorError{Slug: "prices"}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?cursor=abc", nil)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); !strings.Contains(got, apperror.CodeSheetStaleCursor) {
+		t.Errorf("body = %s, want it to name %s", got, apperror.CodeSheetStaleCursor)
 	}
 }
 

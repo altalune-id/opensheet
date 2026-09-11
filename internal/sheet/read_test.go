@@ -134,6 +134,8 @@ type harnessOpts struct {
 	publicEnabled   bool
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
+	maxQueryRows    int
+	rowStore        sheet.RowStore
 }
 
 func newReadHarness(t *testing.T, opts harnessOpts) *readHarness {
@@ -158,10 +160,14 @@ func newReadHarness(t *testing.T, opts harnessOpts) *readHarness {
 		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
+	var rowStore sheet.RowStore = h.rows
+	if opts.rowStore != nil {
+		rowStore = opts.rowStore
+	}
 	h.wf = sheet.NewReadWorkflow(
-		h.snaps, h.rows, h.srcs, h.toks, h.reauth, h.google.factory(),
+		h.snaps, rowStore, h.srcs, h.toks, h.reauth, h.google.factory(),
 		fakeCaps{public: opts.publicEnabled},
-		opts.defaultTTL, opts.maxPayloadBytes,
+		opts.defaultTTL, opts.maxPayloadBytes, opts.maxQueryRows,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
 	)
 	return h
@@ -488,6 +494,20 @@ func TestReadWorkflow_OversizePayloadIsNotCached(t *testing.T) {
 	}
 	if h.snaps.PutCount() != 0 {
 		t.Errorf("PutCount = %d, want 0", h.snaps.PutCount())
+	}
+}
+
+// NOTE: the projection is written before the marshal, so the sheets this feature exists for are queryable even though they are too large to snapshot.
+func TestReadWorkflow_OversizePayloadStillLeavesAProjection(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{maxPayloadBytes: 8})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	_, err := h.wf.Rows(t.Context(), sh)
+	if !sheet.IsPayloadTooLargeError(err) {
+		t.Fatalf("err = %v, want PayloadTooLargeError", err)
+	}
+	if rows := h.rows.Projected(sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}); len(rows) != 2 {
+		t.Errorf("Projected = %d rows, want the tab projected before the payload was refused", len(rows))
 	}
 }
 

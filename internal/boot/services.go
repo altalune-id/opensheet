@@ -218,6 +218,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		sheetCaps,
 		cfg.Cache.DefaultTTL,
 		cfg.Sheets.MaxPayloadBytes,
+		cfg.Sheets.MaxQueryRows,
 		log,
 		reporter.Unexpected,
 	)

@@ -669,8 +669,7 @@ func IsEmptyIDError(err error) bool {
 	return ok
 }
 
-// ContractViolationError signals an id-addressed operation on a sheet that does not satisfy the table contract.
-// NOTE: unused until the keyed-write path; landed with its siblings so the block and its docs stay in one piece.
+// ContractViolationError signals a row operation on a sheet that does not satisfy the table contract.
 type ContractViolationError struct {
 	Slug   string
 	Reason string
@@ -688,7 +687,7 @@ func (e *ContractViolationError) Error() string {
 func (e *ContractViolationError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeSheetContractViolation,
-		"This sheet does not satisfy the table contract, so its rows cannot be addressed by id",
+		"This sheet does not satisfy the table contract, so its rows cannot be addressed or queried",
 		codes.Aborted,
 		&apperrorv1.ErrorDetail{
 			Code: apperror.CodeSheetContractViolation,
@@ -1001,5 +1000,33 @@ func (e *InvalidCursorError) ToAppError() *apperror.AppError {
 // IsInvalidCursorError reports whether err's tree contains an *InvalidCursorError.
 func IsInvalidCursorError(err error) bool {
 	_, ok := errors.AsType[*InvalidCursorError](err)
+	return ok
+}
+
+// StaleCursorError signals a ?cursor= issued against content the sheet no longer holds.
+type StaleCursorError struct {
+	Slug string
+}
+
+func (e *StaleCursorError) Error() string {
+	return fmt.Sprintf("sheet: %q: the rows changed since this page cursor was issued", e.Slug)
+}
+
+// ToAppError maps StaleCursorError to an Aborted envelope.
+func (e *StaleCursorError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetStaleCursor,
+		"The rows changed since this page cursor was issued: start the walk again without one",
+		codes.Aborted,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetStaleCursor,
+			Meta: map[string]string{"slug": e.Slug},
+		},
+	)
+}
+
+// IsStaleCursorError reports whether err's tree contains a *StaleCursorError.
+func IsStaleCursorError(err error) bool {
+	_, ok := errors.AsType[*StaleCursorError](err)
 	return ok
 }

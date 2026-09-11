@@ -149,6 +149,13 @@ func TestWriteErrors_EnvelopesAndPredicates(t *testing.T) {
 			status: http.StatusBadRequest,
 			pred:   IsInvalidCellError,
 		},
+		{
+			name:   "unknown query parameter",
+			err:    &UnknownQueryParamError{Param: "wher"},
+			code:   apperror.CodeSheetUnknownQueryParam,
+			status: http.StatusBadRequest,
+			pred:   IsUnknownQueryParamError,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/sheet"
@@ -24,6 +26,7 @@ import (
 type Reader interface {
 	Rows(ctx context.Context, sh *sheet.Sheet) (sheet.Rows, error)
 	RowByID(ctx context.Context, sh *sheet.Sheet, id string) (sheet.Row, error)
+	QueryRows(ctx context.Context, sh *sheet.Sheet, f sheet.RowFilter) (sheet.FilteredRows, error)
 }
 
 // Inspector reports what one published sheet's projection and contract state say about its table.
@@ -70,6 +73,12 @@ const StaleHeader = "X-Opensheet-Stale"
 // NOTE: sheet.Rows.Warnings is dropped — the body is upstream opensheet's bare array, with nowhere to carry it.
 
 const mountSuffix = "/api/v1"
+
+const (
+	whereParam  = "where"
+	limitParam  = "limit"
+	cursorParam = "cursor"
+)
 
 type handler struct {
 	resolver   resolver
@@ -144,12 +153,73 @@ func (h *handler) rows(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, aErr)
 		return
 	}
+	filter, filtered, err := rowFilterOf(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if filtered {
+		h.queryRows(w, r, sc.sheet, filter)
+		return
+	}
 	rows, err := h.reader.Rows(r.Context(), sc.sheet)
 	if err != nil {
 		h.fail(w, r, maskPublicDisabled(err))
 		return
 	}
 	h.writeRows(w, r, sc.sheet, rows)
+}
+
+func (h *handler) queryRows(w http.ResponseWriter, r *http.Request, sh *sheet.Sheet, filter sheet.RowFilter) {
+	page, err := h.reader.QueryRows(r.Context(), sh, filter)
+	if err != nil {
+		h.fail(w, r, maskPublicDisabled(err))
+		return
+	}
+	// NOTE: set before writeCached, so the link rides the 304 as RFC 8288 asks.
+	if page.NextCursor != "" {
+		w.Header().Set("Link", nextPageLink(r.URL, page.NextCursor))
+	}
+	h.writeCached(w, r, sh, page.Payload, cacheMeta{
+		etag: page.ETag, fetchedAt: page.FetchedAt, cached: page.Cached, stale: page.Stale,
+	})
+}
+
+// SECURITY: an unrecognised parameter is refused rather than ignored, so a typo cannot silently serve
+// every row of the tab the caller meant to filter.
+func rowFilterOf(r *http.Request) (filter sheet.RowFilter, filtered bool, err error) {
+	query := r.URL.Query()
+	for name := range query {
+		if !recognisedQueryParam(name) {
+			return sheet.RowFilter{}, false, &UnknownQueryParamError{Param: name}
+		}
+	}
+	filter = sheet.RowFilter{
+		Where:       query[whereParam],
+		Limit:       query.Get(limitParam),
+		Cursor:      query.Get(cursorParam),
+		IfNoneMatch: r.Header.Get("If-None-Match"),
+	}
+	filtered = len(filter.Where) > 0 || query.Has(limitParam) || query.Has(cursorParam)
+	return filter, filtered, nil
+}
+
+// NOTE: i18n.QueryParam is consumed by the middleware in front of the mount, so it reaches here and is not the caller's mistake.
+func recognisedQueryParam(name string) bool {
+	switch name {
+	case whereParam, limitParam, cursorParam, i18n.QueryParam:
+		return true
+	default:
+		return false
+	}
+}
+
+// NOTE: a relative URI-reference, which RFC 8288 allows: StripPrefix has already taken the mount prefix
+// off r.URL.Path, and an absolute URL would need a forwarded host this handler has no reason to trust.
+func nextPageLink(u *url.URL, cursor string) string {
+	query := u.Query()
+	query.Set(cursorParam, cursor)
+	return "<?" + query.Encode() + `>; rel="next"`
 }
 
 func (h *handler) rowByID(w http.ResponseWriter, r *http.Request) {

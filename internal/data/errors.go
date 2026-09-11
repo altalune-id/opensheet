@@ -148,3 +148,29 @@ func publicDisabled() error {
 		codes.FailedPrecondition,
 	)
 }
+
+// UnknownQueryParamError reports a query parameter this surface does not understand.
+type UnknownQueryParamError struct{ Param string }
+
+func (e *UnknownQueryParamError) Error() string {
+	return "data: unknown query parameter " + strconv.Quote(e.Param)
+}
+
+// ToAppError maps UnknownQueryParamError to the canonical InvalidArgument envelope.
+func (e *UnknownQueryParamError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetUnknownQueryParam,
+		"This endpoint does not understand the query parameter "+strconv.Quote(e.Param),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetUnknownQueryParam,
+			Meta: map[string]string{"param": e.Param},
+		},
+	)
+}
+
+// IsUnknownQueryParamError reports whether err's tree contains an *UnknownQueryParamError.
+func IsUnknownQueryParamError(err error) bool {
+	_, ok := errors.AsType[*UnknownQueryParamError](err)
+	return ok
+}

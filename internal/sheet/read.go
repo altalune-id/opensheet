@@ -70,6 +70,7 @@ type ReadWorkflow struct {
 	caps            Capabilities
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
+	maxQueryRows    int
 	log             *slog.Logger
 	unexpected      apperror.UnexpectedFunc
 	flight          singleflight.Group
@@ -86,6 +87,7 @@ func NewReadWorkflow(
 	caps Capabilities,
 	defaultTTL time.Duration,
 	maxPayloadBytes int64,
+	maxQueryRows int,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
 ) *ReadWorkflow {
@@ -99,6 +101,7 @@ func NewReadWorkflow(
 		caps:            caps,
 		defaultTTL:      defaultTTL,
 		maxPayloadBytes: maxPayloadBytes,
+		maxQueryRows:    maxQueryRows,
 		log:             log.With("module", "sheet"),
 		unexpected:      unexpected,
 	}
@@ -168,12 +171,7 @@ func (w *ReadWorkflow) Rows(ctx context.Context, sh *Sheet) (Rows, error) {
 	}
 	span.RecordError(err)
 
-	if gworkspace.IsAuthExpiredError(err) {
-		if mErr := w.reauth.MarkReauthNeeded(ctx, src.CredentialID); mErr != nil {
-			_ = w.unexpected(ctx, "sheet.Rows: mark reauth needed", mErr,
-				"sheet_id", sh.ID, "credential_id", src.CredentialID)
-		}
-	}
+	w.markReauth(ctx, sh, src, err)
 	// NOTE: drift is a parallel branch on purpose — isGoogleFailure keeps meaning "Google is unreachable".
 	if found && isContractDrift(err) {
 		if stale, ok := w.stale(ctx, sh, tab, snap, "sheet: serving a stale snapshot for a tab that no longer satisfies the contract", err); ok {
@@ -214,6 +212,16 @@ func (w *ReadWorkflow) client(ctx context.Context, sh *Sheet, src Source) (*gshe
 	return client, nil
 }
 
+func (w *ReadWorkflow) markReauth(ctx context.Context, sh *Sheet, src Source, cause error) {
+	if !gworkspace.IsAuthExpiredError(cause) {
+		return
+	}
+	if err := w.reauth.MarkReauthNeeded(ctx, src.CredentialID); err != nil {
+		_ = w.unexpected(ctx, "sheet.Rows: mark reauth needed", err,
+			"sheet_id", sh.ID, "credential_id", src.CredentialID)
+	}
+}
+
 // NOTE: singleflight.Do runs the loader on the calling goroutine, so no goroutine is started here and there is nothing to shut down.
 func (w *ReadWorkflow) fetch(
 	ctx context.Context, client *gsheet.Client, sh *Sheet, src Source, key SnapshotKey, staleAvailable bool,
@@ -232,14 +240,36 @@ func (w *ReadWorkflow) fetch(
 	return out, nil
 }
 
-// NOTE: gen0 comes from the caller's freshly resolved aggregate, and the fetch runs outside any transaction — holding the sheet's row lock across a Google call would serialize every reader.
 func (w *ReadWorkflow) load(
 	ctx context.Context, client *gsheet.Client, sh *Sheet, src Source, key SnapshotKey, staleAvailable bool,
 ) (Rows, error) {
+	got, err := w.reproject(ctx, client, sh, src, key, staleAvailable)
+	if err != nil {
+		return Rows{}, err
+	}
+	if !got.applied {
+		return w.committed(ctx, sh, key)
+	}
+	return w.serve(ctx, sh, key, got.values, got.warnings, got.fetchedAt)
+}
+
+// reprojected is what one refresh committed, and the live picture a snapshot would hold.
+type reprojected struct {
+	values    []gsheet.Row
+	warnings  []string
+	fetchedAt time.Time
+	applied   bool
+}
+
+// NOTE: the projection is written before anything is marshalled, so a tab over maxPayloadBytes is still queryable — it loses only its snapshot.
+// NOTE: gen0 comes from the caller's freshly resolved aggregate, and the fetch runs outside any transaction — holding the sheet's row lock across a Google call would serialize every reader.
+func (w *ReadWorkflow) reproject(
+	ctx context.Context, client *gsheet.Client, sh *Sheet, src Source, key SnapshotKey, staleAvailable bool,
+) (reprojected, error) {
 	gen0 := sh.Generation
 	tbl, err := client.Table(ctx, src.GoogleFileID, key.Tab)
 	if err != nil {
-		return Rows{}, gwerr.AppError(err)
+		return reprojected{}, gwerr.AppError(err)
 	}
 	fetchedAt := time.Now().UTC()
 
@@ -247,30 +277,27 @@ func (w *ReadWorkflow) load(
 	if cErr != nil {
 		w.markDrift(ctx, sh, key, gen0, contract, cErr)
 		if staleAvailable {
-			return Rows{}, cErr
+			return reprojected{}, cErr
 		}
 		// NOTE: a whole-tab read needs no id column, so a drifted tab with nothing cached is served verbatim rather than refused.
 		verbatim, warnings := keyRows(tbl)
-		return w.serve(ctx, sh, key, verbatim, warnings, fetchedAt)
+		return reprojected{values: verbatim, warnings: warnings, fetchedAt: fetchedAt, applied: true}, nil
 	}
 
 	projected, pErr := projectRows(tbl, key.Tab, fetchedAt)
 	if pErr != nil {
-		return Rows{}, w.unexpected(ctx, "sheet.Rows: project rows", pErr, "sheet_id", sh.ID, "tab", key.Tab)
+		return reprojected{}, w.unexpected(ctx, "sheet.Rows: project rows", pErr, "sheet_id", sh.ID, "tab", key.Tab)
 	}
 	_, warnings := gsheet.NormalizeHeaders(tbl.Headers)
-	out, oErr := w.rowsOf(ctx, sh, key, liveValues(projected), warnings, fetchedAt)
-	if oErr != nil {
-		return Rows{}, oErr
+	out := reprojected{
+		values: liveValues(projected), warnings: warnings, fetchedAt: fetchedAt, applied: true,
 	}
-
 	switch applied, rErr := w.rows.Replace(ctx, key, gen0, projected, contract); {
 	case rErr != nil:
 		_ = w.unexpected(ctx, "sheet.Rows: replace projection", rErr, "sheet_id", sh.ID, "tab", key.Tab)
 	case !applied:
-		return w.committed(ctx, sh, key)
+		out.applied = false
 	}
-	w.cache(ctx, sh, key, out)
 	return out, nil
 }
 

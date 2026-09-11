@@ -227,7 +227,7 @@ func newWriteHarnessWith(t *testing.T, opts writeOpts) *writeHarness {
 	)
 	h.rf = sheet.NewReadWorkflow(
 		h.snaps, h.rows, h.srcs, h.toks, h.reauth, h.google.readFactory(),
-		fakeCaps{public: true}, opts.defaultTTL, opts.maxPayloadBytes, log, unexpected,
+		fakeCaps{public: true}, opts.defaultTTL, opts.maxPayloadBytes, 0, log, unexpected,
 	)
 	return h
 }

@@ -280,3 +280,20 @@ func TestNewFilterErrorsMapToHTTP400(t *testing.T) {
 		}
 	}
 }
+
+func TestStaleCursorError(t *testing.T) {
+	e := &StaleCursorError{Slug: "prices"}
+	if msg := e.Error(); !strings.Contains(msg, "prices") {
+		t.Errorf("Error() = %q, want it to carry the slug", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetStaleCursor)
+	if !IsStaleCursorError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsStaleCursorError does not see through a wrap")
+	}
+	if IsStaleCursorError(&InvalidCursorError{}) {
+		t.Error("IsStaleCursorError matched the wrong type")
+	}
+	if got := e.ToAppError().HTTPStatus(); got != http.StatusConflict {
+		t.Errorf("HTTPStatus = %d, want %d — the walk must restart, not be retried", got, http.StatusConflict)
+	}
+}
