@@ -1100,3 +1100,69 @@ func IsHintOperandError(err error) bool {
 	_, ok := errors.AsType[*HintOperandError](err)
 	return ok
 }
+
+// InvalidSortError signals a ?sort= that is not column:[type.]asc|desc, or one given more than once.
+type InvalidSortError struct {
+	Sort   string
+	Reason string
+}
+
+func (e *InvalidSortError) Error() string {
+	reason := e.Reason
+	if reason == "" {
+		reason = "invalid"
+	}
+	return fmt.Sprintf("sheet: sort %q: %s", e.Sort, reason)
+}
+
+// ToAppError maps InvalidSortError to the canonical InvalidArgument envelope. NOTE: the reason is interpolated because SHT039 covers three conditions and the data-plane envelope carries no meta.
+func (e *InvalidSortError) ToAppError() *apperror.AppError {
+	reason := e.Reason
+	if reason == "" {
+		reason = "it is not written " + rowSortForm
+	}
+	return apperror.New(
+		apperror.CodeSheetInvalidSort,
+		"This sort cannot be read: "+reason,
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetInvalidSort,
+			Meta: map[string]string{"sort": e.Sort, "reason": e.Reason},
+		},
+	)
+}
+
+// IsInvalidSortError reports whether err's tree contains an *InvalidSortError.
+func IsInvalidSortError(err error) bool {
+	_, ok := errors.AsType[*InvalidSortError](err)
+	return ok
+}
+
+// UnknownSortColumnError signals a ?sort= naming a column absent from the tab's header row.
+type UnknownSortColumnError struct {
+	Column string
+	Tab    string
+}
+
+func (e *UnknownSortColumnError) Error() string {
+	return fmt.Sprintf("sheet: tab %q: no column %q to sort by", e.Tab, e.Column)
+}
+
+// ToAppError maps UnknownSortColumnError to the canonical InvalidArgument envelope.
+func (e *UnknownSortColumnError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSheetUnknownSortColumn,
+		fmt.Sprintf("This tab has no column %q to sort by", e.Column),
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSheetUnknownSortColumn,
+			Meta: map[string]string{"column": e.Column, "tab": e.Tab},
+		},
+	)
+}
+
+// IsUnknownSortColumnError reports whether err's tree contains an *UnknownSortColumnError.
+func IsUnknownSortColumnError(err error) bool {
+	_, ok := errors.AsType[*UnknownSortColumnError](err)
+	return ok
+}

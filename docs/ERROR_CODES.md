@@ -168,6 +168,8 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | `SHT036` | `apperror.CodeSheetStaleCursor`           | Sheet Stale Page Cursor       |
 | `SHT037` | `apperror.CodeSheetHintNotApplicable`     | Sheet Hint Not Applicable     |
 | `SHT038` | `apperror.CodeSheetHintOperand`           | Sheet Invalid Hint Operand    |
+| `SHT039` | `apperror.CodeSheetInvalidSort`           | Sheet Invalid Sort            |
+| `SHT041` | `apperror.CodeSheetUnknownSortColumn`     | Sheet Unknown Sort Column     |
 
 ## KEY — API keys
 

@@ -705,3 +705,212 @@ func TestRowClause_CarriesNoSecondRepresentationOfTheValue(t *testing.T) {
 		t.Errorf("RowClause fields = %v, want %v", got, want)
 	}
 }
+
+func TestParseRowSort_EveryDirectionAndHint(t *testing.T) {
+	tests := []struct {
+		spec string
+		want RowSort
+	}{
+		{"qty:asc", RowSort{Column: "qty"}},
+		{"qty:desc", RowSort{Column: "qty", Desc: true}},
+		{"qty:num.asc", RowSort{Column: "qty", Hint: RowHintNum}},
+		{"qty:num.desc", RowSort{Column: "qty", Hint: RowHintNum, Desc: true}},
+		{"created_at:date.asc", RowSort{Column: "created_at", Hint: RowHintDate}},
+		{"created_at:date.desc", RowSort{Column: "created_at", Hint: RowHintDate, Desc: true}},
+		{"Status:asc", RowSort{Column: "Status"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			got, err := ParseRowSort([]string{tt.spec})
+			if err != nil {
+				t.Fatalf("ParseRowSort(%q) error = %v, want nil", tt.spec, err)
+			}
+			if got == nil {
+				t.Fatalf("ParseRowSort(%q) = nil, want %+v", tt.spec, tt.want)
+			}
+			if *got != tt.want {
+				t.Errorf("ParseRowSort(%q) = %+v, want %+v", tt.spec, *got, tt.want)
+			}
+		})
+	}
+}
+
+// An absent or blank ?sort= is an unsorted read, not a refusal.
+func TestParseRowSort_AbsentOrBlankIsUnsorted(t *testing.T) {
+	for name, raw := range map[string][]string{
+		"nil":         nil,
+		"empty slice": {},
+		"empty value": {""},
+		"blank value": {"   "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseRowSort(raw)
+			if err != nil {
+				t.Fatalf("ParseRowSort(%#v) error = %v, want nil", raw, err)
+			}
+			if got != nil {
+				t.Errorf("ParseRowSort(%#v) = %+v, want nil — an unsorted read", raw, *got)
+			}
+		})
+	}
+}
+
+// query.Get silently takes the first value, which is the silent-typo class the
+// parameter allow-list exists to prevent, so a repeat is refused outright.
+func TestParseRowSort_RefusesARepeatedParameter(t *testing.T) {
+	for _, raw := range [][]string{
+		{"qty:asc", "name:desc"},
+		{"qty:asc", "qty:asc"},
+		{"qty:asc", ""},
+		{"", "qty:asc"},
+		{"qty:asc", "name:desc", "id:asc"},
+	} {
+		t.Run(strings.Join(raw, "&"), func(t *testing.T) {
+			got, err := ParseRowSort(raw)
+			if got != nil {
+				t.Errorf("ParseRowSort(%#v) = %+v, want nil", raw, *got)
+			}
+			if !IsInvalidSortError(err) {
+				t.Fatalf("ParseRowSort(%#v) error = %v, want InvalidSortError", raw, err)
+			}
+			sortErr, _ := errors.AsType[*InvalidSortError](err)
+			if !strings.Contains(sortErr.Reason, "given "+strconv.Itoa(len(raw))+" times") {
+				t.Errorf("Reason = %q, want it to name the repeat", sortErr.Reason)
+			}
+		})
+	}
+}
+
+func TestParseRowSort_RefusesAMalformedSpec(t *testing.T) {
+	tests := []struct {
+		spec       string
+		wantReason string
+	}{
+		{"qty", "no direction"},
+		{"asc", "no direction"},
+		{":asc", "no column"},
+		{"   :asc", "no column"},
+		{"qty:", `unknown direction ""`},
+		{"qty:ascending", `unknown direction "ascending"`},
+		{"qty:up", `unknown direction "up"`},
+		{"qty:num.", `unknown direction ""`},
+		{"qty:num.up", `unknown direction "up"`},
+		{"qty:foo.asc", `unknown direction "foo.asc"`},
+		{"a:b:asc", `unknown direction "b:asc"`},
+		{"qty:asc:extra", `unknown direction "asc:extra"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.spec, func(t *testing.T) {
+			got, err := ParseRowSort([]string{tt.spec})
+			if got != nil {
+				t.Errorf("ParseRowSort(%q) = %+v, want nil", tt.spec, *got)
+			}
+			if !IsInvalidSortError(err) {
+				t.Fatalf("ParseRowSort(%q) error = %v, want InvalidSortError", tt.spec, err)
+			}
+			sortErr, _ := errors.AsType[*InvalidSortError](err)
+			if !strings.Contains(sortErr.Reason, tt.wantReason) {
+				t.Errorf("Reason = %q, want it to contain %q", sortErr.Reason, tt.wantReason)
+			}
+			if sortErr.Sort != tt.spec {
+				t.Errorf("Sort = %q, want the offending value %q", sortErr.Sort, tt.spec)
+			}
+		})
+	}
+}
+
+// splitRowHint returns the token unchanged on an unknown prefix, so an unknown
+// hint must land on the direction refusal rather than on a hint error.
+func TestParseRowSort_AnUnknownHintPrefixIsADirectionRefusal(t *testing.T) {
+	_, err := ParseRowSort([]string{"qty:foo.asc"})
+	if !IsInvalidSortError(err) {
+		t.Fatalf("error = %v, want InvalidSortError", err)
+	}
+	if IsHintNotApplicableError(err) || IsHintOperandError(err) {
+		t.Error("an unknown hint prefix became a hint refusal")
+	}
+}
+
+// ?sort= splits on the first colon only, so a header holding a colon is
+// unsortable exactly as it is already unfilterable.
+func TestParseRowSort_SplitsOnTheFirstColonOnly(t *testing.T) {
+	got, err := ParseRowSort([]string{"a:b:asc"})
+	if got != nil {
+		t.Errorf("ParseRowSort = %+v, want nil — a colon'd header is unsortable", *got)
+	}
+	if !IsInvalidSortError(err) {
+		t.Fatalf("error = %v, want InvalidSortError", err)
+	}
+	sortErr, _ := errors.AsType[*InvalidSortError](err)
+	if strings.Contains(sortErr.Reason, "no column") {
+		t.Error("the spec split on the last colon and read \"a:b\" as the column")
+	}
+}
+
+// The direction vocabulary is case-sensitive, like the operator and hint vocabularies.
+func TestParseRowSort_DirectionsAreCaseSensitive(t *testing.T) {
+	for _, spec := range []string{"qty:ASC", "qty:Asc", "qty:DESC", "qty:Desc", "qty:NUM.asc", "qty:num.ASC"} {
+		t.Run(spec, func(t *testing.T) {
+			if _, err := ParseRowSort([]string{spec}); !IsInvalidSortError(err) {
+				t.Fatalf("ParseRowSort(%q) error = %v, want InvalidSortError", spec, err)
+			}
+		})
+	}
+}
+
+// The column is deliberately not resolved here: the tab's column list does not
+// exist until the projection has been written, so SHT041 is the route's refusal.
+func TestParseRowSort_DoesNotValidateTheColumn(t *testing.T) {
+	got, err := ParseRowSort([]string{"nosuchcolumn:asc"})
+	if err != nil {
+		t.Fatalf("ParseRowSort() error = %v, want nil", err)
+	}
+	if got == nil || got.Column != "nosuchcolumn" {
+		t.Fatalf("ParseRowSort() = %+v, want the column carried verbatim", got)
+	}
+}
+
+// An optional parsed value is carried as a pointer, mirroring RowWindow.Cursor,
+// so "is this a sorted read?" is one nil check at every later site.
+func TestRowSort_IsCarriedAsAnOptionalPointer(t *testing.T) {
+	field, ok := reflect.TypeFor[RowQuery]().FieldByName("Sort")
+	if !ok {
+		t.Fatal("RowQuery has no Sort field")
+	}
+	if want := reflect.TypeFor[*RowSort](); field.Type != want {
+		t.Errorf("RowQuery.Sort is %s, want %s", field.Type, want)
+	}
+	fn := reflect.TypeOf(ParseRowSort)
+	if fn.NumIn() != 1 || fn.In(0) != reflect.TypeFor[[]string]() {
+		t.Errorf("ParseRowSort takes %s, want []string — a single string cannot represent a repeat", fn.In(0))
+	}
+	if fn.NumOut() != 2 || fn.Out(0) != reflect.TypeFor[*RowSort]() {
+		t.Errorf("ParseRowSort returns %s, want *RowSort", fn.Out(0))
+	}
+}
+
+// 0 falls back to the default rather than to an unbounded walk: a sorted walk is
+// never unbounded, the same reasoning sheets.maxQueryRows uses.
+func TestMaxSortPagesOf_ZeroAndNegativeFallBackToTheDefault(t *testing.T) {
+	tests := []struct {
+		configured int
+		want       int
+	}{
+		{0, DefaultMaxSortPages},
+		{-1, DefaultMaxSortPages},
+		{1, 1},
+		{5, 5},
+		{DefaultMaxSortPages, DefaultMaxSortPages},
+		{500, 500},
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Itoa(tt.configured), func(t *testing.T) {
+			if got := maxSortPagesOf(tt.configured); got != tt.want {
+				t.Errorf("maxSortPagesOf(%d) = %d, want %d", tt.configured, got, tt.want)
+			}
+		})
+	}
+	if DefaultMaxSortPages != 20 {
+		t.Errorf("DefaultMaxSortPages = %d, want 20 — it pairs with sheets.maxSortPages", DefaultMaxSortPages)
+	}
+}

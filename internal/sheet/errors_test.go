@@ -361,3 +361,101 @@ func TestHintErrorsMapToHTTP400(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidSortError(t *testing.T) {
+	e := &InvalidSortError{Sort: "qty:up", Reason: `unknown direction "up"`}
+	msg := e.Error()
+	if !strings.Contains(msg, "qty:up") || !strings.Contains(msg, "up") {
+		t.Errorf("Error() = %q, want it to carry the sort and the reason", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetInvalidSort)
+	if !IsInvalidSortError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsInvalidSortError does not see through a wrap")
+	}
+	if IsInvalidSortError(&UnknownSortColumnError{}) {
+		t.Error("IsInvalidSortError matched the wrong type")
+	}
+	if got := (&InvalidSortError{}).Error(); !strings.Contains(got, "invalid") {
+		t.Errorf("Error() with no reason = %q, want a fallback reason", got)
+	}
+	if got := (&InvalidSortError{}).ToAppError().Error(); !strings.Contains(got, "column:asc") {
+		t.Errorf("message with no reason = %q, want the accepted form", got)
+	}
+}
+
+func TestUnknownSortColumnError(t *testing.T) {
+	e := &UnknownSortColumnError{Column: "qty", Tab: "Sheet1"}
+	msg := e.Error()
+	if !strings.Contains(msg, "qty") || !strings.Contains(msg, "Sheet1") {
+		t.Errorf("Error() = %q, want it to carry the column and the tab", msg)
+	}
+	assertAppError(t, e.ToAppError(), apperror.CodeSheetUnknownSortColumn)
+	if !IsUnknownSortColumnError(fmt.Errorf("wrapped: %w", e)) {
+		t.Error("IsUnknownSortColumnError does not see through a wrap")
+	}
+	if IsUnknownSortColumnError(&UnknownColumnError{}) {
+		t.Error("IsUnknownSortColumnError matched the wrong type")
+	}
+}
+
+// SHT041 exists rather than reusing SHT014 because the data-plane envelope is
+// {code, message} with a static message, so only a distinct code tells a client
+// sending ?where=a:eq:1&sort=b:asc which parameter is wrong.
+func TestUnknownSortColumnError_IsDistinctFromUnknownColumnError(t *testing.T) {
+	sortErr := (&UnknownSortColumnError{Column: "qty", Tab: "Sheet1"}).ToAppError()
+	whereErr := (&UnknownColumnError{Column: "qty", Tab: "Sheet1"}).ToAppError()
+	if sortErr.Code() == whereErr.Code() {
+		t.Fatalf("both refusals carry the code %q", sortErr.Code())
+	}
+	if sortErr.Error() == whereErr.Error() {
+		t.Errorf("both refusals render %q", sortErr.Error())
+	}
+}
+
+// SHT039 collapses three conditions, so its message must say which one fired —
+// the envelope carries no meta, and Reason-style detail never reaches a client.
+func TestInvalidSortError_MessageTellsTheThreeConditionsApart(t *testing.T) {
+	messages := map[string]string{}
+	for name, raw := range map[string][]string{
+		"repeated":          {"qty:asc", "name:desc"},
+		"malformed":         {"qty"},
+		"unknown direction": {"qty:up"},
+	} {
+		_, err := ParseRowSort(raw)
+		if !IsInvalidSortError(err) {
+			t.Fatalf("%s: error = %v, want InvalidSortError", name, err)
+		}
+		var appErr interface{ ToAppError() *apperror.AppError }
+		if !errors.As(err, &appErr) {
+			t.Fatalf("%s: %v carries no AppError", name, err)
+		}
+		messages[name] = appErr.ToAppError().Error()
+	}
+	if !strings.Contains(messages["repeated"], "given 2 times") {
+		t.Errorf("repeated message = %q, want it to name the repeat", messages["repeated"])
+	}
+	if !strings.Contains(messages["malformed"], "no direction") {
+		t.Errorf("malformed message = %q, want it to name the missing direction", messages["malformed"])
+	}
+	if !strings.Contains(messages["unknown direction"], `unknown direction "up"`) {
+		t.Errorf("direction message = %q, want the direction it refused", messages["unknown direction"])
+	}
+	seen := map[string]string{}
+	for name, msg := range messages {
+		if prev, dup := seen[msg]; dup {
+			t.Errorf("%s and %s render the identical message %q", prev, name, msg)
+		}
+		seen[msg] = name
+	}
+}
+
+func TestSortErrorsMapToHTTP400(t *testing.T) {
+	for _, e := range []interface{ ToAppError() *apperror.AppError }{
+		&InvalidSortError{Sort: "qty", Reason: "no direction"},
+		&UnknownSortColumnError{Column: "qty", Tab: "Sheet1"},
+	} {
+		if got := e.ToAppError().HTTPStatus(); got != http.StatusBadRequest {
+			t.Errorf("%T HTTPStatus = %d, want %d", e, got, http.StatusBadRequest)
+		}
+	}
+}

@@ -43,6 +43,16 @@ const RowLikeEscape = `\`
 // DefaultMaxQueryRows bounds a filtered read when sheets.maxQueryRows is unset.
 const DefaultMaxQueryRows = 1000
 
+// DefaultMaxSortPages bounds a sorted walk when sheets.maxSortPages is unset.
+const DefaultMaxSortPages = 20
+
+const (
+	rowSortAsc  = "asc"
+	rowSortDesc = "desc"
+)
+
+const rowSortForm = "column:asc or column:desc, optionally with a num. or date. hint on the direction"
+
 const rowCursorVersion = 1
 
 // RowClause is one validated predicate over a column the projection stores.
@@ -53,6 +63,13 @@ type RowClause struct {
 	Value   string
 	Values  []string
 	Pattern string
+}
+
+// RowSort is the validated ordering a filtered read asks for.
+type RowSort struct {
+	Column string
+	Hint   RowHint
+	Desc   bool
 }
 
 // RowCursor is the keyset position an opaque ?cursor= carries.
@@ -70,6 +87,7 @@ type RowWindow struct {
 // RowQuery is a validated row filter and the window it pages with. NOTE: the window is parsed before the freshness gate and the clauses after it, because the column list a clause validates against does not exist until the projection has been written.
 type RowQuery struct {
 	Clauses []RowClause
+	Sort    *RowSort
 	Window  RowWindow
 }
 
@@ -186,6 +204,45 @@ func parseRowClause(raw string, columns []string, tab string, del int) (RowClaus
 	default:
 	}
 	return clause, nil
+}
+
+// ParseRowSort validates repeated ?sort= values; a nil result means an unsorted read. NOTE: the column is not resolved here, because the tab's column list does not exist until the projection has been written.
+func ParseRowSort(raw []string) (*RowSort, error) {
+	if len(raw) > 1 {
+		return nil, &InvalidSortError{
+			Sort:   strings.Join(raw, ","),
+			Reason: fmt.Sprintf("?sort= was given %d times; a read has one sort", len(raw)),
+		}
+	}
+	if len(raw) == 0 || strings.TrimSpace(raw[0]) == "" {
+		return nil, nil
+	}
+	spec := raw[0]
+	column, token, found := strings.Cut(spec, ":")
+	if !found {
+		return nil, &InvalidSortError{Sort: spec, Reason: "no direction; write " + rowSortForm}
+	}
+	if strings.TrimSpace(column) == "" {
+		return nil, &InvalidSortError{Sort: spec, Reason: "no column; write " + rowSortForm}
+	}
+	hint, dir := splitRowHint(token)
+	switch dir {
+	case rowSortAsc:
+		return &RowSort{Column: column, Hint: hint}, nil
+	case rowSortDesc:
+		return &RowSort{Column: column, Hint: hint, Desc: true}, nil
+	}
+	return nil, &InvalidSortError{
+		Sort:   spec,
+		Reason: fmt.Sprintf("unknown direction %q; write %s or %s", dir, rowSortAsc, rowSortDesc),
+	}
+}
+
+func maxSortPagesOf(configured int) int {
+	if configured <= 0 {
+		return DefaultMaxSortPages
+	}
+	return configured
 }
 
 // NOTE: the operator token is split on the first "." and the prefix is checked against the known hints first, so col:foo.bar stays 3a's unknown-operator refusal rather than becoming a hint error.

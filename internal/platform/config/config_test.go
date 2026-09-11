@@ -596,6 +596,12 @@ func TestDefaults_OpensheetKeys(t *testing.T) {
 	if cfg.Sheets.MaxPayloadBytes != 8388608 {
 		t.Errorf("sheets.maxPayloadBytes = %d, want 8388608", cfg.Sheets.MaxPayloadBytes)
 	}
+	if cfg.Sheets.MaxQueryRows != 1000 {
+		t.Errorf("sheets.maxQueryRows = %d, want 1000", cfg.Sheets.MaxQueryRows)
+	}
+	if cfg.Sheets.MaxSortPages != 20 {
+		t.Errorf("sheets.maxSortPages = %d, want 20", cfg.Sheets.MaxSortPages)
+	}
 	if cfg.Google.Timeout != 15*time.Second {
 		t.Errorf("google.timeout = %s, want 15s", cfg.Google.Timeout)
 	}

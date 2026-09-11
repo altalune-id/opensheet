@@ -111,6 +111,8 @@ const (
 	CodeSheetStaleCursor           = "SHT036"
 	CodeSheetHintNotApplicable     = "SHT037"
 	CodeSheetHintOperand           = "SHT038"
+	CodeSheetInvalidSort           = "SHT039"
+	CodeSheetUnknownSortColumn     = "SHT041"
 
 	CodeAPIKeyNotFound          = "KEY001"
 	CodeAPIKeyInvalidName       = "KEY002"
