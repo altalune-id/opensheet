@@ -361,11 +361,68 @@ func sqliteCell(data sqlite.ColumnString, field string) (sqlite.StringExpression
 	return sqlite.StringExp(sqlite.Func("json_extract", data, sqlite.String(path))), nil
 }
 
+// NOTE: the cell test is the registered Go function, so a cell and an operand are admitted by one grammar rather than by two implementations of it.
+func sqliteNumCell(data sqlite.ColumnString, field string) (sqlite.FloatExpression, error) {
+	cell, err := sqliteCell(data, field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.FloatExp(sqlite.Func("opensheet_num", cell)), nil
+}
+
+// NOTE: opensheet_date hands the cell back verbatim, so the comparison stays textual and needs no date(), no julianday() and none of their cross-driver divergence.
+func sqliteDateCell(data sqlite.ColumnString, field string) (sqlite.StringExpression, error) {
+	cell, err := sqliteCell(data, field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.StringExp(sqlite.Func("opensheet_date", cell)), nil
+}
+
 func sqliteClausePredicate(data sqlite.ColumnString, c RowClause) (sqlite.BoolExpression, error) {
+	switch c.Hint {
+	case RowHintNum:
+		cell, err := sqliteNumCell(data, c.Column)
+		if err != nil {
+			return nil, err
+		}
+		return sqliteNumPredicate(cell, c)
+	case RowHintDate:
+		cell, err := sqliteDateCell(data, c.Column)
+		if err != nil {
+			return nil, err
+		}
+		return sqliteTextPredicate(cell, c)
+	}
 	cell, err := sqliteCell(data, c.Column)
 	if err != nil {
 		return nil, err
 	}
+	return sqliteTextPredicate(cell, c)
+}
+
+// NOTE: the operand binds as a float and never as c.Value — SQLite compares by storage class and a REAL always sorts below a TEXT, so a text bind makes every num.gt return nothing and every num.lt everything, with no error. ParseNum's ok is an invariant here: the parser refuses a num hint whose operand is outside the grammar.
+func sqliteNumPredicate(cell sqlite.FloatExpression, c RowClause) (sqlite.BoolExpression, error) {
+	value, _ := ParseNum(c.Value)
+	operand := sqlite.Float(value)
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(operand), nil
+	case RowOpNe:
+		return cell.NOT_EQ(operand), nil
+	case RowOpGt:
+		return cell.GT(operand), nil
+	case RowOpGte:
+		return cell.GT_EQ(operand), nil
+	case RowOpLt:
+		return cell.LT(operand), nil
+	case RowOpLte:
+		return cell.LT_EQ(operand), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+func sqliteTextPredicate(cell sqlite.StringExpression, c RowClause) (sqlite.BoolExpression, error) {
 	switch c.Op {
 	case RowOpEq:
 		return cell.EQ(sqlite.String(c.Value)), nil

@@ -4,6 +4,7 @@ package sheet_test
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -999,4 +1000,114 @@ func TestPgTypedGrammar_AgreesWithTheGoGrammar(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestPgRowStore_Query_TypedOperators(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, typedFixtureRows())
+
+	for _, tc := range typedQueryCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := f.rows.Query(ctx, k, queryOf(t, typedFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			assert.False(t, page.More, "a page under the limit has nothing following it")
+		})
+	}
+}
+
+// TestPgRowStore_Query_NumBoundaryTable drives the CASE guard off the same grammar table as ParseNum: a bare cast raises on the first unparseable cell and pg_input_is_valid admits NaN.
+func TestPgRowStore_Query_NumBoundaryTable(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, numBoundaryFixtureRows())
+
+	for _, operand := range []string{"1.5", "0"} {
+		for _, tc := range numBoundaryCases(t, operand) {
+			t.Run(tc.name, func(t *testing.T) {
+				page, err := f.rows.Query(ctx, k, queryOf(t, numFixtureColumns(), 100, tc.where...))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			})
+		}
+	}
+}
+
+func TestPgRowStore_Query_NonFiniteCellsAreExcludedFromEveryNumComparison(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, nonFiniteFixtureRows())
+
+	var dominates bool
+	require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+		`SELECT pg_input_is_valid('NaN', 'numeric') AND 'NaN'::numeric > 1e308`).Scan(&dominates))
+	require.True(t, dominates, "this is what the regex guard exists to exclude")
+
+	for _, tc := range nonFiniteCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := f.rows.Query(ctx, k, queryOf(t, numFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+		})
+	}
+}
+
+// TestQueryTyped_IsIdenticalAcrossDrivers is spec section 9 assertion 1: one grammar, compiled twice, answering identically — including num.lt, the arm that returns too many rows rather than too few under the SQLite text-bind defect.
+func TestQueryTyped_IsIdenticalAcrossDrivers(t *testing.T) {
+	for _, fixture := range []struct {
+		name    string
+		rows    []sheet.ProjectedRow
+		columns []string
+		cases   []queryCase
+	}{
+		{"typed operators", typedFixtureRows(), typedFixtureColumns(), typedQueryCases()},
+		{"num grammar boundary", numBoundaryFixtureRows(), numFixtureColumns(), numBoundaryCases(t, "1.5")},
+		{"num grammar boundary at zero", numBoundaryFixtureRows(), numFixtureColumns(), numBoundaryCases(t, "0")},
+		{"non-finite cells", nonFiniteFixtureRows(), numFixtureColumns(), nonFiniteCases()},
+		{"significance boundary", significancePairRows(), numFixtureColumns(), significancePairCases()},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			pgf := newPgFixture(t)
+			pgCtx := pgf.a.ctx(t)
+			lf := newSQLiteFixture(t)
+			pgKey := pgSeedQueryFixture(t, pgf, fixture.rows)
+			liteStore, liteKey := seedSQLiteQueryFixture(t, lf, fixture.rows)
+			for _, tc := range fixture.cases {
+				t.Run(tc.name, func(t *testing.T) {
+					q := queryOf(t, fixture.columns, 100, tc.where...)
+					pgPage, err := pgf.rows.Query(pgCtx, pgKey, q)
+					require.NoError(t, err)
+					litePage, err := liteStore.Query(lf.ctx(), liteKey, q)
+					require.NoError(t, err)
+					assert.Equal(t, pgPage, litePage, "?where=%v must answer identically on both drivers", tc.where)
+					assert.Equal(t, tc.want, rowIDsOf(pgPage.Rows))
+				})
+			}
+		})
+	}
+}
+
+// TestQueryTyped_SignificanceIsMeasuredNotAssumed re-measures the divergence the significance half of the guard closes, so the pair in significancePairRows keeps its reason.
+func TestQueryTyped_SignificanceIsMeasuredNotAssumed(t *testing.T) {
+	f := newPgFixture(t)
+	const low, high = "123456789012345.1", "123456789012345.101"
+
+	shape := regexp.MustCompile(sheet.NumPattern)
+	for _, v := range []string{low, high} {
+		require.True(t, shape.MatchString(v), "the shape regex admits %q, so the regex alone would be the whole guard", v)
+		_, ok := sheet.ParseNum(v)
+		require.False(t, ok, "%q carries more than 15 significant digits", v)
+	}
+
+	var distinct bool
+	require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+		`SELECT ($1::text)::numeric <> ($2::text)::numeric`, low, high).Scan(&distinct))
+	require.True(t, distinct, "Postgres numeric is exact and tells the pair apart")
+
+	lowF, err := strconv.ParseFloat(low, 64)
+	require.NoError(t, err)
+	highF, err := strconv.ParseFloat(high, 64)
+	require.NoError(t, err)
+	require.Equal(t, lowF, highF, "float64 does not, which is the divergence the significance bound excludes")
 }

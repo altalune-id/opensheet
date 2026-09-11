@@ -352,8 +352,65 @@ func pgCell(data postgres.ColumnString, field string) postgres.StringExpression 
 		data, postgres.Token("->>"), postgres.String(field)))
 }
 
+// NOTE: postgres.CAST emits no parentheses over ->>, which renders data ->> $1::text::numeric and fails with "operator does not exist: jsonb ->> numeric", so the guards parenthesise the extraction by hand.
+func pgCellParens(data postgres.ColumnString, field string) postgres.Expression {
+	return postgres.CustomExpression(
+		postgres.Token("("), data, postgres.Token("->>"), postgres.String(field), postgres.Token(")"))
+}
+
+// NOTE: the CASE is required rather than defensive — ORDER BY and the SELECT list have no guard to reorder against, where a bare cast raises on the first unparseable cell. NumPattern alone is not the grammar either: it bounds each digit run to 15, not the significant digits across the point, so the length test carries the rest. pg_input_is_valid is not the guard — it admits NaN, which outranks every finite numeric.
+func pgNumCell(data postgres.ColumnString, field string) postgres.FloatExpression {
+	return postgres.FloatExp(postgres.CustomExpression(
+		postgres.Token("(CASE WHEN"), pgCellParens(data, field),
+		postgres.Token("~"), postgres.String(NumPattern),
+		postgres.Token("AND length(ltrim(translate("), pgCellParens(data, field),
+		postgres.Token(", '-.', ''), '0')) <="), postgres.Int(NumSignificanceLimit),
+		postgres.Token("THEN"), pgCellParens(data, field),
+		postgres.Token("::numeric END)"),
+	))
+}
+
+// NOTE: no cast and no ::date — every field of the date grammar is fixed-width and ordered most significant first under one timezone, so lexical order is chronological and the shape guard is the whole implementation.
+func pgDateCell(data postgres.ColumnString, field string) postgres.StringExpression {
+	return postgres.StringExp(postgres.CustomExpression(
+		postgres.Token("(CASE WHEN"), pgCellParens(data, field),
+		postgres.Token("~"), postgres.String(DatePattern),
+		postgres.Token("THEN"), pgCellParens(data, field),
+		postgres.Token("END)"),
+	))
+}
+
 func pgClausePredicate(data postgres.ColumnString, c RowClause) (postgres.BoolExpression, error) {
-	cell := pgCell(data, c.Column)
+	switch c.Hint {
+	case RowHintNum:
+		return pgNumPredicate(pgNumCell(data, c.Column), c)
+	case RowHintDate:
+		return pgTextPredicate(pgDateCell(data, c.Column), c)
+	}
+	return pgTextPredicate(pgCell(data, c.Column), c)
+}
+
+// NOTE: the operand binds as a Go string with no cast of its own — pgx sends OID 0 and the server infers numeric from the comparison, and inside the 15-significant-digit bound numeric and float64 hold the same value.
+func pgNumPredicate(cell postgres.FloatExpression, c RowClause) (postgres.BoolExpression, error) {
+	operand := postgres.Decimal(c.Value)
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(operand), nil
+	case RowOpNe:
+		return cell.NOT_EQ(operand), nil
+	case RowOpGt:
+		return cell.GT(operand), nil
+	case RowOpGte:
+		return cell.GT_EQ(operand), nil
+	case RowOpLt:
+		return cell.LT(operand), nil
+	case RowOpLte:
+		return cell.LT_EQ(operand), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+func pgTextPredicate(cell postgres.StringExpression, c RowClause) (postgres.BoolExpression, error) {
 	switch c.Op {
 	case RowOpEq:
 		return cell.EQ(postgres.String(c.Value)), nil

@@ -1,6 +1,7 @@
 package sheet_test
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -912,4 +913,224 @@ func TestSQLiteRowStore_Query_IsScopedToOneTab(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, page.Rows, "another tab's rows are not this tab's")
 	assert.False(t, page.More)
+}
+
+// typedFixtureRows is the shared typed-filter fixture both drivers seed: in-grammar numbers, out-of-grammar numbers, a NaN, date shapes the grammar admits and shapes it refuses, an empty cell and a missing key.
+func typedFixtureRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "t1", RowIndex: 0, Data: gsheet.Row{"id": "t1", "qty": "10", "net.qty": "12", "when": "2026-01-02"}},
+		{RowID: "t2", RowIndex: 1, Data: gsheet.Row{"id": "t2", "qty": "9", "net.qty": "3", "when": "2026-01-02T00:00:00Z"}},
+		{RowID: "t3", RowIndex: 2, Data: gsheet.Row{"id": "t3", "qty": "003", "when": "2026-01-01T23:00:00Z"}},
+		{RowID: "t4", RowIndex: 4, Data: gsheet.Row{"id": "t4", "qty": "-4", "when": "2026-01-03"}},
+		{RowID: "t5", RowIndex: 5, Data: gsheet.Row{"id": "t5", "qty": "-0", "when": "01/02/2026"}},
+		{RowID: "t6", RowIndex: 6, Data: gsheet.Row{"id": "t6", "qty": "1.5", "when": "2026-01-02T00:00:00.5Z"}},
+		{RowID: "t7", RowIndex: 7, Data: gsheet.Row{"id": "t7", "qty": "999999999999999", "when": "2026-01-02T10:00:00+07:00"}},
+		{RowID: "t8", RowIndex: 8, Data: gsheet.Row{"id": "t8", "qty": "abc", "when": "2026-01-02 00:00:00"}},
+		{RowID: "t9", RowIndex: 9, Data: gsheet.Row{"id": "t9", "qty": "NaN", "when": "2026-02-31"}},
+		{RowID: "t10", RowIndex: 11, Data: gsheet.Row{"id": "t10", "qty": "1e3", "when": ""}},
+		{RowID: "t11", RowIndex: 12, Data: gsheet.Row{"id": "t11"}},
+		{RowID: "t12", RowIndex: 13, Data: gsheet.Row{"id": "t12", "qty": "", "when": "2026-01-02T23:59:59Z"}},
+	}
+}
+
+func typedFixtureColumns() []string {
+	return []string{"id", "net.qty", "qty", "when"}
+}
+
+// typedQueryCases is every hintable operator under both hints against typedFixtureRows, asserted by row id in row_index order.
+func typedQueryCases() []queryCase {
+	return []queryCase{
+		{"num gt", []string{"qty:num.gt:9"}, []string{"t1", "t7"}},
+		{"num gte", []string{"qty:num.gte:9"}, []string{"t1", "t2", "t7"}},
+		{"num lt", []string{"qty:num.lt:9"}, []string{"t3", "t4", "t5", "t6"}},
+		{"num lte", []string{"qty:num.lte:9"}, []string{"t2", "t3", "t4", "t5", "t6"}},
+		{"num eq ignores leading zeros", []string{"qty:num.eq:3"}, []string{"t3"}},
+		{"num eq matches a negative zero cell", []string{"qty:num.eq:0"}, []string{"t5"}},
+		{"num eq ignores a trailing fractional zero", []string{"qty:num.eq:1.50"}, []string{"t6"}},
+		{"num ne is not the complement of num eq", []string{"qty:num.ne:9"}, []string{"t1", "t3", "t4", "t5", "t6", "t7"}},
+		{"num lt on a zero operand", []string{"qty:num.lt:0"}, []string{"t4"}},
+		{"num gte on a negative zero operand", []string{"qty:num.gte:-0"}, []string{"t1", "t2", "t3", "t5", "t6", "t7"}},
+		{"num gt at the fifteen digit bound", []string{"qty:num.gt:999999999999998"}, []string{"t7"}},
+		{
+			"num lte at the fifteen digit bound",
+			[]string{"qty:num.lte:999999999999999"},
+			[]string{"t1", "t2", "t3", "t4", "t5", "t6", "t7"},
+		},
+		{"the same operator without a hint compares text", []string{"qty:gt:9"}, []string{"t7", "t8", "t9"}},
+		{"date eq", []string{"when:date.eq:2026-01-02"}, []string{"t1"}},
+		{"date ne", []string{"when:date.ne:2026-01-02"}, []string{"t2", "t3", "t4", "t9", "t12"}},
+		{"date gt", []string{"when:date.gt:2026-01-02"}, []string{"t2", "t4", "t9", "t12"}},
+		{"date gte", []string{"when:date.gte:2026-01-02"}, []string{"t1", "t2", "t4", "t9", "t12"}},
+		{"date lt", []string{"when:date.lt:2026-01-02"}, []string{"t3"}},
+		{"date lte", []string{"when:date.lte:2026-01-02"}, []string{"t1", "t3"}},
+		{"date gt an instant leaves the bare day below it", []string{"when:date.gt:2026-01-02T00:00:00Z"}, []string{"t4", "t9", "t12"}},
+		{"a hinted clause ANDs with another", []string{"qty:num.gt:0", "when:date.gte:2026-01-02"}, []string{"t1", "t2"}},
+		{"num gt on a dotted header", []string{"net.qty:num.gt:5"}, []string{"t1"}},
+		{"num lt on a dotted header", []string{"net.qty:num.lt:5"}, []string{"t2"}},
+	}
+}
+
+// numBoundaryFixtureRows lays every case in the num grammar table out as one row, so what a num comparison returns is exactly the set the grammar admits.
+func numBoundaryFixtureRows() []sheet.ProjectedRow {
+	cases := numGrammarCases()
+	out := make([]sheet.ProjectedRow, 0, len(cases))
+	for i, tc := range cases {
+		id := "b" + strconv.Itoa(i)
+		out = append(out, sheet.ProjectedRow{
+			RowID: id, RowIndex: i, Data: gsheet.Row{"id": id, "qty": tc.in},
+		})
+	}
+	return out
+}
+
+func numFixtureColumns() []string {
+	return []string{"id", "qty"}
+}
+
+// numBoundaryCases asserts all six hinted operators against the grammar table, deriving the wanted ids from ParseNum so a driver that admits one value more or one fewer than the Go grammar fails.
+func numBoundaryCases(t *testing.T, operand string) []queryCase {
+	t.Helper()
+	pivot, ok := sheet.ParseNum(operand)
+	require.True(t, ok, "the operand must itself be in the grammar, or the parser refuses the clause")
+
+	ops := []struct {
+		op   string
+		keep func(float64) bool
+	}{
+		{"eq", func(v float64) bool { return v == pivot }},
+		{"ne", func(v float64) bool { return v != pivot }},
+		{"gt", func(v float64) bool { return v > pivot }},
+		{"gte", func(v float64) bool { return v >= pivot }},
+		{"lt", func(v float64) bool { return v < pivot }},
+		{"lte", func(v float64) bool { return v <= pivot }},
+	}
+	cases := numGrammarCases()
+	out := make([]queryCase, 0, len(ops))
+	for _, op := range ops {
+		want := make([]string, 0, len(cases))
+		for i, tc := range cases {
+			v, inGrammar := sheet.ParseNum(tc.in)
+			if inGrammar && op.keep(v) {
+				want = append(want, "b"+strconv.Itoa(i))
+			}
+		}
+		require.NotEmpty(t, want, "num.%s:%s must match something, or the case proves nothing", op.op, operand)
+		out = append(out, queryCase{
+			name:  "num." + op.op + ":" + operand,
+			where: []string{"qty:num." + op.op + ":" + operand},
+			want:  want,
+		})
+	}
+	return out
+}
+
+// nonFiniteFixtureRows holds the values Postgres calls valid numerics and the grammar refuses: 'NaN'::numeric outranks every finite value, so one such cell would dominate under a pg_input_is_valid guard.
+func nonFiniteFixtureRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "n1", RowIndex: 0, Data: gsheet.Row{"id": "n1", "qty": "NaN"}},
+		{RowID: "n2", RowIndex: 1, Data: gsheet.Row{"id": "n2", "qty": "Infinity"}},
+		{RowID: "n3", RowIndex: 2, Data: gsheet.Row{"id": "n3", "qty": "-Infinity"}},
+		{RowID: "n4", RowIndex: 3, Data: gsheet.Row{"id": "n4", "qty": "7"}},
+	}
+}
+
+func nonFiniteCases() []queryCase {
+	return []queryCase{
+		{"eq", []string{"qty:num.eq:7"}, []string{"n4"}},
+		{"ne", []string{"qty:num.ne:7"}, []string{}},
+		{"gt", []string{"qty:num.gt:7"}, []string{}},
+		{"gte", []string{"qty:num.gte:7"}, []string{"n4"}},
+		{"lt", []string{"qty:num.lt:7"}, []string{}},
+		{"lte", []string{"qty:num.lte:7"}, []string{"n4"}},
+	}
+}
+
+// significancePairRows holds the pair spec section 2 measures: both match NumPattern, Postgres calls them distinct and float64 calls them equal, so only the significance half of the guard keeps the drivers from disagreeing.
+func significancePairRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "s1", RowIndex: 0, Data: gsheet.Row{"id": "s1", "qty": "123456789012345.1"}},
+		{RowID: "s2", RowIndex: 1, Data: gsheet.Row{"id": "s2", "qty": "123456789012345.101"}},
+		{RowID: "s3", RowIndex: 2, Data: gsheet.Row{"id": "s3", "qty": "123456789012345"}},
+	}
+}
+
+func significancePairCases() []queryCase {
+	return []queryCase{
+		{"gt below the pair", []string{"qty:num.gt:123456789012344"}, []string{"s3"}},
+		{"gte at the in-grammar value", []string{"qty:num.gte:123456789012345"}, []string{"s3"}},
+		{"lt above the pair", []string{"qty:num.lt:999999999999999"}, []string{"s3"}},
+		{"eq the in-grammar value", []string{"qty:num.eq:123456789012345"}, []string{"s3"}},
+		{"ne the in-grammar value", []string{"qty:num.ne:123456789012345"}, []string{}},
+	}
+}
+
+func TestSQLiteRowStore_Query_TypedOperators(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, typedFixtureRows())
+
+	for _, tc := range typedQueryCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := store.Query(f.ctx(), k, queryOf(t, typedFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			assert.False(t, page.More, "a page under the limit has nothing following it")
+		})
+	}
+}
+
+// TestSQLiteRowStore_Query_NumBoundaryTable is the arm the storage-class trap breaks: under a text bind every num.gt returns nothing and every num.lt returns everything, with no error.
+func TestSQLiteRowStore_Query_NumBoundaryTable(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, numBoundaryFixtureRows())
+
+	for _, operand := range []string{"1.5", "0"} {
+		for _, tc := range numBoundaryCases(t, operand) {
+			t.Run(tc.name, func(t *testing.T) {
+				page, err := store.Query(f.ctx(), k, queryOf(t, numFixtureColumns(), 100, tc.where...))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			})
+		}
+	}
+}
+
+func TestSQLiteRowStore_Query_NonFiniteCellsAreExcludedFromEveryNumComparison(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, nonFiniteFixtureRows())
+
+	for _, tc := range nonFiniteCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := store.Query(f.ctx(), k, queryOf(t, numFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+		})
+	}
+}
+
+func TestSQLiteRowStore_Query_SignificanceBoundary(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, significancePairRows())
+
+	for _, tc := range significancePairCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := store.Query(f.ctx(), k, queryOf(t, numFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+		})
+	}
+}
+
+// NOTE: sqlite has no RLS, so this is what holds the explicit org_id predicate in place for a typed clause too; on postgres FORCE ROW LEVEL SECURITY is the backstop and no test can see the predicate go missing.
+func TestSQLiteRowStore_Query_ATypedFilterIsScopedToOneOrg(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, typedFixtureRows())
+
+	stranger := tenant.Into(t.Context(), tenant.Context{
+		OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New(),
+	})
+	for _, where := range []string{"qty:num.gt:-999999999999999", "when:date.gte:2026-01-01"} {
+		page, err := store.Query(stranger, k, queryOf(t, typedFixtureColumns(), 100, where))
+		require.NoError(t, err)
+		assert.Empty(t, page.Rows, "another org must read zero rows, predicate first and RLS second")
+	}
 }
