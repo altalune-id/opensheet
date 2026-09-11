@@ -164,3 +164,69 @@ func TestPagesServed_CountsThePagesAlreadyServed(t *testing.T) {
 	assert.Equal(t, 1, pagesServed(RowWindow{Cursor: &RowCursor{Page: 0}}))
 	assert.Equal(t, 4, pagesServed(RowWindow{Cursor: &RowCursor{Page: 3}}))
 }
+
+// TestRowQueryETag_UnhintedUnsortedTagsAreByteStable pins the three tags 3a shipped, hash and all: an unhinted clause rendered as "qty:.gt:10", or a sort segment emitted when no sort was asked for, moves every tag in flight and costs one global revalidation miss.
+func TestRowQueryETag_UnhintedUnsortedTagsAreByteStable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		q    RowQuery
+		want string
+	}{
+		{
+			name: "no clause",
+			q:    RowQuery{Window: RowWindow{Limit: 50}},
+			want: "4410f63cc0f47dd5e1683963550abd49",
+		},
+		{
+			name: "one unhinted clause",
+			q: RowQuery{
+				Clauses: []RowClause{{Column: "qty", Op: RowOpGt, Value: "10"}},
+				Window:  RowWindow{Limit: 50},
+			},
+			want: "472767af5440f889f64acb746c20321f",
+		},
+		{
+			name: "a cursor",
+			q: RowQuery{
+				Window: RowWindow{Limit: 50, Cursor: &RowCursor{Digest: "d", RowIndex: 3}},
+			},
+			want: "28cda29fe7af413c7cd01434c6e4b836",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, rowQueryETag(7, tc.q))
+		})
+	}
+}
+
+// TestRowQueryETag_SeparatesEveryHintAndDirection is the unit-level half of the wrong-304 assertion: each canonical form below must be distinct from all the others at one generation.
+func TestRowQueryETag_SeparatesEveryHintAndDirection(t *testing.T) {
+	t.Parallel()
+	seen := make(map[string]string, 8)
+	for _, tc := range []struct {
+		name string
+		q    RowQuery
+	}{
+		{"unhinted clause", RowQuery{Clauses: []RowClause{{Column: "qty", Op: RowOpGt, Value: "10"}}}},
+		{"num clause", RowQuery{
+			Clauses: []RowClause{{Column: "qty", Op: RowOpGt, Hint: RowHintNum, Value: "10"}},
+		}},
+		{"date clause", RowQuery{
+			Clauses: []RowClause{{Column: "qty", Op: RowOpGt, Hint: RowHintDate, Value: "10"}},
+		}},
+		{"unsorted", RowQuery{}},
+		{"sorted ascending", RowQuery{Sort: &RowSort{Column: "qty"}}},
+		{"sorted descending", RowQuery{Sort: &RowSort{Column: "qty", Desc: true}}},
+		{"sorted num ascending", RowQuery{Sort: &RowSort{Column: "qty", Hint: RowHintNum}}},
+		{"sorted date ascending", RowQuery{Sort: &RowSort{Column: "qty", Hint: RowHintDate}}},
+		{"another column ascending", RowQuery{Sort: &RowSort{Column: "name"}}},
+	} {
+		tag := rowQueryETag(1, tc.q)
+		if other, clash := seen[tag]; clash {
+			t.Errorf("%s tags as %s does, so one would answer 304 from the other's cache", tc.name, other)
+		}
+		seen[tag] = tc.name
+	}
+}

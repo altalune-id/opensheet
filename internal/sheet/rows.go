@@ -129,6 +129,22 @@ func rowCursorNum(value string) (float64, error) {
 	return num, nil
 }
 
+// NOTE: the same two refusals the drivers carry, hoisted ahead of the freshness gate so a hand-edited envelope costs no Google call; the drivers keep theirs because they bind the value.
+func checkRowCursorSortValue(sort RowSort, c RowCursor) error {
+	if c.NullRank == 1 {
+		return nil
+	}
+	value, err := rowCursorSortValue(c)
+	if err != nil {
+		return err
+	}
+	if sort.Hint != RowHintNum {
+		return nil
+	}
+	_, err = rowCursorNum(value)
+	return err
+}
+
 // NOTE: the label is JSON-quoted, never "$."+field — a naive concat reads a header containing '.' as a nested path and silently returns NULL, and a header holding '[' or '"' raises "bad JSON path".
 func rowJSONPath(field string) (string, error) {
 	label, err := json.Marshal(field)

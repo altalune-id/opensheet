@@ -531,6 +531,7 @@ func refuseTakenID(rows [][]string, idCol int, id string) error {
 // RowFilter is the filtered read one request asks for, before any of it is validated.
 type RowFilter struct {
 	Where       []string
+	Sort        []string
 	Limit       string
 	Cursor      string
 	IfNoneMatch string
@@ -566,6 +567,13 @@ func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (F
 	if err != nil {
 		return FilteredRows{}, recordSpanError(span, err)
 	}
+	sort, err := ParseRowSort(f.Sort)
+	if err != nil {
+		return FilteredRows{}, recordSpanError(span, err)
+	}
+	if err = w.checkSortedWindow(sort, window); err != nil {
+		return FilteredRows{}, recordSpanError(span, err)
+	}
 	age, err := w.freshen(ctx, sh)
 	if err != nil {
 		return FilteredRows{}, recordSpanError(span, err)
@@ -585,6 +593,9 @@ func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (F
 		if err != nil {
 			return FilteredRows{}, recordSpanError(span, err)
 		}
+		if err = resolveRowSortColumn(sort, stats.Columns, key.Tab); err != nil {
+			return FilteredRows{}, recordSpanError(span, err)
+		}
 	}
 
 	// NOTE: read after the refresh, never off sh, whose generation and digest are captured when the sheet is resolved and never updated in memory.
@@ -600,7 +611,7 @@ func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (F
 		return FilteredRows{}, recordSpanError(span, &StaleCursorError{Slug: sh.Slug})
 	}
 
-	q := RowQuery{Clauses: clauses, Window: window}
+	q := RowQuery{Clauses: clauses, Sort: sort, Window: window}
 	out := FilteredRows{
 		ETag:      rowQueryETag(state.Generation, q),
 		FetchedAt: age.fetchedAt,
@@ -633,6 +644,34 @@ func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (F
 	}
 	out.NextCursor = next
 	return out, nil
+}
+
+// NOTE: the canonical spelling is stored on the sort, because both drivers use RowSort.Column verbatim as the JSON field name while the parser leaves the client's own spelling there — and the caller applies 3a's carve-out, so a tab with no live row names no column and leaves a typo'd sort unrefused exactly as it leaves a typo'd clause.
+func resolveRowSortColumn(sort *RowSort, columns []string, tab string) error {
+	if sort == nil {
+		return nil
+	}
+	col, err := columnOf(columns, sort.Column, tab)
+	if err != nil {
+		return &UnknownSortColumnError{Column: sort.Column, Tab: tab}
+	}
+	sort.Column = columns[col]
+	return nil
+}
+
+// NOTE: every refusal here needs no column list and no Google call, so it sits ahead of the freshness gate — placed after it, a capped request pays a refresh first and a client holding a matching tag collects a 304 instead of the refusal.
+func (w *ReadWorkflow) checkSortedWindow(sort *RowSort, window RowWindow) error {
+	if err := CheckRowCursorVersion(window.Cursor, sort != nil); err != nil {
+		return err
+	}
+	if sort == nil || window.Cursor == nil {
+		return nil
+	}
+	// NOTE: Page counts pages already served, so a cursor presenting the cap has had every page the cap allows.
+	if pages := maxSortPagesOf(w.maxSortPages); window.Cursor.Page >= pages {
+		return &SortDepthError{Pages: pages}
+	}
+	return checkRowCursorSortValue(*sort, *window.Cursor)
 }
 
 // NOTE: the null rank and the sort value are derived in Go, from the last row's own cell, because RowPage carries nothing else — and a missing key ranks null while a blank cell ranks 0 with a non-nil empty value, which is what keeps a text walk from repeating or dropping its null tail.
@@ -755,7 +794,7 @@ func (w *ReadWorkflow) project(ctx context.Context, sh *Sheet) error {
 func rowQueryETag(generation int64, q RowQuery) string {
 	clauses := make([]string, 0, len(q.Clauses))
 	for _, c := range q.Clauses {
-		clauses = append(clauses, c.Column+":"+string(c.Op)+":"+c.Value)
+		clauses = append(clauses, c.Column+":"+rowHintPrefix(c.Hint)+string(c.Op)+":"+c.Value)
 	}
 	slices.Sort(clauses)
 	var b strings.Builder
@@ -766,6 +805,11 @@ func rowQueryETag(generation int64, q RowQuery) string {
 	if q.Window.Cursor != nil {
 		b.WriteString("\x00")
 		b.WriteString(strconv.Itoa(q.Window.Cursor.RowIndex))
+	}
+	// NOTE: emitted only when a sort was asked for, and the hint prefix only when hinted, so every tag 3a already issued is byte-identical and shipping this costs no global revalidation miss.
+	if q.Sort != nil {
+		b.WriteString("\x00")
+		b.WriteString(q.Sort.Column + ":" + rowHintPrefix(q.Sort.Hint) + rowSortDirection(*q.Sort))
 	}
 	for _, c := range clauses {
 		b.WriteString("\x00")

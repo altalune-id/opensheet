@@ -135,6 +135,7 @@ type harnessOpts struct {
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
 	maxQueryRows    int
+	maxSortPages    int
 	rowStore        sheet.RowStore
 }
 
@@ -167,7 +168,7 @@ func newReadHarness(t *testing.T, opts harnessOpts) *readHarness {
 	h.wf = sheet.NewReadWorkflow(
 		h.snaps, rowStore, h.srcs, h.toks, h.reauth, h.google.factory(),
 		fakeCaps{public: opts.publicEnabled},
-		opts.defaultTTL, opts.maxPayloadBytes, opts.maxQueryRows,
+		opts.defaultTTL, opts.maxPayloadBytes, opts.maxQueryRows, opts.maxSortPages,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
 	)
 	return h

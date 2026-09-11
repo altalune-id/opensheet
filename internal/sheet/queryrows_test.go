@@ -372,3 +372,337 @@ func TestQueryRows_DoesNotShareTheWholeTabSingleflightKey(t *testing.T) {
 		t.Errorf("Rows = etag:%q payload:%s, want the whole-tab answer", tab.ETag, tab.Payload)
 	}
 }
+
+func sortedCursor(t *testing.T, digest string, page int) string {
+	t.Helper()
+	raw, err := sheet.EncodeSortedRowCursor(
+		sheet.RowCursor{Digest: digest, RowIndex: 0, NullRank: 1, Page: page})
+	if err != nil {
+		t.Fatalf("EncodeSortedRowCursor err = %v", err)
+	}
+	return raw
+}
+
+func unsortedCursor(t *testing.T, digest string) string {
+	t.Helper()
+	raw, err := sheet.EncodeRowCursor(sheet.RowCursor{Digest: digest, RowIndex: 0})
+	if err != nil {
+		t.Fatalf("EncodeRowCursor err = %v", err)
+	}
+	return raw
+}
+
+func TestQueryRows_MalformedSortIsRefusedBeforeAnyGoogleCall(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	for _, tc := range []struct {
+		name string
+		sort []string
+	}{
+		{"given twice", []string{"name:asc", "qty:desc"}},
+		{"no direction", []string{"name"}},
+		{"a third field", []string{"name:num:asc"}},
+		{"unknown direction", []string{"name:sideways"}},
+		{"an upper-case direction", []string{"name:ASC"}},
+		{"no column", []string{":asc"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{Sort: tc.sort})
+			if !sheet.IsInvalidSortError(err) {
+				t.Fatalf("err = %v, want InvalidSortError", err)
+			}
+			if rows, _ := h.google.counts(); rows != 0 {
+				t.Errorf("Google row reads = %d, want a cheap refusal", rows)
+			}
+		})
+	}
+}
+
+// NOTE: the pairing sits at step 2 with the window, so a mismatch needs neither the column list nor a refresh.
+func TestQueryRows_TheCursorVersionMustPairWithTheSortedness(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	for _, tc := range []struct {
+		name   string
+		filter sheet.RowFilter
+	}{
+		{"an unsorted cursor on a sorted read", sheet.RowFilter{
+			Sort: []string{"name:asc"}, Cursor: unsortedCursor(t, "d"),
+		}},
+		{"a sorted cursor on an unsorted read", sheet.RowFilter{
+			Cursor: sortedCursor(t, "d", 1),
+		}},
+		{"a sorted cursor on a bare ?sort=", sheet.RowFilter{
+			Sort: []string{""}, Cursor: sortedCursor(t, "d", 1),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := h.wf.QueryRows(t.Context(), sh, tc.filter)
+			if !sheet.IsInvalidCursorError(err) {
+				t.Fatalf("err = %v, want InvalidCursorError", err)
+			}
+			if rows, _ := h.google.counts(); rows != 0 {
+				t.Errorf("Google row reads = %d, want a cheap refusal", rows)
+			}
+		})
+	}
+}
+
+// NOTE: the envelope carries no MAC, so both malformations are reachable by hand and neither may cost a Google call before it is refused.
+func TestQueryRows_AForgedSortedCursorIsRefusedBeforeAnyGoogleCall(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	valued := func(t *testing.T, value *string) string {
+		t.Helper()
+		raw, err := sheet.EncodeSortedRowCursor(
+			sheet.RowCursor{Digest: "d", RowIndex: 1, SortValue: value, Page: 1})
+		if err != nil {
+			t.Fatalf("EncodeSortedRowCursor err = %v", err)
+		}
+		return raw
+	}
+	notANumber := "abc"
+
+	for _, tc := range []struct {
+		name   string
+		filter sheet.RowFilter
+	}{
+		{"it ranks a value and carries none", sheet.RowFilter{
+			Sort: []string{"name:asc"}, Cursor: valued(t, nil),
+		}},
+		{"its num sort value is outside the grammar", sheet.RowFilter{
+			Sort: []string{"qty:num.asc"}, Cursor: valued(t, &notANumber),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := h.wf.QueryRows(t.Context(), sh, tc.filter)
+			if !sheet.IsInvalidCursorError(err) {
+				t.Fatalf("err = %v, want InvalidCursorError", err)
+			}
+			if rows, _ := h.google.counts(); rows != 0 {
+				t.Errorf("Google row reads = %d, want the driver's refusal hoisted ahead of the gate", rows)
+			}
+		})
+	}
+}
+
+func TestQueryRows_TheSortedWalkDepthIsCapped(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{maxSortPages: 3})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+	state, err := h.rows.StateOf(t.Context(), sh.ID)
+	if err != nil {
+		t.Fatalf("StateOf err = %v", err)
+	}
+
+	if _, err = h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{
+		Sort: []string{"name:asc"}, Cursor: sortedCursor(t, state.Digest, 2),
+	}); err != nil {
+		t.Fatalf("err = %v, want the page one short of the cap served", err)
+	}
+
+	_, err = h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{
+		Sort: []string{"name:asc"}, Cursor: sortedCursor(t, state.Digest, 3),
+	})
+	var depth *sheet.SortDepthError
+	if !errors.As(err, &depth) {
+		t.Fatalf("err = %v, want SortDepthError at the cap", err)
+	}
+	if depth.Pages != 3 {
+		t.Errorf("Pages = %d, want the plumbed sheets.maxSortPages", depth.Pages)
+	}
+}
+
+// TestQueryRows_TheSortPageCapIsRefusedAheadOfTheFreshnessGate pins the cap to step 2: behind the gate every capped request pays a refresh, and behind the conditional check a client holding the tag collects a 304 instead of the refusal.
+func TestQueryRows_TheSortPageCapIsRefusedAheadOfTheFreshnessGate(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{maxSortPages: 3})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+
+	// NOTE: nothing is projected yet, so a read reaching the gate would fetch from Google.
+	_, err := h.wf.QueryRows(t.Context(), sh,
+		sheet.RowFilter{Sort: []string{"name:asc"}, Cursor: sortedCursor(t, "some digest", 3)})
+	if !sheet.IsSortDepthError(err) {
+		t.Fatalf("err = %v, want SortDepthError", err)
+	}
+	if rows, _ := h.google.counts(); rows != 0 {
+		t.Errorf("Google row reads = %d, want the cap refused before the gate", rows)
+	}
+
+	seedFreshProjection(t, h, sh, projectedRows())
+	state, err := h.rows.StateOf(t.Context(), sh.ID)
+	if err != nil {
+		t.Fatalf("StateOf err = %v", err)
+	}
+	// NOTE: the tag hashes the cursor's row index and not its page count, so a page inside the cap and one past it share a tag — which is what makes the refusal's position observable.
+	served, err := h.wf.QueryRows(t.Context(), sh,
+		sheet.RowFilter{Sort: []string{"name:asc"}, Cursor: sortedCursor(t, state.Digest, 1)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	_, err = h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{
+		Sort:        []string{"name:asc"},
+		Cursor:      sortedCursor(t, state.Digest, 3),
+		IfNoneMatch: `"` + served.ETag + `"`,
+	})
+	if !sheet.IsSortDepthError(err) {
+		t.Fatalf("err = %v, want SortDepthError rather than a 304 answered from the page inside the cap", err)
+	}
+}
+
+// NOTE: an unset sheets.maxSortPages falls back through the one site that owns the default, never an inlined <= 0.
+func TestQueryRows_AnUnsetSortPageCapFallsBackToTheDefault(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+	state, err := h.rows.StateOf(t.Context(), sh.ID)
+	if err != nil {
+		t.Fatalf("StateOf err = %v", err)
+	}
+
+	if _, err = h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{
+		Sort:   []string{"name:asc"},
+		Cursor: sortedCursor(t, state.Digest, sheet.DefaultMaxSortPages-1),
+	}); err != nil {
+		t.Fatalf("err = %v, want the page one short of the default cap served", err)
+	}
+
+	_, err = h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{
+		Sort:   []string{"name:asc"},
+		Cursor: sortedCursor(t, state.Digest, sheet.DefaultMaxSortPages),
+	})
+	var depth *sheet.SortDepthError
+	if !errors.As(err, &depth) {
+		t.Fatalf("err = %v, want SortDepthError at the default cap", err)
+	}
+	if depth.Pages != sheet.DefaultMaxSortPages {
+		t.Errorf("Pages = %d, want %d", depth.Pages, sheet.DefaultMaxSortPages)
+	}
+}
+
+// NOTE: an unsorted walk is bounded by nothing but the row count, and its cursor carries no page count to bound it with.
+func TestQueryRows_AnUnsortedWalkIsNotCapped(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{maxSortPages: 1})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+	state, err := h.rows.StateOf(t.Context(), sh.ID)
+	if err != nil {
+		t.Fatalf("StateOf err = %v", err)
+	}
+
+	if _, err = h.wf.QueryRows(t.Context(), sh,
+		sheet.RowFilter{Limit: "1", Cursor: unsortedCursor(t, state.Digest)}); err != nil {
+		t.Fatalf("err = %v, want the sort page cap to leave 3a's walk alone", err)
+	}
+}
+
+func TestQueryRows_AnUnknownSortColumnIsRefused(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+
+	_, err := h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{Sort: []string{"nope:asc"}})
+	if !sheet.IsUnknownSortColumnError(err) {
+		t.Fatalf("err = %v, want UnknownSortColumnError rather than the unknown-clause-column code", err)
+	}
+	if sheet.IsUnknownColumnError(err) {
+		t.Error("a bad sort column is indistinguishable from a bad clause column")
+	}
+}
+
+// NOTE: the same carve-out the clauses get — a tab with no live row names no column, so validating the sort column there would 400 every sorted read of a wholly tombstoned or never-refreshed tab.
+func TestQueryRows_ATabWithNoLiveRowLeavesTheSortColumnUnvalidated(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	at := time.Now().UTC().Add(-time.Hour)
+	seedFreshProjection(t, h, sh, []sheet.ProjectedRow{
+		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "apple"}, DeletedAt: &at},
+	})
+
+	got, err := h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{Sort: []string{"nope:asc"}})
+	if err != nil {
+		t.Fatalf("QueryRows err = %v, want an empty page rather than a refusal", err)
+	}
+	if string(got.Payload) != "[]" {
+		t.Errorf("Payload = %s, want []", got.Payload)
+	}
+}
+
+// TestQueryRows_TheTagSeparatesTheHintAndTheSort exists because every pair below answers a different body at the same generation: a shared tag is a wrong 304, not a slow read.
+func TestQueryRows_TheTagSeparatesTheHintAndTheSort(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+
+	tagOf := func(t *testing.T, f sheet.RowFilter) string {
+		t.Helper()
+		got, err := h.wf.QueryRows(t.Context(), sh, f)
+		if err != nil {
+			t.Fatalf("QueryRows err = %v", err)
+		}
+		return got.ETag
+	}
+
+	for _, tc := range []struct {
+		name string
+		one  sheet.RowFilter
+		othr sheet.RowFilter
+	}{
+		{
+			name: "a hinted clause against an unhinted one",
+			one:  sheet.RowFilter{Where: []string{"qty:gt:10"}},
+			othr: sheet.RowFilter{Where: []string{"qty:num.gt:10"}},
+		},
+		{
+			name: "a num hint against a date one",
+			one:  sheet.RowFilter{Where: []string{"qty:gte:2026-01-01"}},
+			othr: sheet.RowFilter{Where: []string{"qty:date.gte:2026-01-01"}},
+		},
+		{
+			name: "a sorted read against an unsorted one",
+			one:  sheet.RowFilter{},
+			othr: sheet.RowFilter{Sort: []string{"name:asc"}},
+		},
+		{
+			name: "the two directions",
+			one:  sheet.RowFilter{Sort: []string{"name:asc"}},
+			othr: sheet.RowFilter{Sort: []string{"name:desc"}},
+		},
+		{
+			name: "the two sort columns",
+			one:  sheet.RowFilter{Sort: []string{"name:asc"}},
+			othr: sheet.RowFilter{Sort: []string{"qty:asc"}},
+		},
+		{
+			name: "a hinted sort against an unhinted one",
+			one:  sheet.RowFilter{Sort: []string{"qty:asc"}},
+			othr: sheet.RowFilter{Sort: []string{"qty:num.asc"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if one, othr := tagOf(t, tc.one), tagOf(t, tc.othr); one == othr {
+				t.Errorf("both reads tag %q, so one would answer 304 from the other's cache", one)
+			}
+		})
+	}
+}
+
+// NOTE: a bare ?sort= is 3a's unsorted read, so it must also be 3a's tag.
+func TestQueryRows_ABareSortTagsAsAnUnsortedRead(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	seedFreshProjection(t, h, sh, projectedRows())
+
+	bare, err := h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{Sort: []string{""}})
+	if err != nil {
+		t.Fatalf("QueryRows err = %v", err)
+	}
+	none, err := h.wf.QueryRows(t.Context(), sh, sheet.RowFilter{})
+	if err != nil {
+		t.Fatalf("QueryRows err = %v", err)
+	}
+	if bare.ETag != none.ETag {
+		t.Errorf("ETag = %q with a bare sort and %q with none", bare.ETag, none.ETag)
+	}
+}

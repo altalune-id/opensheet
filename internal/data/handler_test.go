@@ -486,6 +486,87 @@ func TestHandler_GetTakesTheFastPathWhenOnlyTheLocaleIsNamed(t *testing.T) {
 	}
 }
 
+// TestHandler_SortAloneDoesNotTakeTheFastPath is the assertion that makes ?sort= reachable: recognising the parameter without adding it to filtered serves the whole unsorted snapshot under the unfiltered tag, which still answers 200 and still looks right.
+func TestHandler_SortAloneDoesNotTakeTheFastPath(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.rows.Payload = []byte(`[{"id":"a","qty":"3"},{"id":"b","qty":"100"}]`)
+	g.reader.page = sheet.FilteredRows{
+		Payload:    []byte(`[{"id":"b","qty":"100"},{"id":"a","qty":"3"}]`),
+		ETag:       "sortedtag",
+		NextCursor: "CURSOR2",
+		FetchedAt:  time.Now().UTC(),
+	}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?sort=qty:num.desc", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), `[{"id":"b","qty":"100"},{"id":"a","qty":"3"}]`; got != want {
+		t.Errorf("body = %s, want the sorted page %s", got, want)
+	}
+	if got, want := rec.Header().Get("ETag"), `"sortedtag"`; got != want {
+		t.Errorf("ETag = %q, want the sorted tag %q", got, want)
+	}
+	if len(g.reader.calls) != 0 {
+		t.Error("a sorted read took the serve-verbatim whole-tab path")
+	}
+	if len(g.reader.pageCalls) != 1 {
+		t.Fatalf("filtered reads = %d, want 1", len(g.reader.pageCalls))
+	}
+	if got, want := g.reader.pageCalls[0].Sort, []string{"qty:num.desc"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Sort = %#v, want %#v", got, want)
+	}
+	// NOTE: the next-page link must carry the sort, or the v2 cursor it also carries lands on an unsorted read.
+	want := `<?cursor=CURSOR2&sort=qty%3Anum.desc>; rel="next"`
+	if got := rec.Header().Get("Link"); got != want {
+		t.Errorf("Link = %q, want %q", got, want)
+	}
+}
+
+// NOTE: the raw slice reaches the workflow, never query.Get's silent first value, so a repeated ?sort= is refusable.
+func TestHandler_GetCarriesEverySortValueSoARepeatIsRefusable(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.page = sheet.FilteredRows{Payload: []byte(`[]`), ETag: "pagetag"}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?sort=qty:asc&sort=name:desc", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.reader.pageCalls) != 1 {
+		t.Fatalf("filtered reads = %d, want 1", len(g.reader.pageCalls))
+	}
+	want := []string{"qty:asc", "name:desc"}
+	if got := g.reader.pageCalls[0].Sort; !reflect.DeepEqual(got, want) {
+		t.Errorf("Sort = %#v, want %#v", got, want)
+	}
+}
+
+// NOTE: a bare ?sort= filters (the parameter was named) but parses to no sort at all, so the two halves must not be read off one another.
+func TestHandler_GetBareSortStillLeavesTheFastPath(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+	g.reader.page = sheet.FilteredRows{Payload: []byte(`[]`), ETag: "pagetag"}
+
+	rec := g.do(t, http.MethodGet, rowsPath+"?sort=", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(g.reader.calls) != 0 {
+		t.Error("a named sort parameter took the whole-tab path")
+	}
+	if len(g.reader.pageCalls) != 1 {
+		t.Fatalf("filtered reads = %d, want 1", len(g.reader.pageCalls))
+	}
+	if got, want := g.reader.pageCalls[0].Sort, []string{""}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Sort = %#v, want %#v", got, want)
+	}
+}
+
 func TestHandler_GetFilteredServesThePageAndLinksTheNextOne(t *testing.T) {
 	g := newRig()
 	g.sheets.ref.Visibility = sheet.VisibilityPublic

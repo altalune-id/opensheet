@@ -71,6 +71,7 @@ type ReadWorkflow struct {
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
 	maxQueryRows    int
+	maxSortPages    int
 	log             *slog.Logger
 	unexpected      apperror.UnexpectedFunc
 	flight          singleflight.Group
@@ -88,6 +89,7 @@ func NewReadWorkflow(
 	defaultTTL time.Duration,
 	maxPayloadBytes int64,
 	maxQueryRows int,
+	maxSortPages int,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
 ) *ReadWorkflow {
@@ -102,6 +104,7 @@ func NewReadWorkflow(
 		defaultTTL:      defaultTTL,
 		maxPayloadBytes: maxPayloadBytes,
 		maxQueryRows:    maxQueryRows,
+		maxSortPages:    maxSortPages,
 		log:             log.With("module", "sheet"),
 		unexpected:      unexpected,
 	}

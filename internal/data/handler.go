@@ -76,6 +76,7 @@ const mountSuffix = "/api/v1"
 
 const (
 	whereParam  = "where"
+	sortParam   = "sort"
 	limitParam  = "limit"
 	cursorParam = "cursor"
 )
@@ -196,18 +197,22 @@ func rowFilterOf(r *http.Request) (filter sheet.RowFilter, filtered bool, err er
 	}
 	filter = sheet.RowFilter{
 		Where:       query[whereParam],
+		Sort:        query[sortParam],
 		Limit:       query.Get(limitParam),
 		Cursor:      query.Get(cursorParam),
 		IfNoneMatch: r.Header.Get("If-None-Match"),
 	}
-	filtered = len(filter.Where) > 0 || query.Has(limitParam) || query.Has(cursorParam)
+	// SECURITY: ?sort= joins this disjunction, not only the allow-list — recognising it without it would
+	// serve the whole unsorted blob under the unfiltered ETag, a 200 that looks right.
+	filtered = len(filter.Where) > 0 || query.Has(sortParam) ||
+		query.Has(limitParam) || query.Has(cursorParam)
 	return filter, filtered, nil
 }
 
 // NOTE: i18n.QueryParam is consumed by the middleware in front of the mount, so it reaches here and is not the caller's mistake.
 func recognisedQueryParam(name string) bool {
 	switch name {
-	case whereParam, limitParam, cursorParam, i18n.QueryParam:
+	case whereParam, sortParam, limitParam, cursorParam, i18n.QueryParam:
 		return true
 	default:
 		return false

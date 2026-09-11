@@ -259,6 +259,21 @@ func ParseRowSort(raw []string) (*RowSort, error) {
 	}
 }
 
+func rowHintPrefix(hint RowHint) string {
+	if hint == RowHintNone {
+		return ""
+	}
+	return string(hint) + "."
+}
+
+// NOTE: RowSort carries only a bool, so the direction is spelled out rather than formatted, or asc and desc would share a tag under %v's zero value.
+func rowSortDirection(sort RowSort) string {
+	if sort.Desc {
+		return rowSortDesc
+	}
+	return rowSortAsc
+}
+
 func maxSortPagesOf(configured int) int {
 	if configured <= 0 {
 		return DefaultMaxSortPages
