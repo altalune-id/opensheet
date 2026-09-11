@@ -4,6 +4,8 @@ package sheet_test
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -917,4 +919,84 @@ func TestQuery_IsIdenticalAcrossDrivers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, pgPage, litePage, "limit=%d must page identically on both drivers", limit)
 	}
+}
+
+// pgNumGuard is the Postgres spelling of the whole num grammar: NumPattern bounds each digit run, the length test bounds the significant digits.
+const pgNumGuard = `SELECT $1::text ~ $2::text
+                      AND length(ltrim(translate($1::text, '-.', ''), '0')) <= $3::int`
+
+// TestPgTypedGrammar_AgreesWithTheGoGrammar drives the Postgres half of the grammar off the same tables as ParseNum, MatchesDateShape and the two registered SQLite functions.
+func TestPgTypedGrammar_AgreesWithTheGoGrammar(t *testing.T) {
+	f := newPgFixture(t)
+
+	t.Run("num", func(t *testing.T) {
+		for _, tc := range numGrammarCases() {
+			t.Run(tc.name, func(t *testing.T) {
+				var admitted bool
+				require.NoError(t, f.ownerDB.QueryRowContext(t.Context(), pgNumGuard,
+					tc.in, sheet.NumPattern, sheet.NumSignificanceLimit).Scan(&admitted))
+				require.Equal(t, tc.ok, admitted, "the Postgres guard must admit exactly what ParseNum admits")
+				if !tc.ok {
+					return
+				}
+				want, ok := sheet.ParseNum(tc.in)
+				require.True(t, ok)
+				var same bool
+				require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+					`SELECT ($1::text)::numeric = ($2::text)::numeric`,
+					tc.in, strconv.FormatFloat(want, 'f', -1, 64)).Scan(&same))
+				require.True(t, same,
+					"Postgres numeric is exact and Go is float64; inside the 15-digit bound they must be the same value")
+			})
+		}
+	})
+
+	t.Run("date", func(t *testing.T) {
+		for _, tc := range dateGrammarCases() {
+			t.Run(tc.name, func(t *testing.T) {
+				var matched bool
+				require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+					`SELECT $1::text ~ $2::text`, tc.in, sheet.DatePattern).Scan(&matched))
+				require.Equal(t, tc.ok, matched, "DatePattern must read the same in Postgres ARE as in Go RE2")
+			})
+		}
+	})
+
+	// NumPattern alone bounds each digit run, not the significant digits across the point, so task 3's CASE needs both halves.
+	t.Run("the shape regex alone is not the guard", func(t *testing.T) {
+		const crossRun = "123456789012345.1"
+		_, ok := sheet.ParseNum(crossRun)
+		require.False(t, ok, "16 significant digits are outside the Go grammar")
+
+		var shapeOnly, guarded bool
+		require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+			`SELECT $1::text ~ $2::text`, crossRun, sheet.NumPattern).Scan(&shapeOnly))
+		require.True(t, shapeOnly, "the shape regex admits it, so the regex alone would diverge from Go")
+		require.NoError(t, f.ownerDB.QueryRowContext(t.Context(), pgNumGuard,
+			crossRun, sheet.NumPattern, sheet.NumSignificanceLimit).Scan(&guarded))
+		require.False(t, guarded, "the significance half closes the divergence")
+	})
+
+	t.Run("what the guard prevents", func(t *testing.T) {
+		for _, tc := range []struct {
+			in      string
+			valid   bool
+			because string
+		}{
+			{in: "NaN", valid: true, because: "pg_input_is_valid accepts NaN, which sorts above every finite numeric"},
+			{in: "Infinity", valid: true, because: "pg_input_is_valid accepts Infinity"},
+			{in: strings.Repeat("9", 309), valid: true, because: "a 309-digit numeric is exact in Postgres and ErrRange in Go"},
+			{in: "0." + strings.Repeat("9", 16384), valid: false, because: "numeric overflows past 16,383 fractional digits, so a bare cast would raise"},
+		} {
+			t.Run(tc.because, func(t *testing.T) {
+				var valid, admitted bool
+				require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+					`SELECT pg_input_is_valid($1::text, 'numeric')`, tc.in).Scan(&valid))
+				require.Equal(t, tc.valid, valid)
+				require.NoError(t, f.ownerDB.QueryRowContext(t.Context(), pgNumGuard,
+					tc.in, sheet.NumPattern, sheet.NumSignificanceLimit).Scan(&admitted))
+				require.False(t, admitted, "the grammar must refuse it: %s", tc.because)
+			})
+		}
+	})
 }
