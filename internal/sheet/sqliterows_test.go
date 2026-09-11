@@ -361,6 +361,9 @@ func TestSQLiteRowStore_RequiresTenantScope(t *testing.T) {
 	_, err = store.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
 
+	_, err = store.Query(t.Context(), k, sheet.RowQuery{})
+	assert.True(t, tenant.IsMissingError(err), "Query want MissingError, got %T: %v", err, err)
+
 	_, err = store.Stats(t.Context(), k.SheetID, k.Tab)
 	assert.True(t, tenant.IsMissingError(err), "Stats want MissingError, got %T: %v", err, err)
 
@@ -666,4 +669,247 @@ func TestSQLiteRowStore_UpsertRow_ClearsTheDigestSoOutstandingCursorsAreRefused(
 	assert.Empty(t, after.Digest,
 		"a write must clear the digest, or a cursor issued before it still matches and the walk resumes across a mutation")
 	assert.Greater(t, after.Generation, settled.Generation, "a write always bumps")
+}
+
+// queryFixtureRows is the shared filter fixture both drivers seed: interior row_index gaps, one tombstone, an empty cell, a missing key, and values that become wildcards if a LIKE pattern is not escaped.
+func queryFixtureRows(deletedAt *time.Time) []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "r1", RowIndex: 0, Data: gsheet.Row{
+			"id": "r1", "status": "open", "owner": "ada", "note": "alpha", "qty": "10"}},
+		{RowID: "r2", RowIndex: 2, Data: gsheet.Row{
+			"id": "r2", "status": "closed", "owner": "bob", "note": "", "qty": "03"}},
+		{RowID: "r3", RowIndex: 3, Data: gsheet.Row{
+			"id": "r3", "status": "open", "owner": "cyd", "note": "100% s", "qty": "05"}, DeletedAt: deletedAt},
+		{RowID: "r4", RowIndex: 5, Data: gsheet.Row{
+			"id": "r4", "status": "open", "owner": "dee", "qty": "20"}},
+		{RowID: "r5", RowIndex: 6, Data: gsheet.Row{
+			"id": "r5", "status": "held", "owner": "eve", "note": "_wild", "qty": "02"}},
+		{RowID: "r6", RowIndex: 8, Data: gsheet.Row{
+			"id": "r6", "status": "open", "owner": "fay", "note": "100% s", "qty": "09"}},
+		{RowID: "r7", RowIndex: 9, Data: gsheet.Row{
+			"id": "r7", "status": "open", "owner": "gus", "note": "10023", "qty": "07"}},
+	}
+}
+
+func queryFixtureColumns() []string {
+	return []string{"id", "note", "owner", "qty", "status"}
+}
+
+func hostileFixtureColumns() []string {
+	return []string{`a'; DROP TABLE opensheet_sheet_rows; --`, "id", `q"uote`, "weird.dotted"}
+}
+
+func hostileFixtureRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "h1", RowIndex: 0, Data: gsheet.Row{
+			"id": "h1", `a'; DROP TABLE opensheet_sheet_rows; --`: "boom", "weird.dotted": "dot", `q"uote`: "quoted"}},
+		{RowID: "h2", RowIndex: 1, Data: gsheet.Row{
+			"id": "h2", `a'; DROP TABLE opensheet_sheet_rows; --`: "safe", "weird.dotted": "other", `q"uote`: "else"}},
+	}
+}
+
+func queryOf(t *testing.T, columns []string, limit int, where ...string) sheet.RowQuery {
+	t.Helper()
+	clauses, err := sheet.ParseRowClauses(where, columns, "Rates")
+	require.NoError(t, err)
+	return sheet.RowQuery{Clauses: clauses, Window: sheet.RowWindow{Limit: limit}}
+}
+
+func rowIDsOf(rows []sheet.ProjectedRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.RowID)
+	}
+	return out
+}
+
+type queryCase struct {
+	name  string
+	where []string
+	want  []string
+}
+
+// queryCases is every operator against queryFixtureRows, asserted by row id in row_index order.
+func queryCases() []queryCase {
+	return []queryCase{
+		{"eq", []string{"status:eq:open"}, []string{"r1", "r4", "r6", "r7"}},
+		{"eq misses", []string{"status:eq:nobody"}, []string{}},
+		{"ne", []string{"status:ne:open"}, []string{"r2", "r5"}},
+		{"gt", []string{"owner:gt:cyd"}, []string{"r4", "r5", "r6", "r7"}},
+		{"gte", []string{"owner:gte:dee"}, []string{"r4", "r5", "r6", "r7"}},
+		{"lt", []string{"owner:lt:bob"}, []string{"r1"}},
+		{"lte", []string{"owner:lte:bob"}, []string{"r1", "r2"}},
+		{"gte on zero-padded numbers sorts numerically", []string{"qty:gte:09"}, []string{"r1", "r4", "r6"}},
+		{"contains", []string{"owner:contains:d"}, []string{"r1", "r4"}},
+		{"starts", []string{"owner:starts:a"}, []string{"r1"}},
+		{"starts is case-insensitive for ascii", []string{"owner:starts:A"}, []string{"r1"}},
+		{"in", []string{"status:in:open,held"}, []string{"r1", "r4", "r5", "r6", "r7"}},
+		{"in with one item", []string{"status:in:held"}, []string{"r5"}},
+		{"empty matches an empty string and a missing key", []string{"note:empty"}, []string{"r2", "r4"}},
+		{"present is the negation of empty", []string{"note:present"}, []string{"r1", "r5", "r6", "r7"}},
+		{"contains treats % literally", []string{"note:contains:100%"}, []string{"r6"}},
+		{"starts treats % literally", []string{"note:starts:100%"}, []string{"r6"}},
+		{"contains treats _ literally", []string{"note:contains:_w"}, []string{"r5"}},
+		{"an unescaped _ would match alpha", []string{"note:contains:_l"}, []string{}},
+		{"clauses AND", []string{"status:eq:open", "owner:gte:fay"}, []string{"r6", "r7"}},
+		{"a tombstoned row is never returned", []string{"id:eq:r3"}, []string{}},
+	}
+}
+
+func seedSQLiteQueryFixture(t *testing.T, f *fixture, rows []sheet.ProjectedRow) (sheet.RowStore, sheet.SnapshotKey) {
+	t.Helper()
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	ok, err := store.Replace(f.ctx(), k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	return store, k
+}
+
+func TestSQLiteRowStore_Query_EveryOperator(t *testing.T) {
+	f := newSQLiteFixture(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	for _, tc := range queryCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := store.Query(f.ctx(), k, queryOf(t, queryFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			assert.False(t, page.More, "a page under the limit has nothing following it")
+		})
+	}
+}
+
+// TestSQLiteRowStore_Query_KeysetVisitsEveryRowExactlyOnce is the assertion this method exists for: the fixture has an interior row_index gap and an interior tombstone, which a naive OFFSET or a row_index+1 cursor both get wrong.
+func TestSQLiteRowStore_Query_KeysetVisitsEveryRowExactlyOnce(t *testing.T) {
+	f := newSQLiteFixture(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	live, err := store.ListLive(f.ctx(), k)
+	require.NoError(t, err)
+	require.Len(t, live, 6)
+
+	walked := make([]string, 0, len(live))
+	var cursor *sheet.RowCursor
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 20, "the walk must terminate")
+		page, qErr := store.Query(f.ctx(), k, sheet.RowQuery{
+			Window: sheet.RowWindow{Limit: 2, Cursor: cursor},
+		})
+		require.NoError(t, qErr)
+		require.LessOrEqual(t, len(page.Rows), 2, "the limit+1 over-fetch must not leak into Rows")
+		walked = append(walked, rowIDsOf(page.Rows)...)
+		if !page.More {
+			break
+		}
+		require.NotEmpty(t, page.Rows, "More cannot be true on an empty page")
+		cursor = &sheet.RowCursor{Digest: "d", RowIndex: page.Rows[len(page.Rows)-1].RowIndex}
+	}
+
+	assert.Equal(t, rowIDsOf(live), walked,
+		"the keyset walk must visit every live row exactly once, in row_index order")
+}
+
+func TestSQLiteRowStore_Query_MoreReportsWhetherAPageFollows(t *testing.T) {
+	f := newSQLiteFixture(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	for _, tc := range []struct {
+		limit    int
+		wantRows int
+		wantMore bool
+	}{
+		{2, 2, true},
+		{5, 5, true},
+		{6, 6, false},
+		{7, 6, false},
+		{0, 6, false},
+	} {
+		page, err := store.Query(f.ctx(), k, sheet.RowQuery{Window: sheet.RowWindow{Limit: tc.limit}})
+		require.NoError(t, err)
+		assert.Len(t, page.Rows, tc.wantRows, "limit=%d", tc.limit)
+		assert.Equal(t, tc.wantMore, page.More,
+			"limit=%d: More must distinguish a full last page from a full page with more behind it", tc.limit)
+	}
+}
+
+func TestSQLiteRowStore_Query_AHostileColumnNameIsInert(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, hostileFixtureRows())
+
+	for _, tc := range []struct {
+		column string
+		value  string
+		want   []string
+	}{
+		{`a'; DROP TABLE opensheet_sheet_rows; --`, "boom", []string{"h1"}},
+		{"weird.dotted", "other", []string{"h2"}},
+		{`q"uote`, "quoted", []string{"h1"}},
+	} {
+		q := queryOf(t, hostileFixtureColumns(), 10, tc.column+":eq:"+tc.value)
+		page, err := store.Query(f.ctx(), k, q)
+		require.NoError(t, err, "column %q must bind as a parameter, not as SQL or a JSON path fragment", tc.column)
+		assert.Equal(t, tc.want, rowIDsOf(page.Rows), "column %q", tc.column)
+	}
+
+	var count int
+	require.NoError(t, f.db.QueryRow("SELECT count(*) FROM "+f.prefix+"sheet_rows").Scan(&count))
+	assert.Equal(t, 2, count, "the projection table must still exist with its rows")
+
+	still, err := store.ListLive(f.ctx(), k)
+	require.NoError(t, err)
+	assert.Len(t, still, 2)
+}
+
+// NOTE: sqlite has no RLS, so this is what holds the explicit org_id predicate in place; on postgres FORCE ROW LEVEL SECURITY is the backstop and no test can see the predicate go missing.
+func TestSQLiteRowStore_Query_IsScopedToOneOrg(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(nil))
+
+	stranger := tenant.Into(t.Context(), tenant.Context{
+		OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New(),
+	})
+	page, err := store.Query(stranger, k, sheet.RowQuery{Window: sheet.RowWindow{Limit: 10}})
+	require.NoError(t, err)
+	assert.Empty(t, page.Rows, "another org must read zero rows, predicate first and RLS second")
+	assert.False(t, page.More)
+}
+
+func TestSQLiteRowStore_Query_PagesAFilteredWalk(t *testing.T) {
+	f := newSQLiteFixture(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	walked := make([]string, 0, 4)
+	var cursor *sheet.RowCursor
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 20, "the walk must terminate")
+		q := queryOf(t, queryFixtureColumns(), 2, "status:eq:open")
+		q.Window.Cursor = cursor
+		page, err := store.Query(f.ctx(), k, q)
+		require.NoError(t, err)
+		walked = append(walked, rowIDsOf(page.Rows)...)
+		if !page.More {
+			break
+		}
+		cursor = &sheet.RowCursor{Digest: "d", RowIndex: page.Rows[len(page.Rows)-1].RowIndex}
+	}
+
+	assert.Equal(t, []string{"r1", "r4", "r6", "r7"}, walked,
+		"the cursor and the clauses must compose: every match once, no repeats")
+}
+
+func TestSQLiteRowStore_Query_IsScopedToOneTab(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, queryFixtureRows(nil))
+
+	other := sheet.SnapshotKey{SheetID: k.SheetID, Tab: "Extras"}
+	page, err := store.Query(f.ctx(), other, sheet.RowQuery{Window: sheet.RowWindow{Limit: 10}})
+	require.NoError(t, err)
+	assert.Empty(t, page.Rows, "another tab's rows are not this tab's")
+	assert.False(t, page.More)
 }

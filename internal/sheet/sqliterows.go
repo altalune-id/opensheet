@@ -289,6 +289,129 @@ func (s *sqliteRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]Project
 	return out, nil
 }
 
+// NOTE: this goes through inTx, never a bare s.db — a read that a write path may reach deadlocks against the single writer otherwise.
+func (s *sqliteRowStore) Query(ctx context.Context, k SnapshotKey, q RowQuery) (RowPage, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return RowPage{}, err
+	}
+	where, err := s.queryPredicate(tc, k, q)
+	if err != nil {
+		return RowPage{}, err
+	}
+	limit := rowQueryLimit(q.Window)
+	var out []ProjectedRow
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
+			FROM(s.rows).
+			WHERE(where).
+			ORDER_BY(s.rows.RowIndex.ASC()).
+			LIMIT(int64(limit) + 1)
+		var scanned []sqliteProjectedRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			return fmt.Errorf("sheet.rows.sqlite.Query: %w", qErr)
+		}
+		out = make([]ProjectedRow, 0, len(scanned))
+		for i := range scanned {
+			data, dErr := unmarshalRowData(scanned[i].Data)
+			if dErr != nil {
+				return dErr
+			}
+			out = append(out, ProjectedRow{
+				RowID:    scanned[i].RowID,
+				RowIndex: int(scanned[i].RowIndex),
+				Data:     data,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return RowPage{}, err
+	}
+	return rowPageOf(out, limit), nil
+}
+
+// NOTE: the keyset reads sheet_rows_page_idx (sheet_id, tab, row_index) directly; OFFSET would re-scan from the top and skip rows a concurrent edit shifted.
+func (s *sqliteRowStore) queryPredicate(
+	tc tenant.Context, k SnapshotKey, q RowQuery,
+) (sqlite.BoolExpression, error) {
+	where := s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+		AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+		AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
+		AND(s.rows.DeletedAt.IS_NULL())
+	if q.Window.Cursor != nil {
+		where = where.AND(s.rows.RowIndex.GT(sqlite.Int(int64(q.Window.Cursor.RowIndex))))
+	}
+	for _, clause := range q.Clauses {
+		pred, err := sqliteClausePredicate(s.rows.Data, clause)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(pred)
+	}
+	return where, nil
+}
+
+// NOTE: the path binds as a parameter, and that bind is the injection boundary — column validation exists for the UnknownColumnError refusal, not for safety.
+func sqliteCell(data sqlite.ColumnString, field string) (sqlite.StringExpression, error) {
+	path, err := rowJSONPath(field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.StringExp(sqlite.Func("json_extract", data, sqlite.String(path))), nil
+}
+
+func sqliteClausePredicate(data sqlite.ColumnString, c RowClause) (sqlite.BoolExpression, error) {
+	cell, err := sqliteCell(data, c.Column)
+	if err != nil {
+		return nil, err
+	}
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(sqlite.String(c.Value)), nil
+	case RowOpNe:
+		return cell.NOT_EQ(sqlite.String(c.Value)), nil
+	case RowOpGt:
+		return cell.GT(sqlite.String(c.Value)), nil
+	case RowOpGte:
+		return cell.GT_EQ(sqlite.String(c.Value)), nil
+	case RowOpLt:
+		return cell.LT(sqlite.String(c.Value)), nil
+	case RowOpLte:
+		return cell.LT_EQ(sqlite.String(c.Value)), nil
+	case RowOpContains, RowOpStarts:
+		return sqliteLike(cell, c.Pattern), nil
+	case RowOpIn:
+		return cell.IN(sqliteStringList(c.Values)...), nil
+	case RowOpEmpty:
+		return cell.IS_NULL().OR(cell.EQ(sqlite.String(""))), nil
+	case RowOpPresent:
+		return cell.IS_NOT_NULL().AND(cell.NOT_EQ(sqlite.String(""))), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+// NOTE: ESCAPE is mandatory here, not optional — SQLite has no default escape character, so a backslash-escaped pattern without it turns a Postgres false positive into a SQLite false negative.
+func sqliteLike(cell sqlite.StringExpression, pattern string) sqlite.BoolExpression {
+	return sqlite.BoolExp(sqlite.CustomExpression(
+		sqlite.Token("("),
+		sqlite.LOWER(cell),
+		sqlite.Token("LIKE"),
+		sqlite.LOWER(sqlite.String(pattern)),
+		sqlite.Token("ESCAPE"),
+		sqlite.String(RowLikeEscape),
+		sqlite.Token(")"),
+	))
+}
+
+func sqliteStringList(values []string) []sqlite.Expression {
+	out := make([]sqlite.Expression, 0, len(values))
+	for _, v := range values {
+		out = append(out, sqlite.String(v))
+	}
+	return out
+}
+
 // NOTE: an empty sheets.tab means "the first tab", whose name only Google knows — so the busiest projected tab stands in, which a rename's orphans mirror row for row.
 func (s *sqliteRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error) {
 	tc, err := tenant.From(ctx)

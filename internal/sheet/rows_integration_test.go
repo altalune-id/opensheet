@@ -362,6 +362,10 @@ func TestPgRowStore_IsTenantScoped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got, "org B must read zero rows from org A's sheet")
 
+	pageForB, err := f.rows.Query(ctxB, k, sheet.RowQuery{Window: sheet.RowWindow{Limit: 10}})
+	require.NoError(t, err)
+	assert.Empty(t, pageForB.Rows, "org B must query zero rows from org A's sheet")
+
 	_, err = f.rows.RowByID(ctxB, k, "a")
 	assert.True(t, sheet.IsRowNotFoundError(err),
 		"org B must not read org A's row by id, got %T: %v", err, err)
@@ -414,6 +418,9 @@ func TestPgRowStore_RequiresTenantScope(t *testing.T) {
 
 	_, err = f.rows.ListLive(t.Context(), k)
 	assert.True(t, tenant.IsMissingError(err), "ListLive want MissingError, got %T: %v", err, err)
+
+	_, err = f.rows.Query(t.Context(), k, sheet.RowQuery{})
+	assert.True(t, tenant.IsMissingError(err), "Query want MissingError, got %T: %v", err, err)
 
 	_, err = f.rows.Stats(t.Context(), k.SheetID, k.Tab)
 	assert.True(t, tenant.IsMissingError(err), "Stats want MissingError, got %T: %v", err, err)
@@ -728,4 +735,186 @@ func TestPgRowStore_UpsertRow_ClearsTheDigestSoOutstandingCursorsAreRefused(t *t
 	assert.Empty(t, after.Digest,
 		"a write must clear the digest, or a cursor issued before it still matches and the walk resumes across a mutation")
 	assert.Greater(t, after.Generation, settled.Generation, "a write always bumps")
+}
+
+func pgSeedQueryFixture(t *testing.T, f *pgFixture, rows []sheet.ProjectedRow) sheet.SnapshotKey {
+	t.Helper()
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	ok, err := f.rows.Replace(f.a.ctx(t), k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	return k
+}
+
+func TestPgRowStore_Query_EveryOperator(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	k := pgSeedQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	for _, tc := range queryCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := f.rows.Query(ctx, k, queryOf(t, queryFixtureColumns(), 100, tc.where...))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, rowIDsOf(page.Rows), "?where=%v", tc.where)
+			assert.False(t, page.More, "a page under the limit has nothing following it")
+		})
+	}
+}
+
+// TestPgRowStore_Query_KeysetVisitsEveryRowExactlyOnce is the assertion this method exists for: the fixture has an interior row_index gap and an interior tombstone, which a naive OFFSET or a row_index+1 cursor both get wrong.
+func TestPgRowStore_Query_KeysetVisitsEveryRowExactlyOnce(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	k := pgSeedQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	live, err := f.rows.ListLive(ctx, k)
+	require.NoError(t, err)
+	require.Len(t, live, 6)
+
+	walked := make([]string, 0, len(live))
+	var cursor *sheet.RowCursor
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 20, "the walk must terminate")
+		page, qErr := f.rows.Query(ctx, k, sheet.RowQuery{
+			Window: sheet.RowWindow{Limit: 2, Cursor: cursor},
+		})
+		require.NoError(t, qErr)
+		require.LessOrEqual(t, len(page.Rows), 2, "the limit+1 over-fetch must not leak into Rows")
+		walked = append(walked, rowIDsOf(page.Rows)...)
+		if !page.More {
+			break
+		}
+		require.NotEmpty(t, page.Rows, "More cannot be true on an empty page")
+		cursor = &sheet.RowCursor{Digest: "d", RowIndex: page.Rows[len(page.Rows)-1].RowIndex}
+	}
+
+	assert.Equal(t, rowIDsOf(live), walked,
+		"the keyset walk must visit every live row exactly once, in row_index order")
+}
+
+func TestPgRowStore_Query_MoreReportsWhetherAPageFollows(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	k := pgSeedQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	for _, tc := range []struct {
+		limit    int
+		wantRows int
+		wantMore bool
+	}{
+		{2, 2, true},
+		{5, 5, true},
+		{6, 6, false},
+		{7, 6, false},
+		{0, 6, false},
+	} {
+		page, err := f.rows.Query(ctx, k, sheet.RowQuery{Window: sheet.RowWindow{Limit: tc.limit}})
+		require.NoError(t, err)
+		assert.Len(t, page.Rows, tc.wantRows, "limit=%d", tc.limit)
+		assert.Equal(t, tc.wantMore, page.More,
+			"limit=%d: More must distinguish a full last page from a full page with more behind it", tc.limit)
+	}
+}
+
+func TestPgRowStore_Query_AHostileColumnNameIsInert(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, hostileFixtureRows())
+
+	for _, tc := range []struct {
+		column string
+		value  string
+		want   []string
+	}{
+		{`a'; DROP TABLE opensheet_sheet_rows; --`, "boom", []string{"h1"}},
+		{"weird.dotted", "other", []string{"h2"}},
+		{`q"uote`, "quoted", []string{"h1"}},
+	} {
+		q := queryOf(t, hostileFixtureColumns(), 10, tc.column+":eq:"+tc.value)
+		page, err := f.rows.Query(ctx, k, q)
+		require.NoError(t, err, "column %q must bind as a parameter, not as SQL", tc.column)
+		assert.Equal(t, tc.want, rowIDsOf(page.Rows), "column %q", tc.column)
+	}
+
+	var count int
+	require.NoError(t, f.ownerDB.QueryRowContext(t.Context(),
+		"SELECT count(*) FROM public."+f.prefix+"sheet_rows").Scan(&count))
+	assert.Equal(t, 2, count, "the projection table must still exist with its rows")
+
+	still, err := f.rows.ListLive(ctx, k)
+	require.NoError(t, err)
+	assert.Len(t, still, 2)
+}
+
+func TestPgRowStore_Query_PagesAFilteredWalk(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	k := pgSeedQueryFixture(t, f, queryFixtureRows(&deletedAt))
+
+	walked := make([]string, 0, 4)
+	var cursor *sheet.RowCursor
+	for pages := 0; ; pages++ {
+		require.Less(t, pages, 20, "the walk must terminate")
+		q := queryOf(t, queryFixtureColumns(), 2, "status:eq:open")
+		q.Window.Cursor = cursor
+		page, err := f.rows.Query(ctx, k, q)
+		require.NoError(t, err)
+		walked = append(walked, rowIDsOf(page.Rows)...)
+		if !page.More {
+			break
+		}
+		cursor = &sheet.RowCursor{Digest: "d", RowIndex: page.Rows[len(page.Rows)-1].RowIndex}
+	}
+
+	assert.Equal(t, []string{"r1", "r4", "r6", "r7"}, walked,
+		"the cursor and the clauses must compose: every match once, no repeats")
+}
+
+func TestPgRowStore_Query_IsScopedToOneTab(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, queryFixtureRows(nil))
+
+	page, err := f.rows.Query(ctx, sheet.SnapshotKey{SheetID: k.SheetID, Tab: "Extras"},
+		sheet.RowQuery{Window: sheet.RowWindow{Limit: 10}})
+	require.NoError(t, err)
+	assert.Empty(t, page.Rows, "another tab's rows are not this tab's")
+	assert.False(t, page.More)
+}
+
+// TestQuery_IsIdenticalAcrossDrivers is narrowed on purpose: LOWER is collation-dependent on Postgres and ASCII-only on SQLite, so only canonical text values are claimed to agree.
+func TestQuery_IsIdenticalAcrossDrivers(t *testing.T) {
+	pgf := newPgFixture(t)
+	pgCtx := pgf.a.ctx(t)
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	pgKey := pgSeedQueryFixture(t, pgf, queryFixtureRows(&deletedAt))
+
+	lf := newSQLiteFixture(t)
+	liteStore, liteKey := seedSQLiteQueryFixture(t, lf, queryFixtureRows(&deletedAt))
+
+	for _, tc := range queryCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			q := queryOf(t, queryFixtureColumns(), 100, tc.where...)
+			pgPage, err := pgf.rows.Query(pgCtx, pgKey, q)
+			require.NoError(t, err)
+			litePage, err := liteStore.Query(lf.ctx(), liteKey, q)
+			require.NoError(t, err)
+			assert.Equal(t, pgPage, litePage, "?where=%v must answer identically on both drivers", tc.where)
+			assert.Equal(t, tc.want, rowIDsOf(pgPage.Rows))
+		})
+	}
+
+	for _, limit := range []int{2, 5, 6, 7} {
+		q := sheet.RowQuery{Window: sheet.RowWindow{Limit: limit}}
+		pgPage, err := pgf.rows.Query(pgCtx, pgKey, q)
+		require.NoError(t, err)
+		litePage, err := liteStore.Query(lf.ctx(), liteKey, q)
+		require.NoError(t, err)
+		assert.Equal(t, pgPage, litePage, "limit=%d must page identically on both drivers", limit)
+	}
 }

@@ -284,6 +284,122 @@ func (s *postgresRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]Proje
 	return out, nil
 }
 
+func (s *postgresRowStore) Query(ctx context.Context, k SnapshotKey, q RowQuery) (RowPage, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return RowPage{}, err
+	}
+	where, err := s.queryPredicate(tc, k, q)
+	if err != nil {
+		return RowPage{}, err
+	}
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return RowPage{}, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	limit := rowQueryLimit(q.Window)
+	stmt := postgres.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
+		FROM(s.rows).
+		WHERE(where).
+		ORDER_BY(s.rows.RowIndex.ASC()).
+		LIMIT(int64(limit) + 1)
+	var scanned []pgProjectedRow
+	if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+		return RowPage{}, fmt.Errorf("sheet.rows.postgres.Query: %w", qErr)
+	}
+	out := make([]ProjectedRow, 0, len(scanned))
+	for i := range scanned {
+		data, dErr := unmarshalRowData(scanned[i].Data)
+		if dErr != nil {
+			return RowPage{}, dErr
+		}
+		out = append(out, ProjectedRow{
+			RowID:    scanned[i].RowID,
+			RowIndex: int(scanned[i].RowIndex),
+			Data:     data,
+		})
+	}
+	return rowPageOf(out, limit), nil
+}
+
+// NOTE: the keyset reads sheet_rows_page_idx (sheet_id, tab, row_index) directly; OFFSET would re-scan from the top and skip rows a concurrent edit shifted.
+func (s *postgresRowStore) queryPredicate(
+	tc tenant.Context, k SnapshotKey, q RowQuery,
+) (postgres.BoolExpression, error) {
+	where := s.rows.SheetID.EQ(postgres.UUID(k.SheetID)).
+		AND(s.rows.Tab.EQ(postgres.String(k.Tab))).
+		AND(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID))).
+		AND(s.rows.DeletedAt.IS_NULL())
+	if q.Window.Cursor != nil {
+		where = where.AND(s.rows.RowIndex.GT(postgres.Int(int64(q.Window.Cursor.RowIndex))))
+	}
+	for _, clause := range q.Clauses {
+		pred, err := pgClausePredicate(s.rows.Data, clause)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(pred)
+	}
+	return where, nil
+}
+
+// NOTE: the field name binds as a parameter, and that bind is the injection boundary — column validation exists for the UnknownColumnError refusal, not for safety.
+func pgCell(data postgres.ColumnString, field string) postgres.StringExpression {
+	return postgres.StringExp(postgres.CustomExpression(
+		data, postgres.Token("->>"), postgres.String(field)))
+}
+
+func pgClausePredicate(data postgres.ColumnString, c RowClause) (postgres.BoolExpression, error) {
+	cell := pgCell(data, c.Column)
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(postgres.String(c.Value)), nil
+	case RowOpNe:
+		return cell.NOT_EQ(postgres.String(c.Value)), nil
+	case RowOpGt:
+		return cell.GT(postgres.String(c.Value)), nil
+	case RowOpGte:
+		return cell.GT_EQ(postgres.String(c.Value)), nil
+	case RowOpLt:
+		return cell.LT(postgres.String(c.Value)), nil
+	case RowOpLte:
+		return cell.LT_EQ(postgres.String(c.Value)), nil
+	case RowOpContains, RowOpStarts:
+		return pgLike(cell, c.Pattern), nil
+	case RowOpIn:
+		return cell.IN(pgStringList(c.Values)...), nil
+	case RowOpEmpty:
+		return cell.IS_NULL().OR(cell.EQ(postgres.String(""))), nil
+	case RowOpPresent:
+		return cell.IS_NOT_NULL().AND(cell.NOT_EQ(postgres.String(""))), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+// NOTE: go-jet's LIKE takes only a pattern, so ESCAPE is emitted by hand — Postgres defaults to backslash but SQLite has no default, and an unescaped pattern turns a literal % into a wildcard.
+func pgLike(cell postgres.StringExpression, pattern string) postgres.BoolExpression {
+	return postgres.BoolExp(postgres.CustomExpression(
+		postgres.Token("("),
+		postgres.LOWER(cell),
+		postgres.Token("LIKE"),
+		postgres.LOWER(postgres.String(pattern)),
+		postgres.Token("ESCAPE"),
+		postgres.String(RowLikeEscape),
+		postgres.Token(")"),
+	))
+}
+
+func pgStringList(values []string) []postgres.Expression {
+	out := make([]postgres.Expression, 0, len(values))
+	for _, v := range values {
+		out = append(out, postgres.String(v))
+	}
+	return out
+}
+
 // NOTE: an empty sheets.tab means "the first tab", whose name only Google knows — so the busiest projected tab stands in, which a rename's orphans mirror row for row.
 func (s *postgresRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error) {
 	tc, err := tenant.From(ctx)

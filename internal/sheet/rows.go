@@ -49,6 +49,12 @@ type TableStats struct {
 	RowCount int64
 }
 
+// RowPage is one page of matching rows and whether another follows.
+type RowPage struct {
+	Rows []ProjectedRow
+	More bool
+}
+
 // RowStore persists the queryable projection of a published tab.
 type RowStore interface {
 	// LockSheet takes the sheet's write lock and returns its current generation.
@@ -65,6 +71,8 @@ type RowStore interface {
 	StateOf(ctx context.Context, sheetID uuid.UUID) (SheetState, error)
 	// ListLive returns the live rows for one (sheet, tab) in row_index order.
 	ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error)
+	// Query returns one page of live rows matching q, in row_index order.
+	Query(ctx context.Context, k SnapshotKey, q RowQuery) (RowPage, error)
 	// Stats counts one tab's live rows and names its columns; an empty tab means the tab the projection holds most of.
 	Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error)
 	// PurgeSheet drops every projected row for a sheet, across tabs.
@@ -88,6 +96,34 @@ func RowsDigest(rows []ProjectedRow) (string, error) {
 		digestField(h, data)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func rowQueryLimit(w RowWindow) int {
+	if w.Limit <= 0 {
+		return DefaultMaxQueryRows
+	}
+	return w.Limit
+}
+
+// NOTE: a driver selects limit+1 and this trims it — a caller handed exactly limit rows cannot tell the last page from a full one, and would advertise a next page that does not exist.
+func rowPageOf(rows []ProjectedRow, limit int) RowPage {
+	if len(rows) > limit {
+		return RowPage{Rows: rows[:limit], More: true}
+	}
+	return RowPage{Rows: rows, More: false}
+}
+
+// NOTE: the label is JSON-quoted, never "$."+field — a naive concat reads a header containing '.' as a nested path and silently returns NULL, and a header holding '[' or '"' raises "bad JSON path".
+func rowJSONPath(field string) (string, error) {
+	label, err := json.Marshal(field)
+	if err != nil {
+		return "", fmt.Errorf("sheet.rows: json path for %q: %w", field, err)
+	}
+	return "$." + string(label), nil
+}
+
+func unsupportedRowOp(op RowOp) error {
+	return fmt.Errorf("sheet.rows: unsupported operator %q", op)
 }
 
 func digestField(h hash.Hash, field string) {
