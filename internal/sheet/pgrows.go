@@ -420,8 +420,9 @@ func (s *postgresRowStore) insertRows(ctx context.Context, tx *sql.Tx, values []
 func (s *postgresRowStore) bumpGeneration(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
 ) error {
-	stmt := s.sheets.UPDATE(s.sheets.Generation).
-		SET(s.sheets.Generation.ADD(postgres.Int(1))).
+	// NOTE: clearing the digest is what refuses every outstanding cursor — '' is a sentinel RowsDigest never returns, so the next refresh is guaranteed to bump.
+	stmt := s.sheets.UPDATE(s.sheets.Generation, s.sheets.ContentDigest).
+		SET(s.sheets.Generation.ADD(postgres.Int(1)), postgres.String("")).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {

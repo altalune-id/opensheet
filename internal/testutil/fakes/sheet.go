@@ -426,12 +426,18 @@ func (f *SheetRows) UpsertRow(_ context.Context, k sheet.SnapshotKey, row sheet.
 			continue
 		}
 		kept[i] = cloneRow(row)
-		f.gens[k.SheetID]++
+		f.wrote(k.SheetID)
 		return nil
 	}
 	f.data[k] = append(kept, cloneRow(row))
-	f.gens[k.SheetID]++
+	f.wrote(k.SheetID)
 	return nil
+}
+
+// NOTE: clearing the digest mirrors both drivers — a write leaves the stored digest describing the pre-write rows, so every outstanding cursor must be refused.
+func (f *SheetRows) wrote(sheetID uuid.UUID) {
+	f.gens[sheetID]++
+	f.digests[sheetID] = ""
 }
 
 func (f *SheetRows) RowByID(_ context.Context, k sheet.SnapshotKey, rowID string) (sheet.ProjectedRow, error) {

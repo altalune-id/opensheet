@@ -409,8 +409,9 @@ func (s *sqliteRowStore) insertRows(ctx context.Context, tx *sql.Tx, values [][]
 func (s *sqliteRowStore) bumpGeneration(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
 ) error {
-	stmt := s.sheets.UPDATE(s.sheets.Generation).
-		SET(s.sheets.Generation.ADD(sqlite.Int(1))).
+	// NOTE: clearing the digest is what refuses every outstanding cursor — '' is a sentinel RowsDigest never returns, so the next refresh is guaranteed to bump.
+	stmt := s.sheets.UPDATE(s.sheets.Generation, s.sheets.ContentDigest).
+		SET(s.sheets.Generation.ADD(sqlite.Int(1)), sqlite.String("")).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
 	if _, err := stmt.ExecContext(ctx, tx); err != nil {

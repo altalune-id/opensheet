@@ -642,3 +642,28 @@ func TestSQLiteRowStore_Replace_StaleRefreshCannotResurrectATombstonedRow(t *tes
 		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
 	}, live, "the deleted row must stay deleted")
 }
+
+func TestSQLiteRowStore_UpsertRow_ClearsTheDigestSoOutstandingCursorsAreRefused(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := store.Replace(f.ctx(), k, 0,
+		[]sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
+		sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	settled, err := store.StateOf(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, settled.Digest, "a refresh must leave a digest")
+
+	require.NoError(t, store.UpsertRow(f.ctx(), k,
+		sheet.ProjectedRow{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}}))
+
+	after, err := store.StateOf(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Empty(t, after.Digest,
+		"a write must clear the digest, or a cursor issued before it still matches and the walk resumes across a mutation")
+	assert.Greater(t, after.Generation, settled.Generation, "a write always bumps")
+}

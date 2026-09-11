@@ -704,3 +704,28 @@ func TestPgRowStore_Replace_StaleRefreshCannotResurrectATombstonedRow(t *testing
 		{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}},
 	}, live, "the deleted row must stay deleted")
 }
+
+func TestPgRowStore_UpsertRow_ClearsTheDigestSoOutstandingCursorsAreRefused(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0,
+		[]sheet.ProjectedRow{{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a"}}},
+		sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	settled, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, settled.Digest, "a refresh must leave a digest")
+
+	require.NoError(t, f.rows.UpsertRow(ctx, k,
+		sheet.ProjectedRow{RowID: "a", RowIndex: 0, Data: gsheet.Row{"id": "a", "name": "ada"}}))
+
+	after, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Empty(t, after.Digest,
+		"a write must clear the digest, or a cursor issued before it still matches and the walk resumes across a mutation")
+	assert.Greater(t, after.Generation, settled.Generation, "a write always bumps")
+}
