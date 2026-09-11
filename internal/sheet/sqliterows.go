@@ -299,13 +299,17 @@ func (s *sqliteRowStore) Query(ctx context.Context, k SnapshotKey, q RowQuery) (
 	if err != nil {
 		return RowPage{}, err
 	}
+	order, err := sqliteRowOrder(s.rows.Data, s.rows.RowIndex, q.Sort)
+	if err != nil {
+		return RowPage{}, err
+	}
 	limit := rowQueryLimit(q.Window)
 	var out []ProjectedRow
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
 			FROM(s.rows).
 			WHERE(where).
-			ORDER_BY(s.rows.RowIndex.ASC()).
+			ORDER_BY(order...).
 			LIMIT(int64(limit) + 1)
 		var scanned []sqliteProjectedRow
 		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
@@ -340,7 +344,11 @@ func (s *sqliteRowStore) queryPredicate(
 		AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
 		AND(s.rows.DeletedAt.IS_NULL())
 	if q.Window.Cursor != nil {
-		where = where.AND(s.rows.RowIndex.GT(sqlite.Int(int64(q.Window.Cursor.RowIndex))))
+		keyset, err := sqliteKeyset(s.rows.Data, s.rows.RowIndex, q.Sort, *q.Window.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(keyset)
 	}
 	for _, clause := range q.Clauses {
 		pred, err := sqliteClausePredicate(s.rows.Data, clause)
@@ -350,6 +358,88 @@ func (s *sqliteRowStore) queryPredicate(
 		where = where.AND(pred)
 	}
 	return where, nil
+}
+
+// NOTE: the null rank leads in both directions, as a boolean key rather than NULLS LAST, because it is what the cursor compares against; and row_index breaks every tie ascending in both directions, since a keyset over a non-total order repeats or skips rows.
+func sqliteRowOrder(
+	data sqlite.ColumnString, rowIndex sqlite.ColumnInteger, sort *RowSort,
+) ([]sqlite.OrderByClause, error) {
+	if sort == nil {
+		return []sqlite.OrderByClause{rowIndex.ASC()}, nil
+	}
+	cell, err := sqliteSortCell(data, *sort)
+	if err != nil {
+		return nil, err
+	}
+	value := cell.ASC()
+	if sort.Desc {
+		value = cell.DESC()
+	}
+	return []sqlite.OrderByClause{cell.IS_NULL().ASC(), value, rowIndex.ASC()}, nil
+}
+
+// NOTE: a sorted keyset REPLACES the row_index arm rather than ANDing onto it — the sorted order reaches rows whose row_index sits below the cursor's, and an AND would silently drop every one of them.
+func sqliteKeyset(
+	data sqlite.ColumnString, rowIndex sqlite.ColumnInteger, sort *RowSort, c RowCursor,
+) (sqlite.BoolExpression, error) {
+	after := rowIndex.GT(sqlite.Int(int64(c.RowIndex)))
+	if sort == nil {
+		return after, nil
+	}
+	if c.NullRank == 1 {
+		cell, err := sqliteSortCell(data, *sort)
+		if err != nil {
+			return nil, err
+		}
+		return cell.IS_NULL().AND(after), nil
+	}
+	value, err := rowCursorSortValue(c)
+	if err != nil {
+		return nil, err
+	}
+	// NOTE: only the value arm flips for :desc — the nulls still ascend and the tiebreaker is still row_index ASC, and inverting all three walks the null tail and never reaches the values. Never a row-value comparison either: (NULL,1) > ('a',0) is NULL on both engines, which ends the walk a row early.
+	if sort.Hint == RowHintNum {
+		cell, cErr := sqliteNumCell(data, sort.Column)
+		if cErr != nil {
+			return nil, cErr
+		}
+		num, nErr := rowCursorNum(value)
+		if nErr != nil {
+			return nil, nErr
+		}
+		// NOTE: the operand binds as a float, never as text — SQLite compares by storage class and a REAL always sorts below a TEXT, so a text bind pages a num sort into either nothing or everything with no error.
+		operand := sqlite.Float(num)
+		ahead := cell.GT(operand)
+		if sort.Desc {
+			ahead = cell.LT(operand)
+		}
+		return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+	}
+	cell, err := sqliteSortTextCell(data, *sort)
+	if err != nil {
+		return nil, err
+	}
+	operand := sqlite.String(value)
+	ahead := cell.GT(operand)
+	if sort.Desc {
+		ahead = cell.LT(operand)
+	}
+	return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+}
+
+func sqliteSortCell(data sqlite.ColumnString, sort RowSort) (sqlite.Expression, error) {
+	if sort.Hint == RowHintNum {
+		return sqliteNumCell(data, sort.Column)
+	}
+	return sqliteSortTextCell(data, sort)
+}
+
+// NOTE: a date sort compares the shape-guarded text and an unhinted sort the raw text, so neither re-types the cursor operand — the guard already yields text.
+func sqliteSortTextCell(data sqlite.ColumnString, sort RowSort) (sqlite.StringExpression, error) {
+	if sort.Hint == RowHintDate {
+		return sqliteDateCell(data, sort.Column)
+	}
+	return sqliteCell(data, sort.Column)
 }
 
 // NOTE: the path binds as a parameter, and that bind is the injection boundary — column validation exists for the UnknownColumnError refusal, not for safety.

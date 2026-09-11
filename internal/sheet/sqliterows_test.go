@@ -1134,3 +1134,295 @@ func TestSQLiteRowStore_Query_ATypedFilterIsScopedToOneOrg(t *testing.T) {
 		assert.Empty(t, page.Rows, "another org must read zero rows, predicate first and RLS second")
 	}
 }
+
+// sortedWalkFixture is one seeded projection and the page sequence a limit=2 sorted walk must produce in each direction. NOTE: the two sequences are simultaneously true only if the tie is broken by row_index ASC and the nulls ascend in both directions, so they are the specification of a correct keyset, not an illustration of one.
+type sortedWalkFixture struct {
+	name    string
+	rows    []sheet.ProjectedRow
+	columns []string
+	column  string
+	hint    string
+	where   []string
+	asc     [][]string
+	desc    [][]string
+}
+
+func (f sortedWalkFixture) sortSpec(dir string) string {
+	return f.column + ":" + f.hint + dir
+}
+
+func (f sortedWalkFixture) query(t *testing.T, dir string) sheet.RowQuery {
+	t.Helper()
+	q := queryOf(t, f.columns, 2, f.where...)
+	sort, err := sheet.ParseRowSort([]string{f.sortSpec(dir)})
+	require.NoError(t, err)
+	require.NotNil(t, sort)
+	q.Sort = sort
+	return q
+}
+
+// sortedWalkFixtures covers the fixture spec section 9 assertion 2 names — two nulls, three rows sharing a sort value, a row_index gap and a tombstone — under all three hints, then repeats it with numerically equal but textually distinct values, with a blank cell against a missing key, and over an all-null column.
+func sortedWalkFixtures() []sortedWalkFixture {
+	shared := [][]string{{"1", "4"}, {"6", "0"}, {"7", "2"}, {"5"}}
+	sharedDesc := [][]string{{"7", "0"}, {"1", "4"}, {"6", "2"}, {"5"}}
+	return []sortedWalkFixture{
+		{
+			name: "num over a shared value, two nulls, a gap and a tombstone",
+			rows: sortedFixtureRows(), columns: sortedFixtureColumns(),
+			column: "qty", hint: "num.", asc: shared, desc: sharedDesc,
+		},
+		{
+			name: "unhinted text over the same fixture",
+			rows: sortedFixtureRows(), columns: sortedFixtureColumns(),
+			column: "name", asc: shared, desc: sharedDesc,
+		},
+		{
+			name: "date over the same fixture",
+			rows: sortedFixtureRows(), columns: sortedFixtureColumns(),
+			column: "when", hint: "date.", asc: shared, desc: sharedDesc,
+		},
+		{
+			name: "num composed with a clause that excludes the null tail",
+			rows: sortedFixtureRows(), columns: sortedFixtureColumns(),
+			column: "qty", hint: "num.", where: []string{"qty:num.lte:100"},
+			asc:  [][]string{{"1", "4"}, {"6", "0"}, {"7"}},
+			desc: [][]string{{"7", "0"}, {"1", "4"}, {"6"}},
+		},
+		{
+			name: "num over numerically equal but textually distinct values",
+			rows: equalNumSortedFixtureRows(), columns: numFixtureColumns(),
+			column: "qty", hint: "num.", asc: shared, desc: sharedDesc,
+		},
+		{
+			name: "text over a blank cell and a missing key, which rank differently",
+			rows: blankSortedFixtureRows(), columns: blankSortedFixtureColumns(),
+			column: "name",
+			asc:    [][]string{{"b0", "b1"}, {"b2", "b3"}, {"b4"}},
+			desc:   [][]string{{"b2", "b0"}, {"b1", "b3"}, {"b4"}},
+		},
+		{
+			name: "text over an all-null column",
+			rows: allNullSortedFixtureRows(), columns: blankSortedFixtureColumns(),
+			column: "name",
+			asc:    [][]string{{"z0", "z1"}, {"z3", "z4"}},
+			desc:   [][]string{{"z0", "z1"}, {"z3", "z4"}},
+		},
+		{
+			name: "num over an all-null column",
+			rows: allNullSortedFixtureRows(), columns: blankSortedFixtureColumns(),
+			column: "qty", hint: "num.",
+			asc:  [][]string{{"z0", "z1"}, {"z3", "z4"}},
+			desc: [][]string{{"z0", "z1"}, {"z3", "z4"}},
+		},
+	}
+}
+
+// sortedFixtureRows ranks identically under all three hints: rows 1, 4 and 6 share a sort value, row 0 is above them and row 7 above that, rows 2 and 5 are null in every domain, row_index skips 3 and 7, and the tombstoned row would sort first in every direction if the tombstone leaked.
+func sortedFixtureRows() []sheet.ProjectedRow {
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	return []sheet.ProjectedRow{
+		{RowID: "0", RowIndex: 0, Data: gsheet.Row{
+			"id": "0", "qty": "20", "name": "cc", "when": "2026-01-03"}},
+		{RowID: "1", RowIndex: 1, Data: gsheet.Row{
+			"id": "1", "qty": "5", "name": "bb", "when": "2026-01-02"}},
+		{RowID: "2", RowIndex: 2, Data: gsheet.Row{
+			"id": "2", "qty": "abc", "when": "01/02/2026"}},
+		{RowID: "3", RowIndex: 4, Data: gsheet.Row{
+			"id": "3", "qty": "1", "name": "aa", "when": "2026-01-01"}, DeletedAt: &deletedAt},
+		{RowID: "4", RowIndex: 5, Data: gsheet.Row{
+			"id": "4", "qty": "5", "name": "bb", "when": "2026-01-02"}},
+		{RowID: "5", RowIndex: 6, Data: gsheet.Row{"id": "5"}},
+		{RowID: "6", RowIndex: 8, Data: gsheet.Row{
+			"id": "6", "qty": "5", "name": "bb", "when": "2026-01-02"}},
+		{RowID: "7", RowIndex: 9, Data: gsheet.Row{
+			"id": "7", "qty": "100", "name": "dd", "when": "2026-02-01"}},
+	}
+}
+
+func sortedFixtureColumns() []string {
+	return []string{"id", "name", "qty", "when"}
+}
+
+// equalNumSortedFixtureRows is the same ranking spelled so the tie is numeric and not textual: a cursor compared as text repeats row 1 on the second page.
+func equalNumSortedFixtureRows() []sheet.ProjectedRow {
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	return []sheet.ProjectedRow{
+		{RowID: "0", RowIndex: 0, Data: gsheet.Row{"id": "0", "qty": "20"}},
+		{RowID: "1", RowIndex: 1, Data: gsheet.Row{"id": "1", "qty": "5"}},
+		{RowID: "2", RowIndex: 2, Data: gsheet.Row{"id": "2", "qty": "abc"}},
+		{RowID: "3", RowIndex: 4, Data: gsheet.Row{"id": "3", "qty": "1"}, DeletedAt: &deletedAt},
+		{RowID: "4", RowIndex: 5, Data: gsheet.Row{"id": "4", "qty": "05"}},
+		{RowID: "5", RowIndex: 6, Data: gsheet.Row{"id": "5"}},
+		{RowID: "6", RowIndex: 8, Data: gsheet.Row{"id": "6", "qty": "5.0"}},
+		{RowID: "7", RowIndex: 9, Data: gsheet.Row{"id": "7", "qty": "100"}},
+	}
+}
+
+// blankSortedFixtureRows pins the consequence spec section 4.1 documents: under a text sort a blank cell ranks 0 and sorts first, a missing key ranks null and sorts last, so empty cells appear at both ends.
+func blankSortedFixtureRows() []sheet.ProjectedRow {
+	return []sheet.ProjectedRow{
+		{RowID: "b0", RowIndex: 0, Data: gsheet.Row{"id": "b0", "name": ""}},
+		{RowID: "b1", RowIndex: 1, Data: gsheet.Row{"id": "b1", "name": ""}},
+		{RowID: "b2", RowIndex: 2, Data: gsheet.Row{"id": "b2", "name": "a"}},
+		{RowID: "b3", RowIndex: 4, Data: gsheet.Row{"id": "b3"}},
+		{RowID: "b4", RowIndex: 5, Data: gsheet.Row{"id": "b4"}},
+	}
+}
+
+func blankSortedFixtureColumns() []string {
+	return []string{"id", "name", "qty"}
+}
+
+func allNullSortedFixtureRows() []sheet.ProjectedRow {
+	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
+	return []sheet.ProjectedRow{
+		{RowID: "z0", RowIndex: 0, Data: gsheet.Row{"id": "z0"}},
+		{RowID: "z1", RowIndex: 2, Data: gsheet.Row{"id": "z1"}},
+		{RowID: "z2", RowIndex: 3, Data: gsheet.Row{"id": "z2"}, DeletedAt: &deletedAt},
+		{RowID: "z3", RowIndex: 5, Data: gsheet.Row{"id": "z3"}},
+		{RowID: "z4", RowIndex: 7, Data: gsheet.Row{"id": "z4"}},
+	}
+}
+
+type rowPager func(sheet.RowQuery) (sheet.RowPage, error)
+
+// walkSortedPages pages a sorted read to exhaustion through the production cursor derivation and the real v2 envelope, and refuses a repeat as it happens.
+func walkSortedPages(t *testing.T, pager rowPager, base sheet.RowQuery) [][]string {
+	t.Helper()
+	require.NotNil(t, base.Sort, "an unsorted walk is 3a's and has its own test")
+	limit := base.Window.Limit
+	pages := make([][]string, 0, 8)
+	seen := make(map[string]int, 16)
+	for {
+		require.Less(t, len(pages), 20, "the walk must terminate")
+		page, err := pager(base)
+		require.NoError(t, err)
+		require.LessOrEqual(t, len(page.Rows), limit, "the limit+1 over-fetch must not leak into Rows")
+		ids := rowIDsOf(page.Rows)
+		for _, id := range ids {
+			seen[id]++
+			require.Equal(t, 1, seen[id], "row %q was visited twice, after pages %v", id, pages)
+		}
+		pages = append(pages, ids)
+		if !page.More {
+			return pages
+		}
+		require.NotEmpty(t, page.Rows, "More cannot be true on an empty page")
+		raw, eErr := sheet.EncodeSortedRowCursor(
+			sheet.NextRowCursorForTest("d", base.Sort, page.Rows[len(page.Rows)-1], len(pages)))
+		require.NoError(t, eErr)
+		decoded, dErr := sheet.DecodeRowCursor(raw)
+		require.NoError(t, dErr)
+		require.Equal(t, len(pages), decoded.Page, "the cursor must count the pages already served")
+		base.Window.Cursor = &decoded
+	}
+}
+
+func assertSortedWalk(t *testing.T, live []sheet.ProjectedRow, want, got [][]string) {
+	t.Helper()
+	assert.Equal(t, want, got, "the page sequence is the specification of a sorted keyset walk")
+	visited := make([]string, 0, len(live))
+	for _, page := range got {
+		visited = append(visited, page...)
+	}
+	assert.ElementsMatch(t, rowIDsOf(live), visited,
+		"the walk must visit every live row exactly once: no repeats, no omissions")
+}
+
+// TestSQLiteRowStore_Query_SortedWalkVisitsEveryRowExactlyOnce is the assertion task 4 exists for; its cross-driver half lives in rows_integration_test.go.
+func TestSQLiteRowStore_Query_SortedWalkVisitsEveryRowExactlyOnce(t *testing.T) {
+	for _, fx := range sortedWalkFixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			f := newSQLiteFixture(t)
+			store, k := seedSQLiteQueryFixture(t, f, fx.rows)
+			live, err := store.ListLive(f.ctx(), k)
+			require.NoError(t, err)
+
+			for _, dir := range []struct {
+				name string
+				want [][]string
+			}{{"asc", fx.asc}, {"desc", fx.desc}} {
+				t.Run(dir.name, func(t *testing.T) {
+					base := fx.query(t, dir.name)
+					got := walkSortedPages(t, func(q sheet.RowQuery) (sheet.RowPage, error) {
+						return store.Query(f.ctx(), k, q)
+					}, base)
+					wantLive := live
+					if len(fx.where) > 0 {
+						wantLive = liveMatching(dir.want, live)
+					}
+					assertSortedWalk(t, wantLive, dir.want, got)
+				})
+			}
+		})
+	}
+}
+
+func liveMatching(pages [][]string, live []sheet.ProjectedRow) []sheet.ProjectedRow {
+	wanted := make(map[string]bool, len(live))
+	for _, page := range pages {
+		for _, id := range page {
+			wanted[id] = true
+		}
+	}
+	out := make([]sheet.ProjectedRow, 0, len(live))
+	for _, row := range live {
+		if wanted[row.RowID] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// NOTE: sqlite has no RLS, so this is what holds the explicit org_id predicate in place for a sorted page too; on postgres FORCE ROW LEVEL SECURITY is the backstop and no test can see the predicate go missing.
+func TestSQLiteRowStore_Query_ASortedPageIsScopedToOneOrg(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, sortedFixtureRows())
+
+	stranger := tenant.Into(t.Context(), tenant.Context{
+		OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New(),
+	})
+	for _, spec := range []string{"qty:num.desc", "name:asc", "when:date.desc"} {
+		sort, err := sheet.ParseRowSort([]string{spec})
+		require.NoError(t, err)
+		q := sheet.RowQuery{Sort: sort, Window: sheet.RowWindow{Limit: 10}}
+		page, err := store.Query(stranger, k, q)
+		require.NoError(t, err)
+		assert.Empty(t, page.Rows, "another org must read zero rows, predicate first and RLS second")
+
+		q.Window.Cursor = &sheet.RowCursor{Digest: "d", RowIndex: 0, NullRank: 1, Page: 1, Version: 2}
+		page, err = store.Query(stranger, k, q)
+		require.NoError(t, err)
+		assert.Empty(t, page.Rows, "a sorted keyset must not widen the org predicate either")
+	}
+}
+
+// TestSQLiteRowStore_Query_AForgedSortedCursorIsRefused pins the two malformations the unsigned envelope admits and DecodeRowCursor cannot see: a null rank of 0 promising a sort value that is absent, and one outside the num grammar.
+func TestSQLiteRowStore_Query_AForgedSortedCursorIsRefused(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store, k := seedSQLiteQueryFixture(t, f, sortedFixtureRows())
+	notANumber := "abc"
+
+	for _, tc := range []struct {
+		name   string
+		spec   string
+		cursor sheet.RowCursor
+	}{
+		{"no sort value at null rank zero", "name:asc", sheet.RowCursor{Digest: "d", RowIndex: 1, Page: 1}},
+		{
+			"a num sort value outside the grammar", "qty:num.asc",
+			sheet.RowCursor{Digest: "d", RowIndex: 1, SortValue: &notANumber, Page: 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sort, err := sheet.ParseRowSort([]string{tc.spec})
+			require.NoError(t, err)
+			_, err = store.Query(f.ctx(), k, sheet.RowQuery{
+				Sort: sort, Window: sheet.RowWindow{Limit: 2, Cursor: &tc.cursor},
+			})
+			require.Error(t, err)
+			assert.True(t, sheet.IsInvalidCursorError(err),
+				"a hand-edited cursor is the caller's mistake, not a 500: %v", err)
+		})
+	}
+}

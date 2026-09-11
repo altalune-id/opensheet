@@ -113,6 +113,22 @@ func rowPageOf(rows []ProjectedRow, limit int) RowPage {
 	return RowPage{Rows: rows, More: false}
 }
 
+// NOTE: the cursor is unsigned, so both refusals here are reachable by a hand-edited envelope the decoder cannot tell from an issued one — a null rank of 0 promises a value the tie-break arm has to bind.
+func rowCursorSortValue(c RowCursor) (string, error) {
+	if c.SortValue == nil {
+		return "", &InvalidCursorError{Reason: "it ranks a sort value and carries none"}
+	}
+	return *c.SortValue, nil
+}
+
+func rowCursorNum(value string) (float64, error) {
+	num, ok := ParseNum(value)
+	if !ok {
+		return 0, &InvalidCursorError{Reason: "its sort value is not a number"}
+	}
+	return num, nil
+}
+
 // NOTE: the label is JSON-quoted, never "$."+field — a naive concat reads a header containing '.' as a nested path and silently returns NULL, and a header holding '[' or '"' raises "bad JSON path".
 func rowJSONPath(field string) (string, error) {
 	label, err := json.Marshal(field)

@@ -1111,3 +1111,99 @@ func TestQueryTyped_SignificanceIsMeasuredNotAssumed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, lowF, highF, "float64 does not, which is the divergence the significance bound excludes")
 }
+
+func pgSeedSortedFixture(t *testing.T, f *pgFixture, slug string, rows []sheet.ProjectedRow) sheet.SnapshotKey {
+	t.Helper()
+	sh := pgSeedSheet(t, f, f.a, slug, "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	ok, err := f.rows.Replace(f.a.ctx(t), k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	return k
+}
+
+func seedSQLiteSortedFixture(
+	t *testing.T, f *fixture, store sheet.RowStore, slug string, rows []sheet.ProjectedRow,
+) sheet.SnapshotKey {
+	t.Helper()
+	sh := seedSQLiteSheet(t, f, slug, "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	ok, err := store.Replace(f.ctx(), k, 0, rows, sheet.ContractState{OK: true})
+	require.NoError(t, err)
+	require.True(t, ok)
+	return k
+}
+
+// TestQuery_SortedWalkVisitsEveryRowExactlyOnce is spec section 9 assertion 2, and the assertion task 4 exists for: both directions, both drivers, walked to exhaustion at limit=2 over a fixture with two nulls, three rows sharing a sort value, a row_index gap and a tombstone.
+func TestQuery_SortedWalkVisitsEveryRowExactlyOnce(t *testing.T) {
+	pgf := newPgFixture(t)
+	pgCtx := pgf.a.ctx(t)
+	lf := newSQLiteFixture(t)
+	liteStore := newSQLiteRowStore(t, lf)
+
+	for i, fx := range sortedWalkFixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			slug := "sorted-" + strconv.Itoa(i)
+			pgKey := pgSeedSortedFixture(t, pgf, slug, fx.rows)
+			liteKey := seedSQLiteSortedFixture(t, lf, liteStore, slug, fx.rows)
+
+			live, err := pgf.rows.ListLive(pgCtx, pgKey)
+			require.NoError(t, err)
+			liteLive, err := liteStore.ListLive(lf.ctx(), liteKey)
+			require.NoError(t, err)
+			require.Equal(t, rowIDsOf(live), rowIDsOf(liteLive), "both drivers must hold the same live set")
+
+			for _, dir := range []struct {
+				name string
+				want [][]string
+			}{{"asc", fx.asc}, {"desc", fx.desc}} {
+				t.Run(dir.name, func(t *testing.T) {
+					pgPages := walkSortedPages(t, func(q sheet.RowQuery) (sheet.RowPage, error) {
+						return pgf.rows.Query(pgCtx, pgKey, q)
+					}, fx.query(t, dir.name))
+					litePages := walkSortedPages(t, func(q sheet.RowQuery) (sheet.RowPage, error) {
+						return liteStore.Query(lf.ctx(), liteKey, q)
+					}, fx.query(t, dir.name))
+					assert.Equal(t, pgPages, litePages, "both drivers must page a sorted read identically")
+
+					wantLive := live
+					if len(fx.where) > 0 {
+						wantLive = liveMatching(dir.want, live)
+					}
+					assertSortedWalk(t, wantLive, dir.want, pgPages)
+				})
+			}
+		})
+	}
+}
+
+// TestPgRowStore_Query_AForgedSortedCursorIsRefused keeps the two malformations the unsigned envelope admits off the 500 path on postgres too, where a bare numeric bind would raise instead.
+func TestPgRowStore_Query_AForgedSortedCursorIsRefused(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	k := pgSeedQueryFixture(t, f, sortedFixtureRows())
+	notANumber := "abc"
+
+	for _, tc := range []struct {
+		name   string
+		spec   string
+		cursor sheet.RowCursor
+	}{
+		{"no sort value at null rank zero", "name:asc", sheet.RowCursor{Digest: "d", RowIndex: 1, Page: 1}},
+		{
+			"a num sort value outside the grammar", "qty:num.asc",
+			sheet.RowCursor{Digest: "d", RowIndex: 1, SortValue: &notANumber, Page: 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sort, err := sheet.ParseRowSort([]string{tc.spec})
+			require.NoError(t, err)
+			_, err = f.rows.Query(ctx, k, sheet.RowQuery{
+				Sort: sort, Window: sheet.RowWindow{Limit: 2, Cursor: &tc.cursor},
+			})
+			require.Error(t, err)
+			assert.True(t, sheet.IsInvalidCursorError(err),
+				"a hand-edited cursor is the caller's mistake, not a 500: %v", err)
+		})
+	}
+}

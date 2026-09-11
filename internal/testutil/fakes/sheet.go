@@ -484,7 +484,7 @@ func (f *SheetRows) ListLive(_ context.Context, k sheet.SnapshotKey) ([]sheet.Pr
 	return out, nil
 }
 
-// NOTE: deliberately unfiltered and unpaged — the filter and keyset semantics are covered only by internal/sheet's two driver test files, because a Go query engine here would be a third implementation to keep in sync with two SQL dialects.
+// NOTE: deliberately unfiltered, unsorted and unpaged — the filter, sort and keyset semantics are covered only by internal/sheet's two driver test files, because a Go query engine here would be a third implementation to keep in sync with two SQL dialects. No test backed by this fake may assert sorting.
 func (f *SheetRows) Query(ctx context.Context, k sheet.SnapshotKey, _ sheet.RowQuery) (sheet.RowPage, error) {
 	rows, err := f.ListLive(ctx, k)
 	if err != nil {

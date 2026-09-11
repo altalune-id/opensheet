@@ -625,15 +625,65 @@ func (w *ReadWorkflow) QueryRows(ctx context.Context, sh *Sheet, f RowFilter) (F
 	if !page.More {
 		return out, nil
 	}
-	next, err := EncodeRowCursor(RowCursor{
-		Digest: state.Digest, RowIndex: page.Rows[len(page.Rows)-1].RowIndex,
-	})
+	next, err := encodeNextRowCursor(q.Sort,
+		nextRowCursor(state.Digest, q.Sort, page.Rows[len(page.Rows)-1], pagesServed(window)))
 	if err != nil {
 		return FilteredRows{}, recordSpanError(span,
 			w.unexpected(ctx, "sheet.QueryRows: encode the next cursor", err, "sheet_id", sh.ID, "tab", key.Tab))
 	}
 	out.NextCursor = next
 	return out, nil
+}
+
+// NOTE: the null rank and the sort value are derived in Go, from the last row's own cell, because RowPage carries nothing else — and a missing key ranks null while a blank cell ranks 0 with a non-nil empty value, which is what keeps a text walk from repeating or dropping its null tail.
+func nextRowCursor(digest string, sort *RowSort, last ProjectedRow, pagesServed int) RowCursor {
+	out := RowCursor{Digest: digest, RowIndex: last.RowIndex}
+	if sort == nil {
+		return out
+	}
+	out.Page = pagesServed
+	value, ranked := rankedSortValue(*sort, last.Data)
+	if !ranked {
+		out.NullRank = 1
+		return out
+	}
+	out.SortValue = &value
+	return out
+}
+
+func rankedSortValue(sort RowSort, data gsheet.Row) (string, bool) {
+	raw, present := data[sort.Column]
+	if !present {
+		return "", false
+	}
+	switch sort.Hint {
+	case RowHintNum:
+		if _, inGrammar := ParseNum(raw); !inGrammar {
+			return "", false
+		}
+	case RowHintDate:
+		if !MatchesDateShape(raw) {
+			return "", false
+		}
+	default:
+	}
+	return raw, true
+}
+
+// NOTE: EncodeRowCursor silently drops NullRank, SortValue and Page, so a sorted page must never reach it.
+func encodeNextRowCursor(sort *RowSort, c RowCursor) (string, error) {
+	if sort == nil {
+		return EncodeRowCursor(c)
+	}
+	return EncodeSortedRowCursor(c)
+}
+
+// NOTE: Page counts pages already served, so the cursor issued after the first page carries 1.
+func pagesServed(w RowWindow) int {
+	if w.Cursor == nil {
+		return 1
+	}
+	return w.Cursor.Page + 1
 }
 
 type projectionAge struct {

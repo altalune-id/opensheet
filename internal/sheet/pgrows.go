@@ -304,7 +304,7 @@ func (s *postgresRowStore) Query(ctx context.Context, k SnapshotKey, q RowQuery)
 	stmt := postgres.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
 		FROM(s.rows).
 		WHERE(where).
-		ORDER_BY(s.rows.RowIndex.ASC()).
+		ORDER_BY(pgRowOrder(s.rows.Data, s.rows.RowIndex, q.Sort)...).
 		LIMIT(int64(limit) + 1)
 	var scanned []pgProjectedRow
 	if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
@@ -334,7 +334,11 @@ func (s *postgresRowStore) queryPredicate(
 		AND(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID))).
 		AND(s.rows.DeletedAt.IS_NULL())
 	if q.Window.Cursor != nil {
-		where = where.AND(s.rows.RowIndex.GT(postgres.Int(int64(q.Window.Cursor.RowIndex))))
+		keyset, err := pgKeyset(s.rows.Data, s.rows.RowIndex, q.Sort, *q.Window.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(keyset)
 	}
 	for _, clause := range q.Clauses {
 		pred, err := pgClausePredicate(s.rows.Data, clause)
@@ -344,6 +348,72 @@ func (s *postgresRowStore) queryPredicate(
 		where = where.AND(pred)
 	}
 	return where, nil
+}
+
+// NOTE: the null rank leads in both directions, as a boolean key rather than NULLS LAST, because it is what the cursor compares against; and row_index breaks every tie ascending in both directions, since a keyset over a non-total order repeats or skips rows.
+func pgRowOrder(data postgres.ColumnString, rowIndex postgres.ColumnInteger, sort *RowSort) []postgres.OrderByClause {
+	if sort == nil {
+		return []postgres.OrderByClause{rowIndex.ASC()}
+	}
+	cell := pgSortCell(data, *sort)
+	value := cell.ASC()
+	if sort.Desc {
+		value = cell.DESC()
+	}
+	return []postgres.OrderByClause{cell.IS_NULL().ASC(), value, rowIndex.ASC()}
+}
+
+// NOTE: a sorted keyset REPLACES the row_index arm rather than ANDing onto it — the sorted order reaches rows whose row_index sits below the cursor's, and an AND would silently drop every one of them.
+func pgKeyset(
+	data postgres.ColumnString, rowIndex postgres.ColumnInteger, sort *RowSort, c RowCursor,
+) (postgres.BoolExpression, error) {
+	after := rowIndex.GT(postgres.Int(int64(c.RowIndex)))
+	if sort == nil {
+		return after, nil
+	}
+	if c.NullRank == 1 {
+		return pgSortCell(data, *sort).IS_NULL().AND(after), nil
+	}
+	value, err := rowCursorSortValue(c)
+	if err != nil {
+		return nil, err
+	}
+	// NOTE: only the value arm flips for :desc — the nulls still ascend and the tiebreaker is still row_index ASC, and inverting all three walks the null tail and never reaches the values. Never a row-value comparison either: (NULL,1) > ('a',0) is NULL on both engines, which ends the walk a row early.
+	if sort.Hint == RowHintNum {
+		if _, nErr := rowCursorNum(value); nErr != nil {
+			return nil, nErr
+		}
+		cell := pgNumCell(data, sort.Column)
+		// NOTE: postgres.Decimal is the only constructor that emits a bare placeholder from a string — postgres.String renders $n::text, which fails against numeric.
+		operand := postgres.Decimal(value)
+		ahead := cell.GT(operand)
+		if sort.Desc {
+			ahead = cell.LT(operand)
+		}
+		return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+	}
+	cell := pgSortTextCell(data, *sort)
+	operand := postgres.String(value)
+	ahead := cell.GT(operand)
+	if sort.Desc {
+		ahead = cell.LT(operand)
+	}
+	return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+}
+
+func pgSortCell(data postgres.ColumnString, sort RowSort) postgres.Expression {
+	if sort.Hint == RowHintNum {
+		return pgNumCell(data, sort.Column)
+	}
+	return pgSortTextCell(data, sort)
+}
+
+// NOTE: a date sort compares the shape-guarded text and an unhinted sort the raw text, so neither re-types the cursor operand — the guard already yields text.
+func pgSortTextCell(data postgres.ColumnString, sort RowSort) postgres.StringExpression {
+	if sort.Hint == RowHintDate {
+		return pgDateCell(data, sort.Column)
+	}
+	return pgCell(data, sort.Column)
 }
 
 // NOTE: the field name binds as a parameter, and that bind is the injection boundary — column validation exists for the UnknownColumnError refusal, not for safety.
