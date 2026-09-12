@@ -3,11 +3,16 @@ package boot
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"strings"
 
+	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/schema"
 )
 
@@ -61,4 +66,32 @@ func runMigrations(ctx context.Context, cfg *config.Config, log *slog.Logger) er
 		log.Info("boot: migrations applied via dedicated migrator connection")
 	}
 	return nil
+}
+
+func buildSealer(cfg *config.Config, log *slog.Logger) (sealer.Sealer, error) {
+	if strings.TrimSpace(cfg.Security.EncryptionKey) == "" {
+		// SECURITY: the app still serves the UI, but every credential seal and open is refused rather than silently stored in the clear.
+		log.Warn("boot: security.encryptionKey is empty - credential storage is disabled")
+		return sealer.Disabled(), nil
+	}
+	key, err := sealer.ParseKey(cfg.Security.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("boot: security.encryptionKey: %w", err)
+	}
+	sl, err := sealer.New(key)
+	if err != nil {
+		return nil, fmt.Errorf("boot: sealer: %w", err)
+	}
+	return sl, nil
+}
+
+func buildSnapshotStore(cfg *config.Config, k *platform.Kernel) (sheet.SnapshotStore, error) {
+	snaps, err := sheet.NewSnapshotStore(cfg.Cache, cfg.DB, k.PgConn, k.Log)
+	if err != nil {
+		return nil, fmt.Errorf("boot: snapshot store: %w", err)
+	}
+	if c, ok := snaps.(io.Closer); ok {
+		k.AddCloser(c)
+	}
+	return snaps, nil
 }

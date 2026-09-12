@@ -21,7 +21,7 @@ type Users struct {
 	MutableColumns sqlite.ColumnList
 }
 
-// NewUsers builds the users binding. tablePrefix matches DB.TablePrefix (e.g. "altempl_").
+// NewUsers builds the users binding. tablePrefix matches DB.TablePrefix (e.g. "opensheet_").
 func NewUsers(tablePrefix string) *Users {
 	var (
 		id              = sqlite.StringColumn("id")

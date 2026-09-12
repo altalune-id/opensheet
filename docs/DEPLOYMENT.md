@@ -55,9 +55,9 @@ and Mailpit's open SMTP — production settings go under `mail.smtp.*` (or
 
 **Production** — role graph provisioned via `scripts/db/provision.sh`:
 
-- `altempl_owner` (`NOLOGIN`) owns every schema object.
-- `altempl_migrator` (`LOGIN`, member of `altempl_owner`) runs migrations under `SET ROLE altempl_owner`, issued once per connection from `db.migrator.role` rather than inside the migration SQL.
-- `altempl_service` (`LOGIN`, `NOBYPASSRLS`) is the runtime DSN. DML granted via `ALTER DEFAULT PRIVILEGES`.
+- `opensheet_owner` (`NOLOGIN`) owns every schema object.
+- `opensheet_migrator` (`LOGIN`, member of `opensheet_owner`) runs migrations under `SET ROLE opensheet_owner`, issued once per connection from `db.migrator.role` rather than inside the migration SQL.
+- `opensheet_service` (`LOGIN`, `NOBYPASSRLS`) is the runtime DSN. DML granted via `ALTER DEFAULT PRIVILEGES`.
 
 Provision idempotently (interactive; prompts for admin URL, DB name, passwords):
 
@@ -68,9 +68,9 @@ APP=opensheet DB_NAME=opensheet scripts/db/provision.sh
 Then set:
 
 ```
-OPENSHEET_DB_DSN=postgres://altempl_service:<svc-pw>@host:5432/opensheet?sslmode=require
-OPENSHEET_DB_MIGRATOR_DSN=postgres://altempl_migrator:<mig-pw>@host:5432/opensheet?sslmode=require
-OPENSHEET_DB_MIGRATOR_ROLE=altempl_owner
+OPENSHEET_DB_DSN=postgres://opensheet_service:<svc-pw>@host:5432/opensheet?sslmode=require
+OPENSHEET_DB_MIGRATOR_DSN=postgres://opensheet_migrator:<mig-pw>@host:5432/opensheet?sslmode=require
+OPENSHEET_DB_MIGRATOR_ROLE=opensheet_owner
 OPENSHEET_DB_ALLOW_BYPASS_RLS=false
 ```
 
@@ -82,19 +82,19 @@ Boot fails if the runtime role has `BYPASSRLS` and `db.allowBypassRLS` is `false
 ### Cross-tenant reads
 
 Tenant-scoped scheduler jobs must first ask "which tenants exist?" — a
-question no single tenant's scope can answer. `altempl_service` is
+question no single tenant's scope can answer. `opensheet_service` is
 `NOBYPASSRLS`, so under `tenant.rlsEnforce=true` a direct read of
 `<prefix>orgs` returns zero rows.
 
 `SECURITY DEFINER` wrapper functions answer it instead. Migration 005 creates
-them owned by `altempl_owner`, which holds `BYPASSRLS`, with `search_path`
-pinned and `EXECUTE` revoked from `PUBLIC`. `altempl_service` reaches them
+them owned by `opensheet_owner`, which holds `BYPASSRLS`, with `search_path`
+pinned and `EXECUTE` revoked from `PUBLIC`. `opensheet_service` reaches them
 through the `ALTER DEFAULT PRIVILEGES … GRANT EXECUTE ON FUNCTIONS` grant in
 `scripts/db/provision.sh`.
 
 No fourth credential is involved. `BYPASSRLS` is a role attribute, not a
-privilege, so granting `altempl_owner` to another role does not confer it —
-only executing a function owned by `altempl_owner` does.
+privilege, so granting `opensheet_owner` to another role does not confer it —
+only executing a function owned by `opensheet_owner` does.
 
 Migration 005 refuses to apply if the migration role lacks `BYPASSRLS`, and
 names the `ALTER ROLE` that fixes it.
@@ -171,6 +171,10 @@ choice is per job, not per deployment:
 
 Scale replicas freely. Do not try to designate a "scheduler replica" for
 correctness; leader election is per tick, in Postgres.
+
+**NOTE:** a Postgres deployment running with `scheduler.enabled=false` never runs
+`session-sweep`, so it needs its own periodic
+`DELETE FROM <prefix>sessions WHERE expires_at < now()`.
 
 **Leader election** uses `pg_try_advisory_lock` on the writer handle. No
 migration and no lock table — nothing to provision. Under

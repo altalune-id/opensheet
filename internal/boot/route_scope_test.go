@@ -3,6 +3,7 @@ package boot_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,7 @@ func probeRoutes() []probeRoute {
 		proj  = "probe-project"
 		base  = "/orgs/" + org
 		pbase = base + "/projects/" + proj
+		dbase = dataMount + pbase
 	)
 	id := uuid.NewString()
 	return []probeRoute{
@@ -61,6 +63,25 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, base + "/projects/new", nil},
 		{http.MethodGet, pbase + "/overview", nil},
 		{http.MethodGet, pbase + "/todos", nil},
+		{http.MethodGet, pbase + "/credentials", nil},
+		{http.MethodGet, pbase + "/spreadsheets", nil},
+		{http.MethodGet, pbase + "/spreadsheets/" + id, nil},
+		{http.MethodGet, pbase + "/spreadsheets/" + id + "/tabs", nil},
+		{http.MethodGet, pbase + "/spreadsheets/" + id + "/publish", nil},
+		{http.MethodGet, pbase + "/sheets", nil},
+		{http.MethodGet, pbase + "/sheets/" + id, nil},
+		{http.MethodGet, pbase + "/sheets/" + id + "/preview", nil},
+		{http.MethodGet, pbase + "/keys", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet/capabilities", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodGet, dbase + "/spreadsheets/" + id + "/tabs", nil},
+
+		// NOTE: these two are the only tenant-scoped pages not mounted under /orgs/{org}/projects/{project}.
+		// Google requires an exact-match redirect URI that cannot carry per-tenant path segments, so both
+		// derive their org and project from a signed state and re-check membership through OrgScopeFor.
+		{http.MethodGet, "/credentials/google/callback", nil},
+		{http.MethodGet, "/credentials/google/picker", nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
@@ -79,6 +100,29 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/todos/" + id + "/toggle", url.Values{}},
 		{http.MethodPost, pbase + "/todos/" + id + "/delete", url.Values{}},
 		{http.MethodDelete, pbase + "/todos/" + id, nil},
+		{http.MethodPost, pbase + "/credentials", url.Values{"name": {"Probe"}}},
+		{http.MethodPost, pbase + "/credentials/google/start", url.Values{}},
+		{http.MethodPost, pbase + "/credentials/" + id + "/delete", url.Values{}},
+		{http.MethodPost, pbase + "/spreadsheets", url.Values{"credential_id": {id}, "google_file_id": {"probe-file-id"}}},
+		{http.MethodPost, pbase + "/spreadsheets/" + id, url.Values{"title": {"Probe"}}},
+		{http.MethodPost, pbase + "/spreadsheets/" + id + "/delete", url.Values{}},
+		{http.MethodPost, pbase + "/spreadsheets/" + id + "/publish", url.Values{"tab": {"0"}, "slug.0": {"probe-bulk-sheet"}, "visibility": {"key"}}},
+		{http.MethodPost, pbase + "/spreadsheets/" + id + "/fix-id-column", url.Values{}},
+		{http.MethodPost, pbase + "/sheets", url.Values{"spreadsheet_id": {id}, "slug": {"probe-sheet"}, "visibility": {"key"}}},
+		{http.MethodPost, pbase + "/sheets/" + id, url.Values{"tab": {"Probe"}, "visibility": {"key"}}},
+		{http.MethodPost, pbase + "/sheets/" + id + "/purge", url.Values{}},
+		{http.MethodPost, pbase + "/sheets/" + id + "/delete", url.Values{}},
+		{http.MethodPost, pbase + "/keys", url.Values{"name": {"Probe"}, "scopes": {"sheets:read"}}},
+		{http.MethodPost, pbase + "/keys/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, pbase + "/keys/" + id + "/delete", url.Values{}},
+		{http.MethodPost, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet/rows", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet/rows/batch", nil},
+		{http.MethodPut, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -98,10 +142,13 @@ func probeRoutes() []probeRoute {
 	}
 }
 
-func newScopeProbeServer(t *testing.T, mode config.Mode) (*boot.Server, *bytes.Buffer) {
+func newScopeProbeServer(t *testing.T, mode config.Mode, tweak ...func(*config.Config)) (*boot.Server, *bytes.Buffer) {
 	t.Helper()
 	cfg := newSmokeCfg(t)
 	cfg.Mode = mode
+	for _, fn := range tweak {
+		fn(cfg)
+	}
 	if mode == config.ModeCloud {
 		// NOTE: org creation and the signup flow are cloud-only capabilities — the paths every tenant-scope bug so far landed on.
 		cfg.OIDC = config.OIDCConfig{
@@ -140,8 +187,39 @@ func probeCookie(t *testing.T, srv *boot.Server, p session.Principal) *http.Cook
 	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid, p, time.Now().Add(time.Hour)))
 	return &http.Cookie{
 		Name:  web.SessionCookieName,
-		Value: web.SignCookie([]byte(srv.Cfg.HTTP.StateSecret), sid),
+		Value: web.SignCookie(srv.StateSecret, sid),
 	}
+}
+
+// TestBootServer_SessionCookiesUseTheResolvedStateSecret pins one HMAC key across boot and the web handlers, so a cookie signed with the raw cfg.HTTP.StateSecret string cannot authenticate.
+func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
+	raw := bytes.Repeat([]byte{0x5A}, 32)
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(c *config.Config) {
+		c.HTTP.StateSecret = encoded
+	})
+	require.Equal(t, raw, srv.StateSecret, "boot must decode http.stateSecret once and share those bytes")
+
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "secret-probe@example.com", Name: "Secret Probe", Source: user.SourceLocal,
+	})
+	require.NoError(t, err)
+	sid, err := web.NewSID()
+	require.NoError(t, err)
+	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid,
+		session.Principal{UserID: owner.ID}, time.Now().Add(time.Hour)))
+
+	status := func(secret []byte) int {
+		req := httptest.NewRequest(http.MethodGet, "/orgs", nil)
+		req.AddCookie(&http.Cookie{Name: web.SessionCookieName, Value: web.SignCookie(secret, sid)})
+		rec := httptest.NewRecorder()
+		srv.Web.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	require.Equal(t, http.StatusOK, status(srv.StateSecret),
+		"a cookie signed with the resolved secret must load the session")
+	require.Equal(t, http.StatusSeeOther, status([]byte(encoded)),
+		"a cookie signed with the raw config string must not authenticate")
 }
 
 // walkRoutes drives every route as p and fails on any 5xx or any tenant-scope error.
@@ -206,8 +284,25 @@ func TestRoutes_ListCoversEveryRegisteredRoute(t *testing.T) {
 	}
 }
 
+// dataMount is the prefix internal/data registers behind, stripped before its own mux sees a request.
+const dataMount = "/api/v1"
+
+// TestRoutes_EveryProbeMatchesARegisteredRoute is the reverse of the assertion above: a probe row no
+// handler registers walks nothing, so the walk would quietly stop proving anything about that route.
+func TestRoutes_EveryProbeMatchesARegisteredRoute(t *testing.T) {
+	registered := map[string]bool{}
+	for _, pat := range registeredRoutes(t) {
+		registered[pat] = true
+	}
+	for _, rt := range probeRoutes() {
+		pat := rt.method + " " + templatize(rt.path)
+		require.True(t, registered[pat],
+			"%q is walked by a probe but no handler registers it — drop the probe or fix its path", pat)
+	}
+}
+
 var (
-	reRegister = regexp.MustCompile(`mux\.HandleFunc\("([A-Z]+) ([^"]+)"`)
+	reRegister = regexp.MustCompile(`\w+\.HandleFunc\("([A-Z]+) ([^"]+)"`)
 	reUUID     = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 )
 
@@ -216,6 +311,7 @@ func templatize(path string) string {
 	path = reUUID.ReplaceAllString(path, "{id}")
 	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{org}", 1)
 	path = strings.Replace(path, "/projects/probe-project", "/projects/{project}", 1)
+	path = strings.Replace(path, "/sheets/probe-sheet", "/sheets/{slug}", 1)
 	if strings.HasPrefix(path, "/orgs/{org}/members/{id}/") {
 		path = strings.Replace(path, "/members/{id}/", "/members/{user}/", 1)
 	}
@@ -225,22 +321,32 @@ func templatize(path string) string {
 	return path
 }
 
+// registeredRoutes scrapes every surface mounted on srv.Web, prefixing each surface's patterns with
+// the mount its own mux sits behind so the results are comparable with a concrete probe path.
 func registeredRoutes(t *testing.T) []string {
 	t.Helper()
-	files, err := filepath.Glob("../web/handlers/*.go")
-	require.NoError(t, err)
-	var out []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		b, rErr := os.ReadFile(f)
-		require.NoError(t, rErr)
-		for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
-			out = append(out, m[1]+" "+m[2])
-		}
+	surfaces := []struct{ glob, mount string }{
+		{"../web/handlers/*.go", ""},
+		{"../data/*.go", dataMount},
 	}
-	require.NotEmpty(t, out, "found no registered routes — the scraper regex has gone stale")
+	var out []string
+	for _, s := range surfaces {
+		files, err := filepath.Glob(s.glob)
+		require.NoError(t, err)
+		found := 0
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, rErr := os.ReadFile(f)
+			require.NoError(t, rErr)
+			for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
+				out = append(out, m[1]+" "+s.mount+m[2])
+				found++
+			}
+		}
+		require.NotZero(t, found, "found no registered routes under %s — the scraper regex has gone stale", s.glob)
+	}
 	return out
 }
 
@@ -268,6 +374,44 @@ func stubIssuer(t *testing.T) string {
 		_, _ = w.Write([]byte(`{"keys":[]}`))
 	})
 	return ts.URL
+}
+
+// TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface drives the booted server: api.enabled is false in
+// the probe config, so buildAPIHandler returns nil, and the data plane must still answer with its JSON envelope.
+func TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted)
+	require.False(t, srv.Cfg.API.Enabled, "the probe config must leave the RPC surface off for this test to mean anything")
+
+	req := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.JSONEq(t, `{"error":{"code":"`+apperror.CodeSheetNotFound+`","message":"Sheet not found"}}`, rec.Body.String())
+}
+
+// TestRoutes_DataPlaneWinsTheAPISubtree locks the mount precedence on the booted server with both
+// surfaces mounted: /api/v1/ is more specific than /api/, so ServeMux routes it to the data plane.
+func TestRoutes_DataPlaneWinsTheAPISubtree(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
+		cfg.API.Enabled = true
+	})
+	require.True(t, srv.Cfg.API.Enabled)
+
+	data := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	dataRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(dataRec, data)
+	require.Equal(t, http.StatusNotFound, dataRec.Code)
+	require.Contains(t, dataRec.Body.String(), apperror.CodeSheetNotFound,
+		"the data plane must own /api/v1/, not the Connect handler")
+
+	rpc := httptest.NewRequest(http.MethodPost, "/api/todo.v1.TodoService/List", strings.NewReader("{}"))
+	rpc.Header.Set("Content-Type", "application/json")
+	rpcRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rpcRec, rpc)
+	require.NotContains(t, rpcRec.Body.String(), apperror.CodeSheetNotFound,
+		"the RPC subtree must not be swallowed by the data plane")
 }
 
 // TestRoutes_NonMemberCannotReachAnotherOrg locks the membership gate: the slug is attacker-supplied and RLS cannot gate it.

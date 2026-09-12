@@ -15,6 +15,7 @@ const (
 	SourceOIDC    Source = "oidc"
 	SourceToken   Source = "token"
 	SourceLocal   Source = "local"
+	SourceAPIKey  Source = "apikey"
 )
 
 type Principal struct {
@@ -24,6 +25,7 @@ type Principal struct {
 	Source          Source
 	IDPIssuer       string
 	IDPSubject      string
+	IDPOrgID        string
 	IDToken         string
 	Scopes          []string
 	ActiveOrgID     uuid.UUID
@@ -45,8 +47,11 @@ func PrincipalFrom(ctx context.Context) Principal {
 	return p
 }
 
+// Store persists sessions by opaque id.
 type Store interface {
 	Save(ctx context.Context, sid string, p Principal, exp time.Time) error
 	Load(ctx context.Context, sid string) (Principal, bool, error)
 	Delete(ctx context.Context, sid string) error
+	// DeleteExpired removes sessions whose expiry has passed and reports how many went.
+	DeleteExpired(ctx context.Context) (int, error)
 }

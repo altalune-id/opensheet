@@ -74,8 +74,8 @@ func (l LogError) RenderError(w http.ResponseWriter, r *http.Request, err *apper
 
 func isHTMX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
-func statusFromApp(_ *apperror.AppError) int {
-	return http.StatusInternalServerError
+func statusFromApp(err *apperror.AppError) int {
+	return err.HTTPStatus()
 }
 
 func htmxErrorFragment(status int, title, msg string) []byte {

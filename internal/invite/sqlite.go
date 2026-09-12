@@ -83,17 +83,17 @@ func (s *sqliteStore) Save(ctx context.Context, i *Invite) error {
 			i.Email,
 			string(i.Role),
 			i.TokenHash,
-			i.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(i.ExpiresAt),
 			sqliteNullableTimeArg(i.UsedAt),
 			tc.UserID.String(),
-			i.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(i.CreatedAt),
 		).
 		ON_CONFLICT(s.table.ID).
 		DO_UPDATE(sqlite.SET(
 			s.table.Email.SET(sqlite.String(i.Email)),
 			s.table.Role.SET(sqlite.String(string(i.Role))),
 			s.table.TokenHash.SET(sqlite.String(i.TokenHash)),
-			s.table.ExpiresAt.SET(sqlite.String(i.ExpiresAt.UTC().Format(time.RFC3339Nano))),
+			s.table.ExpiresAt.SET(sqlite.String(sqliteent.SQLiteTime(i.ExpiresAt))),
 			s.table.AcceptedAt.SET(sqliteNullableTimeExpr(i.UsedAt)),
 		))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
@@ -134,7 +134,7 @@ func (s *sqliteStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*Invi
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.ListPending: %w", err)
@@ -156,7 +156,7 @@ func (s *sqliteStore) FindPendingForEmail(ctx context.Context, email string) ([]
 		FROM(s.table).
 		WHERE(s.table.Email.EQ(sqlite.String(email)).
 			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.FindPendingForEmail: %w", err)
@@ -213,12 +213,12 @@ func sqliteNullableTimeArg(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return sqliteent.SQLiteTime(*t)
 }
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
 		return sqlite.StringExp(sqlite.NULL)
 	}
-	return sqlite.String(t.UTC().Format(time.RFC3339Nano))
+	return sqlite.String(sqliteent.SQLiteTime(*t))
 }

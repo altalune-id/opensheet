@@ -33,6 +33,7 @@ type Middleware = func(http.Handler) http.Handler
 type ServerOpts struct {
 	AppHandlers  []Register
 	APIHandler   http.Handler
+	DataHandler  http.Handler
 	RobotsCfg    *robotsConfig
 	BasePath     string
 	HealthOK     func() bool
@@ -69,6 +70,11 @@ func NewServer(o ServerOpts) http.Handler {
 
 	if o.APIHandler != nil {
 		outer.Handle(Path(o.BasePath, "/api")+"/", o.APIHandler)
+	}
+	// NOTE: ServeMux resolves /api/v1/ over /api/ by specificity, so the data plane wins the subtree
+	// regardless of registration order. The nil guard is required — Handle panics on a nil handler.
+	if o.DataHandler != nil {
+		outer.Handle(Path(o.BasePath, "/api")+"/v1/", o.DataHandler)
 	}
 
 	base := strings.TrimRight(o.BasePath, "/")

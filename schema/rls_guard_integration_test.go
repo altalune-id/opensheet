@@ -17,7 +17,7 @@ func TestRLSGuard_Integration(t *testing.T) {
 	conn := pgtest.New(t).OpenDB(t)
 
 	ctx := context.Background()
-	const table = "altempl_todos"
+	const table = "opensheet_todos"
 
 	var bypassRLS bool
 	if err := conn.QueryRowContext(ctx,
@@ -27,7 +27,7 @@ func TestRLSGuard_Integration(t *testing.T) {
 	}
 
 	if _, err := conn.ExecContext(ctx, `
-		CREATE TABLE altempl_todos (
+		CREATE TABLE opensheet_todos (
 			id     UUID PRIMARY KEY,
 			org_id UUID NOT NULL,
 			title  TEXT NOT NULL
@@ -35,14 +35,14 @@ func TestRLSGuard_Integration(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `ALTER TABLE altempl_todos ENABLE ROW LEVEL SECURITY`); err != nil {
+	if _, err := conn.ExecContext(ctx, `ALTER TABLE opensheet_todos ENABLE ROW LEVEL SECURITY`); err != nil {
 		t.Fatalf("enable rls: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `ALTER TABLE altempl_todos FORCE ROW LEVEL SECURITY`); err != nil {
+	if _, err := conn.ExecContext(ctx, `ALTER TABLE opensheet_todos FORCE ROW LEVEL SECURITY`); err != nil {
 		t.Fatalf("force rls: %v", err)
 	}
 	if _, err := conn.ExecContext(ctx, `
-		CREATE POLICY altempl_todos_tenant ON altempl_todos
+		CREATE POLICY opensheet_todos_tenant ON opensheet_todos
 		USING (org_id = current_setting('app.current_org_id')::uuid)
 	`); err != nil {
 		t.Fatalf("create policy: %v", err)
@@ -68,7 +68,7 @@ func TestRLSGuard_Integration(t *testing.T) {
 		}
 	}
 
-	if _, err := conn.ExecContext(ctx, `DROP POLICY altempl_todos_tenant ON altempl_todos`); err != nil {
+	if _, err := conn.ExecContext(ctx, `DROP POLICY opensheet_todos_tenant ON opensheet_todos`); err != nil {
 		t.Fatalf("drop policy: %v", err)
 	}
 

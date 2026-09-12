@@ -99,3 +99,97 @@ them from screenshots. `NNN` in the range `900`-`999` is reserved for unexpected
 | -------- | ------------------------------------ | ----------------------- |
 | `ONB001` | `apperror.CodeOnboardingRequired`    | Onboarding Required     |
 | `ONB002` | `apperror.CodeOnboardingAlreadyDone` | Onboarding Already Done |
+
+## CRD — Credentials
+
+| Code     | Constant                                     | Meaning                          |
+| -------- | -------------------------------------------- | -------------------------------- |
+| `CRD001` | `apperror.CodeCredentialNotFound`            | Credential Not Found             |
+| `CRD002` | `apperror.CodeCredentialAlreadyExists`       | Credential Already Exists        |
+| `CRD003` | `apperror.CodeCredentialInvalidName`         | Credential Invalid Name          |
+| `CRD004` | `apperror.CodeCredentialInvalidKind`         | Credential Invalid Kind          |
+| `CRD005` | `apperror.CodeCredentialInUse`               | Credential In Use                |
+| `CRD006` | `apperror.CodeCredentialReauthNeeded`        | Credential Needs Reauthorization |
+| `CRD007` | `apperror.CodeEncryptionUnavailable`         | Encryption Unavailable           |
+| `CRD008` | `apperror.CodeCredentialStateInvalid`        | Connect State Invalid Or Expired |
+| `CRD009` | `apperror.CodeEncryptionOpenFailed`          | Encryption Open Failed           |
+| `CRD010` | `apperror.CodeCredentialNotSealed`           | Credential Not Sealed            |
+| `CRD011` | `apperror.CodeCredentialGoogleNotConfigured` | Google Connect Not Configured    |
+
+## SPR — Spreadsheets
+
+| Code     | Constant                                | Meaning                        |
+| -------- | --------------------------------------- | ------------------------------ |
+| `SPR001` | `apperror.CodeSpreadsheetNotFound`      | Spreadsheet Not Found          |
+| `SPR002` | `apperror.CodeSpreadsheetAlreadyExists` | Spreadsheet Already Registered |
+| `SPR003` | `apperror.CodeSpreadsheetInvalidFileID` | Spreadsheet Invalid File ID    |
+| `SPR004` | `apperror.CodeSpreadsheetInvalidTitle`  | Spreadsheet Invalid Title      |
+| `SPR005` | `apperror.CodeSpreadsheetNotWritable`   | Spreadsheet Not Writable       |
+
+## SHT — Sheets
+
+| Code     | Constant                                  | Meaning                       |
+| -------- | ----------------------------------------- | ----------------------------- |
+| `SHT001` | `apperror.CodeSheetNotFound`              | Sheet Not Found               |
+| `SHT002` | `apperror.CodeSheetAlreadyExists`         | Sheet Slug Taken              |
+| `SHT003` | `apperror.CodeSheetInvalidSlug`           | Sheet Invalid Slug            |
+| `SHT004` | `apperror.CodeSheetInvalidVisibility`     | Sheet Invalid Visibility      |
+| `SHT005` | `apperror.CodeSheetInvalidTTL`            | Sheet Invalid Cache TTL       |
+| `SHT006` | `apperror.CodeSheetPublicDisabled`        | Public Sheets Disabled        |
+| `SHT007` | `apperror.CodeSheetPayloadTooLarge`       | Sheet Payload Too Large       |
+| `SHT008` | `apperror.CodeSheetTabNotFound`           | Sheet Tab Not Found           |
+| `SHT009` | `apperror.CodeSheetNotWritable`           | Sheet Not Writable            |
+| `SHT010` | `apperror.CodeSheetNoIDColumn`            | Sheet Has No ID Column        |
+| `SHT011` | `apperror.CodeSheetAmbiguousIDColumn`     | Sheet ID Column Ambiguous     |
+| `SHT012` | `apperror.CodeSheetDuplicateID`           | Sheet Duplicate ID            |
+| `SHT013` | `apperror.CodeSheetRowNotFound`           | Sheet Row Not Found           |
+| `SHT014` | `apperror.CodeSheetUnknownColumn`         | Sheet Unknown Column          |
+| `SHT015` | `apperror.CodeSheetReadOnlyColumn`        | Sheet Read-Only Column        |
+| `SHT016` | `apperror.CodeSheetInvalidRow`            | Sheet Invalid Row             |
+| `SHT017` | `apperror.CodeSheetWriteInFlight`         | Sheet Write In Flight         |
+| `SHT018` | `apperror.CodeSheetIdempotencyMismatch`   | Sheet Idempotency Mismatch    |
+| `SHT019` | `apperror.CodeSheetInvalidTabTitle`       | Sheet Invalid Tab Title       |
+| `SHT020` | `apperror.CodeSheetInvalidRowIndex`       | Sheet Invalid Row Index       |
+| `SHT021` | `apperror.CodeSheetDuplicateColumn`       | Sheet Duplicate Column        |
+| `SHT022` | `apperror.CodeSheetEmptyID`               | Sheet Empty Row ID            |
+| `SHT023` | `apperror.CodeSheetContractViolation`     | Sheet Contract Violation      |
+| `SHT024` | `apperror.CodeSheetInvalidRange`          | Sheet Invalid Cell Range      |
+| `SHT025` | `apperror.CodeSheetNothingToFix`          | Sheet Nothing To Fix          |
+| `SHT026` | `apperror.CodeSheetColumnNotEmpty`        | Sheet Column Not Empty        |
+| `SHT027` | `apperror.CodeSheetIDMismatch`            | Sheet Row ID Mismatch         |
+| `SHT028` | `apperror.CodeSheetBatchTooLarge`         | Sheet Batch Too Large         |
+| `SHT029` | `apperror.CodeSheetSoftDeleteUnsupported` | Sheet Soft Delete Unsupported |
+| `SHT030` | `apperror.CodeSheetPreconditionFailed`    | Sheet Precondition Failed     |
+| `SHT031` | `apperror.CodeSheetInvalidClause`         | Sheet Invalid Filter Clause   |
+| `SHT032` | `apperror.CodeSheetUnqueryableColumn`     | Sheet Unqueryable Column      |
+| `SHT033` | `apperror.CodeSheetInvalidLimit`          | Sheet Invalid Row Limit       |
+| `SHT034` | `apperror.CodeSheetInvalidCursor`         | Sheet Invalid Page Cursor     |
+| `SHT035` | `apperror.CodeSheetUnknownQueryParam`     | Sheet Unknown Query Parameter |
+| `SHT036` | `apperror.CodeSheetStaleCursor`           | Sheet Stale Page Cursor       |
+| `SHT037` | `apperror.CodeSheetHintNotApplicable`     | Sheet Hint Not Applicable     |
+| `SHT038` | `apperror.CodeSheetHintOperand`           | Sheet Invalid Hint Operand    |
+| `SHT039` | `apperror.CodeSheetInvalidSort`           | Sheet Invalid Sort            |
+| `SHT040` | `apperror.CodeSheetSortDepth`             | Sheet Sorted Walk Too Deep    |
+| `SHT041` | `apperror.CodeSheetUnknownSortColumn`     | Sheet Unknown Sort Column     |
+
+## KEY — API keys
+
+| Code     | Constant                               | Meaning                    |
+| -------- | -------------------------------------- | -------------------------- |
+| `KEY001` | `apperror.CodeAPIKeyNotFound`          | API Key Not Found          |
+| `KEY002` | `apperror.CodeAPIKeyInvalidName`       | API Key Invalid Name       |
+| `KEY003` | `apperror.CodeAPIKeyInvalidScope`      | API Key Invalid Scope      |
+| `KEY004` | `apperror.CodeAPIKeyUnauthorized`      | API Key Unauthorized       |
+| `KEY005` | `apperror.CodeAPIKeyInsufficientScope` | API Key Insufficient Scope |
+
+`KEY004` is the single opaque code for missing, malformed, unknown, revoked and expired keys:
+distinguishing them on the wire tells an attacker which guesses were closer.
+
+## GSH — Google Sheets
+
+| Code     | Constant                              | Meaning                        |
+| -------- | ------------------------------------- | ------------------------------ |
+| `GSH001` | `apperror.CodeGoogleNotFound`         | Google Document Not Found      |
+| `GSH002` | `apperror.CodeGooglePermissionDenied` | Google Permission Denied       |
+| `GSH003` | `apperror.CodeGoogleQuotaExceeded`    | Google Quota Exceeded          |
+| `GSH004` | `apperror.CodeGoogleUnavailable`      | Google Temporarily Unavailable |

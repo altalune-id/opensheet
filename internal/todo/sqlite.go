@@ -75,7 +75,7 @@ func (s *sqliteStore) Save(ctx context.Context, t *Todo) error {
 	if t.Done {
 		done = 1
 	}
-	updatedAt := t.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	updatedAt := sqliteent.SQLiteTime(t.UpdatedAt)
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			t.ID.String(),
@@ -84,7 +84,7 @@ func (s *sqliteStore) Save(ctx context.Context, t *Todo) error {
 			tc.UserID.String(),
 			t.Title,
 			done,
-			t.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(t.CreatedAt),
 			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).
@@ -121,14 +121,7 @@ func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID) (*Todo, error) {
 	return row.toTodo()
 }
 
-func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts ListOpts) ([]*Todo, error) {
-	tc, err := tenant.From(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if tc.OrgID != orgID {
-		return []*Todo{}, nil
-	}
+func (s *sqliteStore) listStmt(orgID, projectID uuid.UUID, opts ListOpts) sqlite.SelectStatement {
 	where := s.table.OrgID.EQ(sqlite.String(orgID.String())).
 		AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))
 	if opts.Done != nil {
@@ -138,10 +131,21 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts
 		}
 		where = where.AND(s.table.Done.EQ(sqlite.Int(val)))
 	}
-	stmt := sqlite.SELECT(s.table.AllColumns).
+	return sqlite.SELECT(s.table.AllColumns).
 		FROM(s.table).
 		WHERE(where).
-		ORDER_BY(s.table.CreatedAt.DESC())
+		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
+}
+
+func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID, opts ListOpts) ([]*Todo, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tc.OrgID != orgID {
+		return []*Todo{}, nil
+	}
+	stmt := s.listStmt(orgID, projectID, opts)
 	var rows []sqliteTodoRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("todo.sqlite.List: %w", err)
@@ -207,7 +211,7 @@ func (s *sqliteStore) MarkDoneOlderThan(ctx context.Context, orgID uuid.UUID, cu
 	if batch <= 0 {
 		batch = SweepBatchSize
 	}
-	cut := cutoff.UTC().Format(time.RFC3339Nano)
+	cut := sqliteent.SQLiteTime(cutoff)
 	total := 0
 	for {
 		stale := sqlite.SELECT(s.table.ID).
@@ -217,11 +221,11 @@ func (s *sqliteStore) MarkDoneOlderThan(ctx context.Context, orgID uuid.UUID, cu
 					AND(s.table.Done.EQ(sqlite.Int(0))).
 					AND(s.table.CreatedAt.LT(sqlite.String(cut))),
 			).
-			ORDER_BY(s.table.CreatedAt.ASC()).
+			ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC()).
 			LIMIT(int64(batch))
 
 		stmt := s.table.UPDATE(s.table.Done, s.table.UpdatedAt).
-			SET(sqlite.Int(1), sqlite.String(time.Now().UTC().Format(time.RFC3339Nano))).
+			SET(sqlite.Int(1), sqlite.String(sqliteent.SQLiteTime(time.Now()))).
 			WHERE(s.table.ID.IN(stale))
 
 		res, err := stmt.ExecContext(ctx, s.db)

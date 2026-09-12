@@ -16,7 +16,7 @@ import (
 func TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole(t *testing.T) {
 	h := pgtest.New(t)
 	suffix := uniqueSuffix(t)
-	role := "altempl_definer_" + suffix
+	role := "opensheet_definer_" + suffix
 	prefix := "t" + suffix + "_"
 
 	migDB := migrationRoleDB(t, h, role, "BYPASSRLS")
@@ -27,6 +27,7 @@ func TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole(t *testing.T) {
 	for _, sig := range []string{
 		"list_org_ids()", "resolve_org_by_slug(text)", "list_orgs_for_user(uuid)",
 		"resolve_invite_by_token_hash(text)", "list_pending_invites_for_email(text)",
+		"apikey_by_prefix(text)",
 	} {
 		name := prefix + strings.SplitN(sig, "(", 2)[0]
 
@@ -64,7 +65,7 @@ func wrapperCount(t *testing.T, conn *sql.DB, prefix string) int {
 func TestMigrateUp_RaisesWhenMigrationRoleLacksBypassRLS(t *testing.T) {
 	h := pgtest.New(t)
 	suffix := uniqueSuffix(t)
-	role := "altempl_norls_" + suffix
+	role := "opensheet_norls_" + suffix
 	prefix := "t" + suffix + "_"
 
 	migDB := migrationRoleDB(t, h, role, "NOBYPASSRLS")

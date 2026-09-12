@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/schema"
@@ -44,7 +46,7 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, proj
 	userID = uuid.New()
 	orgID = uuid.New()
 	projID = uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -64,6 +66,53 @@ func seedTenant(t *testing.T, sqlDB *sql.DB, prefix string) (userID, orgID, proj
 		t.Fatal(err)
 	}
 	return
+}
+
+func orderedV7Pair(t *testing.T) (lo, hi uuid.UUID) {
+	t.Helper()
+	a := uuid.Must(uuid.NewV7())
+	b := uuid.Must(uuid.NewV7())
+	if a == b {
+		t.Fatal("NewV7 returned two identical ids")
+	}
+	if a.String() > b.String() {
+		return b, a
+	}
+	return a, b
+}
+
+func TestSQLiteStore_List_TiedCreatedAtOrdersByIDDescending(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+	tie := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	lo, hi := orderedV7Pair(t)
+
+	for _, id := range []uuid.UUID{lo, hi} {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, "tied "+id.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.ID = id
+		td.CreatedAt = tie
+		td.UpdatedAt = tie
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	for i := range 5 {
+		got, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{})
+		if err != nil {
+			t.Fatalf("List %d: %v", i, err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("List %d: got %d rows, want 2", i, len(got))
+		}
+		// NOTE: plan-dependent — TestSQLiteStore_ListStatementCarriesTheIDTiebreak locks the emitted ORDER BY.
+		if got[0].ID != hi || got[1].ID != lo {
+			t.Fatalf("List %d: tied created_at must order by id descending, got %v then %v", i, got[0].ID, got[1].ID)
+		}
+	}
 }
 
 func TestSQLiteStore_SaveAndByID(t *testing.T) {
@@ -303,5 +352,45 @@ func TestSQLiteStore_MarkDoneOlderThan_NothingStale(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("swept=%d want 0", n)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_SweepsRowSharingTheCutoffSecond(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	cutoff := time.Date(2026, 9, 9, 2, 12, 19, 236756000, time.UTC)
+	older := []time.Time{
+		time.Date(2026, 9, 9, 2, 12, 19, 0, time.UTC),
+		time.Date(2026, 9, 9, 2, 12, 19, 236700000, time.UTC),
+	}
+
+	for i, created := range older {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, fmt.Sprintf("stale-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.CreatedAt = created
+		td.UpdatedAt = created
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 100)
+	if err != nil {
+		t.Fatalf("MarkDoneOlderThan: %v", err)
+	}
+	if n != len(older) {
+		t.Fatalf("swept=%d want %d: a row with fewer fractional digits than the cutoff must still sort before it", n, len(older))
+	}
+
+	no := false
+	open, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{Done: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Errorf("open todos after sweep: %+v", open)
 	}
 }

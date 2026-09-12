@@ -108,7 +108,7 @@ func TestRLSAuditError_Error_IncludesCounts(t *testing.T) {
 }
 
 func TestIsRLSAuditError_UnwrapsThroughFmt(t *testing.T) {
-	inner := &RLSAuditError{MissingRLS: []string{"altempl_todos"}}
+	inner := &RLSAuditError{MissingRLS: []string{"opensheet_todos"}}
 	wrapped := fmt.Errorf("boot: %w", inner)
 	if !IsRLSAuditError(wrapped) {
 		t.Errorf("IsRLSAuditError(wrapped) = false; want true")

@@ -62,7 +62,7 @@ func (s *postgresStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*In
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(postgres.UUID(orgID)).
 			AND(s.table.AcceptedAt.IS_NULL())).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []pgInviteRow
 	if qErr := stmt.QueryContext(ctx, tx, &rows); qErr != nil {
 		return nil, fmt.Errorf("invite.postgres.ListPending: %w", qErr)

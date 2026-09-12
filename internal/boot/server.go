@@ -3,7 +3,6 @@ package boot
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -14,8 +13,10 @@ import (
 
 	"altalune.id/opensheet/authl"
 	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
@@ -28,6 +29,8 @@ import (
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/logger"
@@ -46,20 +49,29 @@ type Server struct {
 	Caps     capabilities.Capabilities
 	Platform *platform.Kernel
 
-	Auth     *auth.Service
-	Users    *user.Service
-	Orgs     *org.Service
-	Projects *project.Service
-	Todos    *todo.Service
-	Invites  *invite.Service
-	Onboards *onboard.Service
+	Auth         *auth.Service
+	Users        *user.Service
+	Orgs         *org.Service
+	Projects     *project.Service
+	Todos        *todo.Service
+	Invites      *invite.Service
+	Onboards     *onboard.Service
+	Credentials  *credential.Service
+	Spreadsheets *spreadsheet.Service
+	Sheets       *sheet.Service
+	APIKeys      *apikey.Service
 
 	Onboard *user.OnboardWorkflow
+	Read    *sheet.ReadWorkflow
+	Connect *credential.ConnectWorkflow
 
 	Onboarded bool
 
 	// SetupToken gates /onboard while onboarding is still required; empty once onboarded.
 	SetupToken string
+
+	// SECURITY: StateSecret is the single resolved http.stateSecret — the HMAC key behind every signed cookie and OAuth state.
+	StateSecret []byte
 
 	Web        http.Handler
 	API        *api.Server
@@ -80,6 +92,11 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	log := o.logger
 	if log == nil {
 		log = logger.New(cfg.Log)
+	}
+
+	stateSecret, err := resolveStateSecret(cfg, log)
+	if err != nil {
+		return nil, err
 	}
 
 	tp, mp, shutdownOTel, err := telemetry.Setup(ctx, cfg.Telemetry, log)
@@ -112,14 +129,21 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: tokens: %w", err)
 	}
 
-	altAuth, err := buildAltAuth(ctx, cfg, log)
+	altAuth, err := buildAltAuth(ctx, cfg, stateSecret)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
 		return nil, fmt.Errorf("boot: authl: %w", err)
 	}
 
-	sessions := session.NewMemoryStore()
+	sealed, err := buildSealer(cfg, log)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
+
+	sessions := session.NewStore(cfg.DB, pool, sealed, reporter.Unexpected)
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{
@@ -136,6 +160,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Notify:   sinks,
 		Nano:     nanoid.New,
 		Caps:     caps,
+		Sealer:   sealed,
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {
@@ -144,7 +169,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 	kernel.AddCloser(pool)
 
-	svcs, err := buildServices(cfg, kernel, caps)
+	svcs, err := buildServices(cfg, kernel, caps, stateSecret)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -175,6 +200,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	sup := worker.New(log)
 	sup.Register(health)
+	sup.Register(svcs.KeyUsage)
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
@@ -233,8 +259,16 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		logSetupToken(cfg, log, setup)
 	}
 
-	webHandler := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
-		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs.Onboards, required, setup, apiHandler, bundle, defaultLoc)
+	dataHandler := buildDataHandler(cfg, caps, log, svcs)
+
+	webHandler, err := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
+		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs, svcs.Onboards, required, setup,
+		apiHandler, dataHandler, bundle, defaultLoc, stateSecret)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
 
 	httpHandler := webHandler
 	if o.schedulerOnly {
@@ -253,9 +287,16 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Todos:        svcs.Todos,
 		Invites:      svcs.Invites,
 		Onboards:     svcs.Onboards,
+		Credentials:  svcs.Credentials,
+		Spreadsheets: svcs.Spreadsheets,
+		Sheets:       svcs.Sheets,
+		APIKeys:      svcs.APIKeys,
 		Onboarded:    onboarded,
 		SetupToken:   setup,
+		StateSecret:  stateSecret,
 		Onboard:      svcs.Onboard,
+		Read:         svcs.Read,
+		Connect:      svcs.Connect,
 		Web:          webHandler,
 		API:          apiSrv,
 		Scheduler:    runner,
@@ -320,13 +361,9 @@ func oidcRedirectURL(cfg *config.Config) string {
 		strings.TrimRight(cfg.HTTP.BaseURL, "/"), cfg.HTTP.BasePath)
 }
 
-func buildAltAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*authl.Client, error) {
+func buildAltAuth(ctx context.Context, cfg *config.Config, stateSecret []byte) (*authl.Client, error) {
 	if cfg.OIDC.Issuer == "" {
 		return nil, nil
-	}
-	secret, err := resolveStateSecret(cfg, log)
-	if err != nil {
-		return nil, err
 	}
 	redirect := oidcRedirectURL(cfg)
 	return authl.NewClient(ctx, authl.Config{
@@ -337,28 +374,17 @@ func buildAltAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*a
 		Scopes:           cfg.OIDC.Scopes,
 		Resource:         cfg.OIDC.Resource,
 		RememberLastUser: true,
-		LastUserCookie:   "altempl_last_user",
-		StateCookie:      "altempl_oidc_state",
-		StateSecret:      secret,
+		LastUserCookie:   "opensheet_last_user",
+		StateCookie:      "opensheet_oidc_state",
+		StateSecret:      stateSecret,
 		CookieSecure:     cfg.HTTP.CookieSecure,
 	})
 }
 
+// SECURITY: belt-and-braces — config.Validate already rejects a bad value; boot refuses to key a cookie on one regardless.
 func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
-	raw := cfg.HTTP.StateSecret
-	if raw != "" {
-		buf, err := base64.RawURLEncoding.DecodeString(raw)
-		if err != nil {
-			if b2, err2 := base64.StdEncoding.DecodeString(raw); err2 == nil {
-				buf = b2
-			} else {
-				return nil, fmt.Errorf("config: http.stateSecret must be base64url — %w", err)
-			}
-		}
-		if len(buf) < 32 {
-			return nil, errors.New("config: http.stateSecret must decode to >= 32 bytes")
-		}
-		return buf, nil
+	if cfg.HTTP.StateSecret != "" {
+		return config.ParseStateSecret(cfg.HTTP.StateSecret)
 	}
 	ephemeral, err := authl.GenerateStateSecret()
 	if err != nil {

@@ -1,4 +1,4 @@
-.PHONY: help build test test-race test-cover vet fmt check generate ui-vendor buf migrate docker clean install-tools lint dev
+.PHONY: help build test test-race test-cover vet fmt check module-shape generate ui-vendor buf migrate docker clean install-tools lint dev
 
 GO      ?= go
 BIN     := bin/opensheet
@@ -41,7 +41,10 @@ vet: ## Run go vet
 fmt: ## gofmt -w
 	gofmt -w .
 
-check: fmt vet test ## fmt + vet + test — pre-commit gate
+module-shape: ## Verify each domain module carries its canonical file set
+	@bash scripts/check-module-shape.sh
+
+check: fmt vet module-shape test ## fmt + vet + module-shape + test — pre-commit gate
 
 generate: ## Regenerate templ + buf outputs (pnpm-managed buf, go-tool templ)
 	$(GO) tool templ generate

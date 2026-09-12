@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
 )
@@ -120,4 +121,45 @@ func TestNotInvitedError(t *testing.T) {
 	if auth.IsNotInvitedError(errors.New("boom")) {
 		t.Error("false positive")
 	}
+}
+
+func TestOrgUnresolvedError(t *testing.T) {
+	t.Parallel()
+	err := &auth.OrgUnresolvedError{Reason: "multiple memberships"}
+	if err.Error() != "auth: token: org unresolved: multiple memberships" {
+		t.Errorf("Error()=%q", err.Error())
+	}
+	if (&auth.OrgUnresolvedError{}).Error() != "auth: token: org unresolved" {
+		t.Errorf("empty reason Error()=%q", (&auth.OrgUnresolvedError{}).Error())
+	}
+	ae := err.ToAppError()
+	if ae.Code() != apperror.CodeTenantMissing {
+		t.Errorf("code=%q want %q", ae.Code(), apperror.CodeTenantMissing)
+	}
+	if ae.GRPCCode() != codes.Unauthenticated {
+		t.Errorf("grpcCode=%v", ae.GRPCCode())
+	}
+	if got := detailMeta(t, ae)["reason"]; got != "multiple memberships" {
+		t.Errorf("meta[reason]=%q", got)
+	}
+	if meta := detailMeta(t, (&auth.OrgUnresolvedError{}).ToAppError()); len(meta) != 0 {
+		t.Errorf("empty reason must carry no meta, got %v", meta)
+	}
+	if !auth.IsOrgUnresolvedError(fmt.Errorf("wrap: %w", err)) {
+		t.Error("IsOrgUnresolvedError wrapped")
+	}
+	if auth.IsOrgUnresolvedError(errors.New("boom")) {
+		t.Error("false positive")
+	}
+}
+
+func detailMeta(t *testing.T, e *apperror.AppError) map[string]string {
+	t.Helper()
+	for _, d := range e.Details() {
+		if ed, ok := d.(*apperrorv1.ErrorDetail); ok {
+			return ed.GetMeta()
+		}
+	}
+	t.Fatal("no *apperrorv1.ErrorDetail in AppError.Details()")
+	return nil
 }

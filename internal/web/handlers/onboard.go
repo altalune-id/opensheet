@@ -25,7 +25,7 @@ import (
 const minOnboardPasswordLen = 8
 
 // SetupCookieName carries the /onboard setup token across the OIDC round-trip.
-const SetupCookieName = "altempl_setup"
+const SetupCookieName = "opensheet_setup"
 
 const setupCookieTTL = 30 * time.Minute
 
@@ -455,6 +455,9 @@ func OnboardingGate(basePath string, required *atomic.Bool) func(http.Handler) h
 		web.Path(basePath, "/static"),
 		web.Path(basePath, "/oauth/callback"),
 		web.Path(basePath, "/login/oidc"),
+		// NOTE: the machine surfaces must not be redirected to an HTML page. Before onboarding
+		// there are no orgs, projects or keys, so the data plane 404s and RPC is unauthenticated.
+		web.Path(basePath, "/api"),
 	}
 	unprefixed := []string{"/healthz", "/readyz", "/robots.txt"}
 	return func(next http.Handler) http.Handler {

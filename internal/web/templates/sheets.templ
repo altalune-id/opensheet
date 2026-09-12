@@ -1,0 +1,406 @@
+package templates
+
+import (
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+type SheetRow struct {
+	ID               string
+	Slug             string
+	Tab              string
+	TTL              string
+	SpreadsheetTitle string
+	Public           bool
+	Writable         bool
+}
+
+type SheetsView struct {
+	ProjectSlug   string
+	Rows          []SheetRow
+	Spreadsheets  []OptionRow
+	SpreadsheetID string
+	Slug          string
+	Tab           string
+	CacheTTL      string
+	Public        bool
+	Writable      bool
+	Error         string
+	ErrorCode     string
+	Notice        string
+	// FixIDColumnPath is the project-relative path of the offer to add the missing id column, empty unless that offer applies.
+	FixIDColumnPath string
+}
+
+type SheetView struct {
+	ProjectSlug      string
+	ID               string
+	Slug             string
+	Tab              string
+	CacheTTL         string
+	SpreadsheetTitle string
+	Public           bool
+	Writable         bool
+	DataURL          string
+	Error            string
+	ErrorCode        string
+}
+
+type SheetPreview struct {
+	Columns   []string
+	Rows      [][]string
+	Warnings  []string
+	ETag      string
+	FetchedAt string
+	Cached    bool
+	Stale     bool
+	Truncated bool
+	Failure   string
+}
+
+templ SheetSection(d web.LayoutData, v SheetsView) {
+	<section id="sheets-section">
+		if v.Error != "" {
+			<div data-error="sheets">
+				@ErrorBanner(d, v.Error, v.ErrorCode)
+				if v.FixIDColumnPath != "" {
+					<div class="mt-3">
+						<button
+							data-fix-id-column
+							type="button"
+							hx-post={ d.ProjectPath(v.ProjectSlug, v.FixIDColumnPath) }
+							hx-target="#sheets-section"
+							hx-swap="outerHTML"
+							class="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/60"
+						>
+							@icons.Icon("plus", "h-4 w-4")
+							<span>{ d.Tr("sheets.fix_id_column") }</span>
+						</button>
+						<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.fix_id_column_hint") }</p>
+					</div>
+				}
+			</div>
+		}
+		if v.Notice != "" {
+			<div data-notice="sheets" class="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+				<p>{ v.Notice }</p>
+			</div>
+		}
+		if len(v.Spreadsheets) == 0 {
+			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">{ d.Tr("sheets.needs_spreadsheet") }</p>
+				<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("nav.spreadsheets") }</a>
+			</div>
+		} else {
+			<form
+				method="post"
+				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets")) }
+				hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets") }
+				hx-target="#sheets-section"
+				hx-swap="outerHTML"
+				class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm"
+			>
+				<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.publish_heading") }</h2>
+				<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("sheets.publish_subtitle") }</p>
+				<div class="mt-4 grid gap-4 sm:grid-cols-2">
+					<div>
+						<label for="sheet-spreadsheet" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.spreadsheet") }</label>
+						<select id="sheet-spreadsheet" name="spreadsheet_id" required class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring">
+							for _, s := range v.Spreadsheets {
+								<option value={ s.Value } selected?={ s.Value == v.SpreadsheetID }>{ s.Label }</option>
+							}
+						</select>
+					</div>
+					<div>
+						<label for="sheet-tab" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.tab") }</label>
+						<input id="sheet-tab" name="tab" type="text" value={ v.Tab } placeholder={ d.Tr("sheets.tab_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+						<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.tab_hint") }</p>
+					</div>
+					<div>
+						<label for="sheet-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
+						<input id="sheet-slug" name="slug" type="text" required value={ v.Slug } pattern="[a-z0-9][a-z0-9-]*" placeholder={ d.Tr("sheets.slug_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+						<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.slug_hint") }</p>
+					</div>
+					<div>
+						<label for="sheet-ttl" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.cache_ttl") }</label>
+						<input id="sheet-ttl" name="cache_ttl" type="number" min="0" max="86400" step="1" value={ v.CacheTTL } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+						<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("sheets.cache_ttl_hint") }</p>
+					</div>
+				</div>
+				@visibilityFields(d, v.Public)
+				@writableField(d, v.Writable)
+				<button type="submit" class="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+					@icons.Icon("plus", "h-4 w-4")
+					<span>{ d.Tr("sheets.publish_submit") }</span>
+				</button>
+			</form>
+		}
+		if len(v.Rows) == 0 {
+			<div data-empty="sheets" class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
+				<p class="text-sm text-muted-foreground">{ d.Tr("sheets.empty") }</p>
+			</div>
+		} else {
+			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				for _, s := range v.Rows {
+					<li>
+						<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + s.ID)) } class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/60">
+							<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground group-hover:text-foreground">
+								@icons.Icon("table-2", "h-4 w-4")
+							</span>
+							<span class="min-w-0 flex-1">
+								<span class="flex items-center gap-2">
+									<span class="truncate font-mono text-sm font-medium text-foreground">{ s.Slug }</span>
+									if s.Public {
+										<span class="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-800 ring-1 ring-inset ring-red-200 dark:bg-red-500/15 dark:text-red-300">{ d.Tr("sheets.public_badge") }</span>
+									}
+									if s.Writable {
+										<span data-writable-badge class="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300">{ d.Tr("sheets.writable_badge") }</span>
+									}
+								</span>
+								<span class="mt-0.5 block truncate text-xs text-muted-foreground">
+									{ s.SpreadsheetTitle + " · " + s.Tab + " · " + s.TTL }
+								</span>
+							</span>
+							@icons.Icon("chevron-right", "h-4 w-4 shrink-0 text-muted-foreground/50")
+						</a>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+// visibilityFields hides the public option entirely when the deployment disables public sheets.
+templ visibilityFields(d web.LayoutData, public bool) {
+	<fieldset class="mt-4">
+		<legend class="text-sm font-medium text-foreground/90">{ d.Tr("sheets.visibility") }</legend>
+		<label class="mt-2 flex items-center gap-2 text-sm text-foreground">
+			<input type="radio" name="visibility" value="key" checked?={ !public } class="size-4"/>
+			<span>{ d.Tr("sheets.visibility_key") }</span>
+		</label>
+		if d.Caps.PublicSheets {
+			<label class="mt-2 flex items-center gap-2 text-sm text-foreground">
+				<input type="radio" name="visibility" value="public" checked?={ public } class="size-4"/>
+				<span>{ d.Tr("sheets.visibility_public") }</span>
+			</label>
+			<div data-public-warning class="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-200">
+				<p>{ d.Tr("sheets.public_warning") }</p>
+				<label class="mt-2 flex items-start gap-2">
+					<input type="checkbox" name="public_ack" value="1" class="mt-0.5 size-4"/>
+					<span>{ d.Tr("sheets.public_ack") }</span>
+				</label>
+			</div>
+		}
+	</fieldset>
+}
+
+// SECURITY: the flag is enforced on the server; this checkbox only carries the operator's intent.
+templ writableField(d web.LayoutData, writable bool) {
+	<fieldset class="mt-4">
+		<label class="flex items-start gap-2 text-sm text-foreground">
+			<input data-writable type="checkbox" name="writable" value="1" checked?={ writable } class="mt-0.5 size-4"/>
+			<span>
+				{ d.Tr("sheets.writable") }
+				<span class="mt-0.5 block text-xs text-muted-foreground">{ d.Tr("sheets.writable_hint") }</span>
+			</span>
+		</label>
+	</fieldset>
+}
+
+templ SheetsPage(d web.LayoutData, v SheetsView) {
+	<div>
+		<header class="border-b border-border pb-4">
+			<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("nav.sheets") }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("sheets.subtitle") }</p>
+		</header>
+		@SheetSection(d, v)
+	</div>
+}
+
+templ SheetsLayout(d web.LayoutData, v SheetsView) {
+	@Layout(web.WithContent(d, SheetsPage(d, v)))
+}
+
+templ SheetPage(d web.LayoutData, v SheetView) {
+	<div class="mx-auto max-w-3xl">
+		<header class="border-b border-border pb-4">
+			<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets")) } class="text-xs text-muted-foreground hover:text-foreground">{ "← " + d.Tr("nav.sheets") }</a>
+			<h1 class="mt-2 font-mono text-2xl font-semibold text-foreground">{ v.Slug }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ v.SpreadsheetTitle }</p>
+		</header>
+		if v.Error != "" {
+			<div data-error="sheet">
+				@ErrorBanner(d, v.Error, v.ErrorCode)
+			</div>
+		}
+		<div class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.endpoints_heading") }</h2>
+			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("sheets.endpoints_subtitle") }</p>
+			<ul data-endpoints class="mt-3 divide-y divide-border/50 overflow-hidden rounded-md border border-border">
+				@endpointRow(d, v, "GET", v.DataURL, d.Tr("sheets.endpoint_rows"))
+				@endpointRow(d, v, "DELETE", v.DataURL+"/cache", d.Tr("sheets.endpoint_purge"))
+			</ul>
+			if v.Public {
+				<p data-public-warning class="mt-2 text-xs text-red-700 dark:text-red-300">{ d.Tr("sheets.public_warning") }</p>
+			} else {
+				<p class="mt-2 text-xs text-muted-foreground">{ d.Tr("sheets.url_key_hint") }</p>
+			}
+		</div>
+		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID)) } class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+			<div class="grid gap-4 sm:grid-cols-2">
+				<div>
+					<label for="sheet-edit-tab" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.tab") }</label>
+					<input id="sheet-edit-tab" name="tab" type="text" value={ v.Tab } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+				</div>
+				<div>
+					<label for="sheet-edit-ttl" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.cache_ttl") }</label>
+					<input id="sheet-edit-ttl" name="cache_ttl" type="number" min="0" max="86400" step="1" value={ v.CacheTTL } class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring"/>
+				</div>
+			</div>
+			@visibilityFields(d, v.Public)
+			@writableField(d, v.Writable)
+			<button type="submit" class="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("common.save") }</button>
+		</form>
+		<div class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.preview_heading") }</h2>
+					<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("sheets.preview_subtitle") }</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<span id="purge-status" class="text-xs text-muted-foreground"></span>
+					<form
+						method="post"
+						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/purge")) }
+						hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/purge") }
+						hx-target="#purge-status"
+						hx-swap="innerHTML"
+						class="inline"
+					>
+						<button type="submit" class="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm hover:bg-muted">
+							@icons.Icon("refresh-cw", "h-4 w-4")
+							<span>{ d.Tr("sheets.purge") }</span>
+						</button>
+					</form>
+				</div>
+			</div>
+			<div
+				id="sheet-preview"
+				hx-get={ d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/preview") }
+				hx-trigger="load"
+				hx-swap="innerHTML"
+				class="mt-4 text-sm text-muted-foreground"
+			>
+				{ d.Tr("common.loading") }
+			</div>
+		</div>
+		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/delete")) } class="mt-6">
+			<button type="submit" class={ dangerButton }>
+				@icons.Icon("trash-2", "h-4 w-4")
+				<span>{ d.Tr("sheets.delete") }</span>
+			</button>
+		</form>
+	</div>
+}
+
+templ SheetLayout(d web.LayoutData, v SheetView) {
+	@Layout(web.WithContent(d, SheetPage(d, v)))
+}
+
+// SheetPreviewFragment renders one read of the published tab, including the header warnings the
+// data plane drops — a blank or duplicate header changes the JSON keys a consumer sees.
+templ SheetPreviewFragment(d web.LayoutData, v SheetPreview) {
+	if v.Failure != "" {
+		<p data-error="preview" class="text-sm text-red-600 dark:text-red-400">{ v.Failure }</p>
+	} else {
+		<div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+			if v.Cached {
+				<span class="rounded-full border border-border px-2 py-0.5">{ d.Tr("sheets.badge_cached") }</span>
+			} else {
+				<span class="rounded-full border border-border px-2 py-0.5">{ d.Tr("sheets.badge_fresh") }</span>
+			}
+			if v.Stale {
+				<span class="rounded-full border border-amber-300 px-2 py-0.5 text-amber-800 dark:text-amber-300">{ d.Tr("sheets.badge_stale") }</span>
+			}
+			<span class="font-mono">{ v.ETag }</span>
+			<span>{ v.FetchedAt }</span>
+		</div>
+		if len(v.Warnings) > 0 {
+			<ul data-warnings class="mt-3 space-y-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">
+				for _, warn := range v.Warnings {
+					<li>{ warn }</li>
+				}
+			</ul>
+		}
+		if len(v.Rows) == 0 {
+			<p data-empty="preview" class="mt-3 text-sm text-muted-foreground">{ d.Tr("sheets.preview_empty") }</p>
+		} else {
+			<div class="mt-3 overflow-x-auto rounded-md border border-border">
+				<table class="w-full text-left text-xs">
+					<thead class="bg-muted/60">
+						<tr>
+							for _, col := range v.Columns {
+								<th class="whitespace-nowrap px-3 py-2 font-mono font-medium text-foreground">{ col }</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range v.Rows {
+							<tr class="border-t border-border/60">
+								for _, cell := range row {
+									<td class="whitespace-nowrap px-3 py-1.5 text-foreground/90">{ cell }</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+			if v.Truncated {
+				<p class="mt-2 text-xs text-muted-foreground">{ d.Tr("sheets.preview_truncated") }</p>
+			}
+		}
+	}
+}
+
+// SheetPurged is the purge button's HTMX response.
+templ SheetPurged(d web.LayoutData, failure string) {
+	if failure != "" {
+		<span data-error="purge" class="text-red-600 dark:text-red-400">{ failure }</span>
+	} else {
+		<span data-purged>{ d.Tr("sheets.purged") }</span>
+	}
+}
+
+templ endpointRow(d web.LayoutData, v SheetView, method, path, hint string) {
+	<li class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+		<span class={ "shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold", methodBadgeClass(method) }>{ method }</span>
+		<code class="min-w-0 flex-1 break-all font-mono text-xs text-foreground">{ path }</code>
+		<button
+			type="button"
+			data-copy-curl
+			data-method={ method }
+			data-path={ path }
+			data-public={ publicFlag(v.Public, method) }
+			class={ copyButton }
+		>
+			@icons.Icon("clipboard", "h-3.5 w-3.5")
+			<span data-copy-label>{ d.Tr("sheets.copy_curl") }</span>
+		</button>
+		<p class="w-full text-xs text-muted-foreground">{ hint }</p>
+	</li>
+}
+
+func methodBadgeClass(method string) string {
+	if method == "DELETE" {
+		return "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+	}
+	return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+}
+
+// publicFlag reports whether the curl may omit the bearer header: only a public sheet's read is keyless.
+func publicFlag(public bool, method string) string {
+	if public && method == "GET" {
+		return "1"
+	}
+	return "0"
+}

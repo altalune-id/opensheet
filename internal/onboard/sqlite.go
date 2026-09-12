@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
 type sqliteStore struct {
@@ -55,7 +57,7 @@ VALUES (1, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
 `, s.table())
 	res, err := s.db.ExecContext(ctx, q,
-		b.OnboardedAt.UTC().Format(time.RFC3339Nano),
+		sqliteent.SQLiteTime(b.OnboardedAt),
 		b.OnboardedBy.String(),
 		string(b.Method),
 	)

@@ -8,6 +8,8 @@
 #   errors.go     typed domain errors
 #   factory.go    NewStoreFactory dispatch
 #   postgres.go   Postgres implementation
+#   pgreader.go   Postgres read methods
+#   pgwriter.go   Postgres write methods
 #   sqlite.go     SQLite implementation
 #
 # `auth` is stateless (delegates to `user` store) so it has no store/factory/
@@ -20,7 +22,7 @@ fail=0
 declare -a missing_notes
 
 # List of modules that follow the full store-backed shape.
-STORE_BACKED=(todo user org project invite)
+STORE_BACKED=(todo user org project invite credential spreadsheet sheet apikey)
 
 # Modules exempt from store-backed conventions.
 STATELESS=(auth)
@@ -37,7 +39,7 @@ check_file() {
 check_store_backed() {
     local mod="$1"
     local local_fail=0
-    for f in "${mod}.go" store.go service.go errors.go factory.go postgres.go sqlite.go; do
+    for f in "${mod}.go" store.go service.go errors.go factory.go postgres.go pgreader.go pgwriter.go sqlite.go; do
         check_file "$mod" "$f" || local_fail=1
     done
     # Test files -- at minimum a service_test.go and a driver test.
@@ -86,5 +88,6 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: every module under internal/{todo,user,org,project,invite,auth}/ has its canonical file set"
+all_checked="$(printf '%s,' "${STORE_BACKED[@]}" "${STATELESS[@]}" | sed 's/,$//')"
+echo "OK: every module under internal/{${all_checked}}/ has its canonical file set"
 exit 0

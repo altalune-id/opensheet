@@ -24,6 +24,14 @@ api:
     # env: OPENSHEET_API_OPENAPI_REQUIRE_BASIC_AUTH
     requireBasicAuth: true
 
+cache:
+  # env: OPENSHEET_CACHE_DEFAULT_TTL
+  defaultTTL: 30s
+  # [bootstrap] env: OPENSHEET_CACHE_DRIVER
+  driver: auto
+  # env: OPENSHEET_CACHE_MAX_BYTES
+  maxBytes: 67108864
+
 compliance:
   # env: OPENSHEET_COMPLIANCE_PRIVACY_URL
   privacyURL: ""
@@ -81,7 +89,7 @@ db:
   # [bootstrap] env: OPENSHEET_DB_SCHEMA
   schema: public
   # [bootstrap] env: OPENSHEET_DB_TABLE_PREFIX
-  tablePrefix: altempl_
+  tablePrefix: opensheet_
 
 genesis:
   # [bootstrap, mode:cloud] env: OPENSHEET_GENESIS_BREAK_GLASS
@@ -90,6 +98,18 @@ genesis:
   email: ""
   # [bootstrap, secret] env: OPENSHEET_GENESIS_PASSWORD
   password: ""
+
+google:
+  oauth:
+    # [required, mode:cloud] env: OPENSHEET_GOOGLE_OAUTH_CLIENT_ID
+    clientID: ""
+    # [required, mode:cloud, secret] env: OPENSHEET_GOOGLE_OAUTH_CLIENT_SECRET
+    clientSecret: ""
+  picker:
+    # [required, mode:cloud] env: OPENSHEET_GOOGLE_PICKER_API_KEY
+    apiKey: ""
+  # env: OPENSHEET_GOOGLE_TIMEOUT
+  timeout: 15s
 
 http:
   # [required] env: OPENSHEET_HTTP_ADDR
@@ -185,9 +205,23 @@ scheduler:
   # [bootstrap] env: OPENSHEET_SCHEDULER_TIMEZONE
   timezone: UTC
 
+security:
+  # [required, secret, bootstrap] env: OPENSHEET_SECURITY_ENCRYPTION_KEY
+  encryptionKey: ""
+
 session:
   # env: OPENSHEET_SESSION_PATH
   path: ~/.opensheet/session.json
+
+sheets:
+  # env: OPENSHEET_SHEETS_MAX_PAYLOAD_BYTES
+  maxPayloadBytes: 8388608
+  # env: OPENSHEET_SHEETS_MAX_QUERY_ROWS
+  maxQueryRows: 1000
+  # env: OPENSHEET_SHEETS_MAX_SORT_PAGES
+  maxSortPages: 20
+  # [bootstrap] env: OPENSHEET_SHEETS_PUBLIC_ENABLED
+  publicEnabled: false
 
 telemetry:
   metrics:

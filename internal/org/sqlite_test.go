@@ -12,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/schema"
 )
 
@@ -36,7 +37,7 @@ func newSQLiteStoreForTest(t *testing.T) (org.Store, *sql.DB, string) {
 func seedUser(t *testing.T, sqlDB *sql.DB, prefix string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := sqlDB.Exec(
 		"INSERT INTO "+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) "+
 			"VALUES (?, ?, '', '', 0, ?, ?)",
@@ -152,6 +153,60 @@ func TestSQLite_MembershipsRoundtrip(t *testing.T) {
 	}
 	if _, err := store.MembershipOf(context.Background(), o.ID, owner); !org.IsMembershipMissingError(err) {
 		t.Errorf("MembershipOf after delete: want MembershipMissingError, got %T: %v", err, err)
+	}
+}
+
+func TestSQLite_ListMembers_TiedCreatedAtOrdersByUserID(t *testing.T) {
+	store, sqlDB, prefix := newSQLiteStoreForTest(t)
+	ctx := context.Background()
+	lo, hi := seedUser(t, sqlDB, prefix), seedUser(t, sqlDB, prefix)
+	if lo.String() > hi.String() {
+		lo, hi = hi, lo
+	}
+
+	o, err := org.NewOrg("acme", "Acme", lo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, o); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	tie := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	for _, userID := range []uuid.UUID{hi, lo} {
+		m, mErr := org.NewMembership(o.ID, userID, org.RoleMember)
+		if mErr != nil {
+			t.Fatal(mErr)
+		}
+		m.CreatedAt = tie
+		if sErr := store.SaveMembership(ctx, m); sErr != nil {
+			t.Fatalf("SaveMembership: %v", sErr)
+		}
+	}
+
+	for i := range 5 {
+		members, mErr := store.ListMembers(ctx, o.ID)
+		if mErr != nil {
+			t.Fatalf("ListMembers %d: %v", i, mErr)
+		}
+		if len(members) != 2 {
+			t.Fatalf("ListMembers %d: got %d rows, want 2", i, len(members))
+		}
+		// NOTE: plan-dependent — TestSQLiteStore_MemberListStatementsCarryTheUserIDTiebreak locks the emitted ORDER BY.
+		if members[0].UserID != lo || members[1].UserID != hi {
+			t.Fatalf("ListMembers %d: tied created_at must order by user_id ascending, got %v then %v", i, members[0].UserID, members[1].UserID)
+		}
+
+		profiles, pErr := store.ListMemberProfiles(ctx, o.ID)
+		if pErr != nil {
+			t.Fatalf("ListMemberProfiles %d: %v", i, pErr)
+		}
+		if len(profiles) != 2 {
+			t.Fatalf("ListMemberProfiles %d: got %d rows, want 2", i, len(profiles))
+		}
+		if profiles[0].UserID != lo || profiles[1].UserID != hi {
+			t.Fatalf("ListMemberProfiles %d: tied created_at must order by user_id ascending, got %v then %v", i, profiles[0].UserID, profiles[1].UserID)
+		}
 	}
 }
 

@@ -80,6 +80,7 @@ func (o *oidcVerifier) Verify(ctx context.Context, raw string) (session.Principa
 		Source:     session.SourceToken,
 		IDPIssuer:  tok.Issuer,
 		IDPSubject: tok.Subject,
+		IDPOrgID:   claims.OrgID,
 		Scopes:     scopes,
 		IssuedAt:   tok.IssuedAt,
 	}, nil

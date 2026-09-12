@@ -122,8 +122,8 @@ func (r *sqliteMemberProfileRow) toProfile() (*MemberProfile, error) {
 }
 
 func (s *sqliteStore) Save(ctx context.Context, o *Org) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	created := o.CreatedAt.UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
+	created := sqliteent.SQLiteTime(o.CreatedAt)
 	stmt := s.orgs.INSERT(s.orgs.AllColumns).
 		VALUES(o.ID.String(), o.Slug, o.Name, o.OwnerID.String(), created, now, boolToInt(o.System)).
 		ON_CONFLICT(s.orgs.ID).
@@ -155,7 +155,7 @@ func (s *sqliteStore) List(ctx context.Context, userID uuid.UUID) ([]*Org, error
 	stmt := sqlite.SELECT(s.orgs.ID, s.orgs.Slug, s.orgs.Name, s.orgs.CreatedBy, s.orgs.CreatedAt, s.orgs.System).
 		FROM(s.orgs.INNER_JOIN(s.members, s.members.OrgID.EQ(s.orgs.ID))).
 		WHERE(s.members.UserID.EQ(sqlite.String(userID.String()))).
-		ORDER_BY(s.orgs.CreatedAt.ASC())
+		ORDER_BY(s.orgs.CreatedAt.ASC(), s.orgs.ID.ASC())
 	var rows []sqliteOrgRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: List: %w", err)
@@ -178,7 +178,7 @@ func (s *sqliteStore) SaveMembership(ctx context.Context, m *Membership) error {
 			m.OrgID.String(),
 			m.UserID.String(),
 			string(m.Role),
-			m.CreatedAt.UTC().Format(time.RFC3339Nano),
+			sqliteent.SQLiteTime(m.CreatedAt),
 			boolToInt(m.System),
 		).
 		ON_CONFLICT(s.members.OrgID, s.members.UserID).
@@ -208,11 +208,15 @@ func (s *sqliteStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUID)
 	return row.toMembership()
 }
 
-func (s *sqliteStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
-	stmt := sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System).
+func (s *sqliteStore) listMembersStmt(orgID uuid.UUID) sqlite.SelectStatement {
+	return sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String()))).
-		ORDER_BY(s.members.CreatedAt.ASC())
+		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
+}
+
+func (s *sqliteStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
+	stmt := s.listMembersStmt(orgID)
 	var rows []sqliteMembershipRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: ListMembers: %w", err)
@@ -228,8 +232,8 @@ func (s *sqliteStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Memb
 	return out, nil
 }
 
-func (s *sqliteStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*MemberProfile, error) {
-	stmt := sqlite.SELECT(
+func (s *sqliteStore) listMemberProfilesStmt(orgID uuid.UUID) sqlite.SelectStatement {
+	return sqlite.SELECT(
 		s.members.UserID,
 		s.members.Role,
 		s.members.CreatedAt,
@@ -239,7 +243,11 @@ func (s *sqliteStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) (
 	).
 		FROM(s.members.INNER_JOIN(s.users, s.users.ID.EQ(s.members.UserID))).
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String()))).
-		ORDER_BY(s.members.CreatedAt.ASC())
+		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
+}
+
+func (s *sqliteStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*MemberProfile, error) {
+	stmt := s.listMemberProfilesStmt(orgID)
 	var rows []sqliteMemberProfileRow
 	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: ListMemberProfiles: %w", err)

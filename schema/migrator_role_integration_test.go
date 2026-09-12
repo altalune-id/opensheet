@@ -68,7 +68,7 @@ func migrationConfig(prefix string) *config.Config {
 func TestMigrateUp_BookkeepingOwnershipIsUniform(t *testing.T) {
 	h := pgtest.New(t)
 	suffix := uniqueSuffix(t)
-	role := "altempl_owner_" + suffix
+	role := "opensheet_owner_" + suffix
 	prefix := "t" + suffix + "_"
 
 	// NOTE: BYPASSRLS is required from migration 005 onward — see 005_definer_functions.sql.

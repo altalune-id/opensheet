@@ -12,10 +12,10 @@ import (
 )
 
 // SessionCookieName is the browser-visible cookie carrying the signed session id.
-const SessionCookieName = "altempl_sid"
+const SessionCookieName = "opensheet_sid"
 
 // InviteCookieName carries a raw invite token across an unauth OIDC round-trip.
-const InviteCookieName = "altempl_invite"
+const InviteCookieName = "opensheet_invite"
 
 // SessionTTL is the maximum age of a session id cookie.
 const SessionTTL = 12 * time.Hour

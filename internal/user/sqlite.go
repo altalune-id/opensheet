@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
 type sqliteStore struct {
@@ -103,13 +105,13 @@ ON CONFLICT(id) DO UPDATE SET
 	terms_accepted_at = excluded.terms_accepted_at,
 	updated_at = excluded.updated_at
 `, s.table())
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	var termsArg any
 	if u.TermsAcceptedAt != nil {
-		termsArg = u.TermsAcceptedAt.UTC().Format(time.RFC3339Nano)
+		termsArg = sqliteent.SQLiteTime(*u.TermsAcceptedAt)
 	}
 	if _, err := s.db.ExecContext(ctx, q,
-		u.ID.String(), u.Email, u.Name, isAdmin, u.PasswordHash, u.Locale, termsArg, u.CreatedAt.UTC().Format(time.RFC3339Nano), now,
+		u.ID.String(), u.Email, u.Name, isAdmin, u.PasswordHash, u.Locale, termsArg, sqliteent.SQLiteTime(u.CreatedAt), now,
 	); err != nil {
 		if isSQLiteUnique(err) {
 			return &AlreadyExistsError{Field: "email", Value: u.Email}
@@ -132,7 +134,7 @@ func (s *sqliteStore) HasLocalUsers(ctx context.Context) (bool, error) {
 func (s *sqliteStore) UpdateLocale(ctx context.Context, id uuid.UUID, locale string) error {
 	//nolint:gosec // G201: table identifier is fixed by config, never user input.
 	q := fmt.Sprintf("UPDATE %s SET locale = ?, updated_at = ? WHERE id = ?", s.table())
-	res, err := s.db.ExecContext(ctx, q, locale, time.Now().UTC().Format(time.RFC3339Nano), id.String())
+	res, err := s.db.ExecContext(ctx, q, locale, sqliteent.SQLiteTime(time.Now()), id.String())
 	if err != nil {
 		return fmt.Errorf("user.UpdateLocale: %w", err)
 	}

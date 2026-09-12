@@ -88,7 +88,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("db.dsn", filepath.Join(homeDir(), ".opensheet", "opensheet.db"))
 	v.SetDefault("db.autoMigrate", true)
 	v.SetDefault("db.schema", "public")
-	v.SetDefault("db.tablePrefix", "altempl_")
+	v.SetDefault("db.tablePrefix", "opensheet_")
 	v.SetDefault("db.connectTimeout", "30s")
 	v.SetDefault("db.connectBackoff", "250ms")
 	v.SetDefault("db.health.interval", "30s")
@@ -133,6 +133,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
+
+	v.SetDefault("cache.driver", string(CacheDriverAuto))
+	v.SetDefault("cache.defaultTTL", "30s")
+	v.SetDefault("cache.maxBytes", int64(67108864))
+
+	v.SetDefault("sheets.publicEnabled", false)
+	v.SetDefault("sheets.maxPayloadBytes", int64(8388608))
+	v.SetDefault("sheets.maxQueryRows", 1000)
+	v.SetDefault("sheets.maxSortPages", 20)
+
+	v.SetDefault("google.timeout", "15s")
 
 	v.SetDefault("tokens.audience", "urn:opensheet:api")
 	v.SetDefault("tokens.supportedAlgs", []string{"RS256", "ES256"})

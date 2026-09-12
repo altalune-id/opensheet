@@ -1,0 +1,789 @@
+package sheet
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/go-jet/jet/v2/qrm"
+	"github.com/go-jet/jet/v2/sqlite"
+	"github.com/google/uuid"
+
+	pdb "altalune.id/opensheet/internal/platform/db"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
+	"altalune.id/opensheet/internal/platform/tenant"
+)
+
+type sqliteRowStore struct {
+	db     *sql.DB
+	rows   *sqliteent.SheetRows
+	sheets *sqliteent.Sheets
+}
+
+func newSQLiteRowStore(sqlDB *sql.DB, tablePrefix string) *sqliteRowStore {
+	return &sqliteRowStore{
+		db:     sqlDB,
+		rows:   sqliteent.NewSheetRows(tablePrefix),
+		sheets: sqliteent.NewSheets(tablePrefix),
+	}
+}
+
+type sqliteProjectedRow struct {
+	RowID     string  `alias:"sheet_rows.row_id"`
+	RowIndex  int64   `alias:"sheet_rows.row_index"`
+	Data      string  `alias:"sheet_rows.data"`
+	DeletedAt *string `alias:"sheet_rows.deleted_at"`
+}
+
+type sqliteSheetStateRow struct {
+	OK            int64  `alias:"sheets.contract_ok"`
+	Reason        string `alias:"sheets.contract_reason"`
+	SoftDelete    int64  `alias:"sheets.soft_delete"`
+	ContentDigest string `alias:"sheets.content_digest"`
+	Generation    int64  `alias:"sheets.generation"`
+}
+
+type sqliteRowStats struct {
+	Tab        string `alias:"sheet_rows.tab"`
+	Total      int64  `alias:"row_stats.total"`
+	Tombstoned int64  `alias:"row_stats.tombstoned"`
+}
+
+type sqliteGenerationRow struct {
+	Generation    int64  `alias:"sheets.generation"`
+	ContentDigest string `alias:"sheets.content_digest"`
+}
+
+// NOTE: sqlite is single-writer, so a read of the generation already has the exclusivity FOR UPDATE buys on postgres.
+func (s *sqliteRowStore) LockSheet(ctx context.Context, sheetID uuid.UUID) (int64, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var gen int64
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		g, _, gErr := s.generation(ctx, tx, tc, sheetID)
+		if gErr != nil {
+			return gErr
+		}
+		gen = g
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return gen, nil
+}
+
+func (s *sqliteRowStore) Replace(
+	ctx context.Context, k SnapshotKey, gen int64, rows []ProjectedRow, contract ContractState,
+) (bool, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return false, err
+	}
+	values, err := sqliteRowValues(tc, k, rows)
+	if err != nil {
+		return false, err
+	}
+	digest, err := RowsDigest(rows)
+	if err != nil {
+		return false, err
+	}
+	applied := false
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		current, stored, gErr := s.generation(ctx, tx, tc, k.SheetID)
+		if gErr != nil {
+			return gErr
+		}
+		if current != gen {
+			return nil
+		}
+		if dErr := s.deleteTab(ctx, tx, tc, k); dErr != nil {
+			return dErr
+		}
+		if iErr := s.insertRows(ctx, tx, values); iErr != nil {
+			return iErr
+		}
+		if uErr := s.commitRefresh(ctx, tx, tc, k.SheetID, contract, digest, digest != stored); uErr != nil {
+			return uErr
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return applied, nil
+}
+
+func (s *sqliteRowStore) MarkContract(
+	ctx context.Context, sheetID uuid.UUID, gen int64, contract ContractState,
+) (bool, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return false, err
+	}
+	applied := false
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		current, _, gErr := s.generation(ctx, tx, tc, sheetID)
+		if gErr != nil {
+			return gErr
+		}
+		if current != gen {
+			return nil
+		}
+		if mErr := s.markContract(ctx, tx, tc, sheetID, contract); mErr != nil {
+			return mErr
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return applied, nil
+}
+
+func (s *sqliteRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row ProjectedRow) error {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := marshalRowData(row.Data)
+	if err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := s.rows.INSERT(s.rows.AllColumns).
+			VALUES(
+				k.SheetID.String(), k.Tab, row.RowID, int64(row.RowIndex), data,
+				sqliteNullableTime(row.DeletedAt), tc.OrgID.String(), tc.ProjectID.String(),
+			).
+			ON_CONFLICT(s.rows.SheetID, s.rows.Tab, s.rows.RowID).
+			DO_UPDATE(
+				sqlite.SET(
+					s.rows.RowIndex.SET(sqlite.Int(int64(row.RowIndex))),
+					s.rows.Data.SET(sqlite.String(data)),
+					s.rows.DeletedAt.SET(sqliteNullableTimeExpr(row.DeletedAt)),
+				),
+			)
+		if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+			return fmt.Errorf("sheet.rows.sqlite.UpsertRow: %w", execErr)
+		}
+		return s.bumpGeneration(ctx, tx, tc, k.SheetID)
+	})
+}
+
+// NOTE: the tombstone travels with the row — create must refuse a tombstoned id and delete must tell a tombstone from an unknown id, so neither can be served by a live-only lookup.
+func (s *sqliteRowStore) RowByID(ctx context.Context, k SnapshotKey, rowID string) (ProjectedRow, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	var out ProjectedRow
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data, s.rows.DeletedAt).
+			FROM(s.rows).
+			WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+				AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+				AND(s.rows.RowID.EQ(sqlite.String(rowID))).
+				AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
+			LIMIT(1)
+		var scanned sqliteProjectedRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+				return &RowNotFoundError{ID: rowID}
+			}
+			return fmt.Errorf("sheet.rows.sqlite.RowByID: %w", qErr)
+		}
+		data, dErr := unmarshalRowData(scanned.Data)
+		if dErr != nil {
+			return dErr
+		}
+		deletedAt, tErr := sqliteTombstone(scanned.DeletedAt)
+		if tErr != nil {
+			return tErr
+		}
+		out = ProjectedRow{
+			RowID:     scanned.RowID,
+			RowIndex:  int(scanned.RowIndex),
+			Data:      data,
+			DeletedAt: deletedAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return ProjectedRow{}, err
+	}
+	return out, nil
+}
+
+func (s *sqliteRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (SheetState, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return SheetState{}, err
+	}
+	var out SheetState
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(
+			s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+			s.sheets.ContentDigest, s.sheets.Generation,
+		).
+			FROM(s.sheets).
+			WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+				AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
+			LIMIT(1)
+		var scanned sqliteSheetStateRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+				return &NotFoundError{ID: sheetID.String()}
+			}
+			return fmt.Errorf("sheet.rows.sqlite.StateOf: %w", qErr)
+		}
+		out = SheetState{
+			Contract: ContractState{
+				OK: scanned.OK != 0, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete != 0,
+			},
+			Digest:     scanned.ContentDigest,
+			Generation: scanned.Generation,
+		}
+		return nil
+	})
+	if err != nil {
+		return SheetState{}, err
+	}
+	return out, nil
+}
+
+func (s *sqliteRowStore) ListLive(ctx context.Context, k SnapshotKey) ([]ProjectedRow, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
+		FROM(s.rows).
+		WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+			AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+			AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
+			AND(s.rows.DeletedAt.IS_NULL())).
+		ORDER_BY(s.rows.RowIndex.ASC())
+	var scanned []sqliteProjectedRow
+	if qErr := stmt.QueryContext(ctx, s.db, &scanned); qErr != nil {
+		return nil, fmt.Errorf("sheet.rows.sqlite.ListLive: %w", qErr)
+	}
+	out := make([]ProjectedRow, 0, len(scanned))
+	for i := range scanned {
+		data, dErr := unmarshalRowData(scanned[i].Data)
+		if dErr != nil {
+			return nil, dErr
+		}
+		out = append(out, ProjectedRow{
+			RowID:    scanned[i].RowID,
+			RowIndex: int(scanned[i].RowIndex),
+			Data:     data,
+		})
+	}
+	return out, nil
+}
+
+// NOTE: this goes through inTx, never a bare s.db — a read that a write path may reach deadlocks against the single writer otherwise.
+func (s *sqliteRowStore) Query(ctx context.Context, k SnapshotKey, q RowQuery) (RowPage, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return RowPage{}, err
+	}
+	where, err := s.queryPredicate(tc, k, q)
+	if err != nil {
+		return RowPage{}, err
+	}
+	order, err := sqliteRowOrder(s.rows.Data, s.rows.RowIndex, q.Sort)
+	if err != nil {
+		return RowPage{}, err
+	}
+	limit := rowQueryLimit(q.Window)
+	var out []ProjectedRow
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := sqlite.SELECT(s.rows.RowID, s.rows.RowIndex, s.rows.Data).
+			FROM(s.rows).
+			WHERE(where).
+			ORDER_BY(order...).
+			LIMIT(int64(limit) + 1)
+		var scanned []sqliteProjectedRow
+		if qErr := stmt.QueryContext(ctx, tx, &scanned); qErr != nil {
+			return fmt.Errorf("sheet.rows.sqlite.Query: %w", qErr)
+		}
+		out = make([]ProjectedRow, 0, len(scanned))
+		for i := range scanned {
+			data, dErr := unmarshalRowData(scanned[i].Data)
+			if dErr != nil {
+				return dErr
+			}
+			out = append(out, ProjectedRow{
+				RowID:    scanned[i].RowID,
+				RowIndex: int(scanned[i].RowIndex),
+				Data:     data,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return RowPage{}, err
+	}
+	return rowPageOf(out, limit), nil
+}
+
+// NOTE: the keyset reads sheet_rows_page_idx (sheet_id, tab, row_index) directly; OFFSET would re-scan from the top and skip rows a concurrent edit shifted.
+func (s *sqliteRowStore) queryPredicate(
+	tc tenant.Context, k SnapshotKey, q RowQuery,
+) (sqlite.BoolExpression, error) {
+	where := s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+		AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+		AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
+		AND(s.rows.DeletedAt.IS_NULL())
+	if q.Window.Cursor != nil {
+		keyset, err := sqliteKeyset(s.rows.Data, s.rows.RowIndex, q.Sort, *q.Window.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(keyset)
+	}
+	for _, clause := range q.Clauses {
+		pred, err := sqliteClausePredicate(s.rows.Data, clause)
+		if err != nil {
+			return nil, err
+		}
+		where = where.AND(pred)
+	}
+	return where, nil
+}
+
+// NOTE: nulls sort last in both directions, spelled NULLS LAST because Postgres ASC is nulls-last and SQLite ASC is nulls-first; and row_index breaks every tie ascending in both directions, since a keyset over a non-total order repeats or skips rows.
+func sqliteRowOrder(
+	data sqlite.ColumnString, rowIndex sqlite.ColumnInteger, sort *RowSort,
+) ([]sqlite.OrderByClause, error) {
+	if sort == nil {
+		return []sqlite.OrderByClause{rowIndex.ASC()}, nil
+	}
+	cell, err := sqliteSortCell(data, *sort)
+	if err != nil {
+		return nil, err
+	}
+	value := cell.ASC()
+	if sort.Desc {
+		value = cell.DESC()
+	}
+	return []sqlite.OrderByClause{value.NULLS_LAST(), rowIndex.ASC()}, nil
+}
+
+// NOTE: a sorted keyset REPLACES the row_index arm rather than ANDing onto it — the sorted order reaches rows whose row_index sits below the cursor's, and an AND would silently drop every one of them.
+func sqliteKeyset(
+	data sqlite.ColumnString, rowIndex sqlite.ColumnInteger, sort *RowSort, c RowCursor,
+) (sqlite.BoolExpression, error) {
+	after := rowIndex.GT(sqlite.Int(int64(c.RowIndex)))
+	if sort == nil {
+		return after, nil
+	}
+	if c.NullRank == 1 {
+		cell, err := sqliteSortCell(data, *sort)
+		if err != nil {
+			return nil, err
+		}
+		return cell.IS_NULL().AND(after), nil
+	}
+	value, err := rowCursorSortValue(c)
+	if err != nil {
+		return nil, err
+	}
+	// NOTE: only the value arm flips for :desc — the nulls still ascend and the tiebreaker is still row_index ASC, and inverting all three walks the null tail and never reaches the values. Never a row-value comparison either: (NULL,1) > ('a',0) is NULL on both engines, which ends the walk a row early.
+	if sort.Hint == RowHintNum {
+		cell, cErr := sqliteNumCell(data, sort.Column)
+		if cErr != nil {
+			return nil, cErr
+		}
+		num, nErr := rowCursorNum(value)
+		if nErr != nil {
+			return nil, nErr
+		}
+		// NOTE: the operand binds as a float, never as text — SQLite compares by storage class and a REAL always sorts below a TEXT, so a text bind pages a num sort into either nothing or everything with no error.
+		operand := sqlite.Float(num)
+		ahead := cell.GT(operand)
+		if sort.Desc {
+			ahead = cell.LT(operand)
+		}
+		return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+	}
+	cell, err := sqliteSortTextCell(data, *sort)
+	if err != nil {
+		return nil, err
+	}
+	operand := sqlite.String(value)
+	ahead := cell.GT(operand)
+	if sort.Desc {
+		ahead = cell.LT(operand)
+	}
+	return cell.IS_NULL().OR(ahead).OR(cell.EQ(operand).AND(after)), nil
+}
+
+func sqliteSortCell(data sqlite.ColumnString, sort RowSort) (sqlite.Expression, error) {
+	if sort.Hint == RowHintNum {
+		return sqliteNumCell(data, sort.Column)
+	}
+	return sqliteSortTextCell(data, sort)
+}
+
+// NOTE: a date sort compares the shape-guarded text and an unhinted sort the raw text, so neither re-types the cursor operand — the guard already yields text.
+func sqliteSortTextCell(data sqlite.ColumnString, sort RowSort) (sqlite.StringExpression, error) {
+	if sort.Hint == RowHintDate {
+		return sqliteDateCell(data, sort.Column)
+	}
+	return sqliteCell(data, sort.Column)
+}
+
+// NOTE: the path binds as a parameter, and that bind is the injection boundary — column validation exists for the UnknownColumnError refusal, not for safety.
+func sqliteCell(data sqlite.ColumnString, field string) (sqlite.StringExpression, error) {
+	path, err := rowJSONPath(field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.StringExp(sqlite.Func("json_extract", data, sqlite.String(path))), nil
+}
+
+// NOTE: the cell test is the registered Go function, so a cell and an operand are admitted by one grammar rather than by two implementations of it.
+func sqliteNumCell(data sqlite.ColumnString, field string) (sqlite.FloatExpression, error) {
+	cell, err := sqliteCell(data, field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.FloatExp(sqlite.Func("opensheet_num", cell)), nil
+}
+
+// NOTE: opensheet_date hands the cell back verbatim, so the comparison stays textual and needs no date(), no julianday() and none of their cross-driver divergence.
+func sqliteDateCell(data sqlite.ColumnString, field string) (sqlite.StringExpression, error) {
+	cell, err := sqliteCell(data, field)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.StringExp(sqlite.Func("opensheet_date", cell)), nil
+}
+
+func sqliteClausePredicate(data sqlite.ColumnString, c RowClause) (sqlite.BoolExpression, error) {
+	switch c.Hint {
+	case RowHintNum:
+		cell, err := sqliteNumCell(data, c.Column)
+		if err != nil {
+			return nil, err
+		}
+		return sqliteNumPredicate(cell, c)
+	case RowHintDate:
+		cell, err := sqliteDateCell(data, c.Column)
+		if err != nil {
+			return nil, err
+		}
+		return sqliteTextPredicate(cell, c)
+	}
+	cell, err := sqliteCell(data, c.Column)
+	if err != nil {
+		return nil, err
+	}
+	return sqliteTextPredicate(cell, c)
+}
+
+// NOTE: the operand binds as a float and never as c.Value — SQLite compares by storage class and a REAL always sorts below a TEXT, so a text bind makes every num.gt return nothing and every num.lt everything, with no error. ParseNum's ok is an invariant here: the parser refuses a num hint whose operand is outside the grammar.
+func sqliteNumPredicate(cell sqlite.FloatExpression, c RowClause) (sqlite.BoolExpression, error) {
+	value, _ := ParseNum(c.Value)
+	operand := sqlite.Float(value)
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(operand), nil
+	case RowOpNe:
+		return cell.NOT_EQ(operand), nil
+	case RowOpGt:
+		return cell.GT(operand), nil
+	case RowOpGte:
+		return cell.GT_EQ(operand), nil
+	case RowOpLt:
+		return cell.LT(operand), nil
+	case RowOpLte:
+		return cell.LT_EQ(operand), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+func sqliteTextPredicate(cell sqlite.StringExpression, c RowClause) (sqlite.BoolExpression, error) {
+	switch c.Op {
+	case RowOpEq:
+		return cell.EQ(sqlite.String(c.Value)), nil
+	case RowOpNe:
+		return cell.NOT_EQ(sqlite.String(c.Value)), nil
+	case RowOpGt:
+		return cell.GT(sqlite.String(c.Value)), nil
+	case RowOpGte:
+		return cell.GT_EQ(sqlite.String(c.Value)), nil
+	case RowOpLt:
+		return cell.LT(sqlite.String(c.Value)), nil
+	case RowOpLte:
+		return cell.LT_EQ(sqlite.String(c.Value)), nil
+	case RowOpContains, RowOpStarts:
+		return sqliteLike(cell, c.Pattern), nil
+	case RowOpIn:
+		return cell.IN(sqliteStringList(c.Values)...), nil
+	case RowOpEmpty:
+		return cell.IS_NULL().OR(cell.EQ(sqlite.String(""))), nil
+	case RowOpPresent:
+		return cell.IS_NOT_NULL().AND(cell.NOT_EQ(sqlite.String(""))), nil
+	}
+	return nil, unsupportedRowOp(c.Op)
+}
+
+// NOTE: ESCAPE is mandatory here, not optional — SQLite has no default escape character, so a backslash-escaped pattern without it turns a Postgres false positive into a SQLite false negative.
+func sqliteLike(cell sqlite.StringExpression, pattern string) sqlite.BoolExpression {
+	return sqlite.BoolExp(sqlite.CustomExpression(
+		sqlite.Token("("),
+		sqlite.LOWER(cell),
+		sqlite.Token("LIKE"),
+		sqlite.LOWER(sqlite.String(pattern)),
+		sqlite.Token("ESCAPE"),
+		sqlite.String(RowLikeEscape),
+		sqlite.Token(")"),
+	))
+}
+
+func sqliteStringList(values []string) []sqlite.Expression {
+	out := make([]sqlite.Expression, 0, len(values))
+	for _, v := range values {
+		out = append(out, sqlite.String(v))
+	}
+	return out
+}
+
+// NOTE: an empty sheets.tab means "the first tab", whose name only Google knows — so the busiest projected tab stands in, which a rename's orphans mirror row for row.
+func (s *sqliteRowStore) Stats(ctx context.Context, sheetID uuid.UUID, tab string) (TableStats, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return TableStats{}, err
+	}
+	where := s.rows.SheetID.EQ(sqlite.String(sheetID.String())).
+		AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String())))
+	if tab != "" {
+		where = where.AND(s.rows.Tab.EQ(sqlite.String(tab)))
+	}
+	counted := sqlite.SELECT(
+		s.rows.Tab,
+		sqlite.COUNT(sqlite.STAR).AS("row_stats.total"),
+		sqlite.COUNT(s.rows.DeletedAt).AS("row_stats.tombstoned"),
+	).
+		FROM(s.rows).
+		WHERE(where).
+		GROUP_BY(s.rows.Tab).
+		ORDER_BY(sqlite.COUNT(sqlite.STAR).DESC(), s.rows.Tab.ASC()).
+		LIMIT(1)
+	var stats sqliteRowStats
+	if qErr := counted.QueryContext(ctx, s.db, &stats); qErr != nil {
+		if errors.Is(qErr, qrm.ErrNoRows) || errors.Is(qErr, sql.ErrNoRows) {
+			return TableStats{Tab: tab}, nil
+		}
+		return TableStats{}, fmt.Errorf("sheet.rows.sqlite.Stats: %w", qErr)
+	}
+	columns, err := s.firstLiveColumns(ctx, tc, SnapshotKey{SheetID: sheetID, Tab: stats.Tab})
+	if err != nil {
+		return TableStats{}, err
+	}
+	return TableStats{
+		Tab:      stats.Tab,
+		Columns:  columns,
+		RowCount: stats.Total - stats.Tombstoned,
+	}, nil
+}
+
+func (s *sqliteRowStore) firstLiveColumns(ctx context.Context, tc tenant.Context, k SnapshotKey) ([]string, error) {
+	stmt := sqlite.SELECT(s.rows.Data).
+		FROM(s.rows).
+		WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+			AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+			AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))).
+			AND(s.rows.DeletedAt.IS_NULL())).
+		ORDER_BY(s.rows.RowIndex.ASC()).
+		LIMIT(1)
+	var row sqliteProjectedRow
+	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sheet.rows.sqlite: first live row: %w", err)
+	}
+	data, err := unmarshalRowData(row.Data)
+	if err != nil {
+		return nil, err
+	}
+	return dataColumns(data), nil
+}
+
+func (s *sqliteRowStore) PurgeSheet(ctx context.Context, sheetID uuid.UUID) error {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		stmt := s.rows.DELETE().
+			WHERE(s.rows.SheetID.EQ(sqlite.String(sheetID.String())).
+				AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+		if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+			return fmt.Errorf("sheet.rows.sqlite.PurgeSheet: %w", execErr)
+		}
+		return nil
+	})
+}
+
+func (s *sqliteRowStore) generation(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
+) (gen int64, digest string, err error) {
+	stmt := sqlite.SELECT(s.sheets.Generation, s.sheets.ContentDigest).
+		FROM(s.sheets).
+		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
+		LIMIT(1)
+	var row sqliteGenerationRow
+	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return 0, "", &NotFoundError{ID: sheetID.String()}
+		}
+		return 0, "", fmt.Errorf("sheet.rows.sqlite: read generation: %w", err)
+	}
+	return row.Generation, row.ContentDigest, nil
+}
+
+func (s *sqliteRowStore) deleteTab(ctx context.Context, tx *sql.Tx, tc tenant.Context, k SnapshotKey) error {
+	stmt := s.rows.DELETE().
+		WHERE(s.rows.SheetID.EQ(sqlite.String(k.SheetID.String())).
+			AND(s.rows.Tab.EQ(sqlite.String(k.Tab))).
+			AND(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: delete tab: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteRowStore) insertRows(ctx context.Context, tx *sql.Tx, values [][]any) error {
+	for _, v := range values {
+		stmt := s.rows.INSERT(s.rows.AllColumns).VALUES(v[0], v[1:]...)
+		if _, err := stmt.ExecContext(ctx, tx); err != nil {
+			return fmt.Errorf("sheet.rows.sqlite: insert rows: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *sqliteRowStore) bumpGeneration(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
+) error {
+	// NOTE: clearing the digest is what refuses every outstanding cursor — '' is a sentinel RowsDigest never returns, so the next refresh is guaranteed to bump.
+	stmt := s.sheets.UPDATE(s.sheets.Generation, s.sheets.ContentDigest).
+		SET(s.sheets.Generation.ADD(sqlite.Int(1)), sqlite.String("")).
+		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: bump generation: %w", err)
+	}
+	return nil
+}
+
+// NOTE: the generation moves only when the digest moved — a refresh that refetched identical rows must not invalidate an outstanding cursor or an If-None-Match.
+func (s *sqliteRowStore) commitRefresh(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
+	contract ContractState, digest string, bump bool,
+) error {
+	sets := []any{
+		s.sheets.ValidatedAt.SET(sqlite.String(sqliteent.SQLiteTime(time.Now()))),
+		s.sheets.ContractOK.SET(sqlite.Int(boolToInt(contract.OK))),
+		s.sheets.ContractReason.SET(sqlite.String(contract.Reason)),
+		s.sheets.SoftDelete.SET(sqlite.Int(boolToInt(contract.SoftDelete))),
+		s.sheets.ContentDigest.SET(sqlite.String(digest)),
+	}
+	if bump {
+		sets = append(sets, s.sheets.Generation.SET(s.sheets.Generation.ADD(sqlite.Int(1))))
+	}
+	stmt := s.sheets.UPDATE().
+		SET(sets[0], sets[1:]...).
+		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: commit refresh: %w", err)
+	}
+	return nil
+}
+
+// NOTE: generation is left alone — the projected rows did not change, so a concurrent refresh has nothing to discard.
+func (s *sqliteRowStore) markContract(
+	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
+) error {
+	stmt := s.sheets.UPDATE(
+		s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+	).
+		SET(
+			sqlite.String(sqliteent.SQLiteTime(time.Now())),
+			sqlite.Int(boolToInt(contract.OK)),
+			sqlite.String(contract.Reason),
+			sqlite.Int(boolToInt(contract.SoftDelete)),
+		).
+		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
+			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	if _, err := stmt.ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: mark contract: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteRowStore) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return fn(tx)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sheet.rows.sqlite: begin: %w", err)
+	}
+	if fnErr := fn(tx); fnErr != nil {
+		_ = tx.Rollback()
+		return fnErr
+	}
+	if cErr := tx.Commit(); cErr != nil {
+		return fmt.Errorf("sheet.rows.sqlite: commit: %w", cErr)
+	}
+	return nil
+}
+
+func sqliteRowValues(tc tenant.Context, k SnapshotKey, rows []ProjectedRow) ([][]any, error) {
+	out := make([][]any, 0, len(rows))
+	for i := range rows {
+		data, err := marshalRowData(rows[i].Data)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, []any{
+			k.SheetID.String(), k.Tab, rows[i].RowID, int64(rows[i].RowIndex), data,
+			sqliteNullableTime(rows[i].DeletedAt), tc.OrgID.String(), tc.ProjectID.String(),
+		})
+	}
+	return out, nil
+}
+
+func sqliteTombstone(raw *string) (*time.Time, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil //nolint:nilnil // absent nullable timestamp
+	}
+	at, err := time.Parse(time.RFC3339Nano, *raw)
+	if err != nil {
+		return nil, fmt.Errorf("sheet.rows.sqlite: parse deleted_at: %w", err)
+	}
+	utc := at.UTC()
+	return &utc, nil
+}
+
+func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
+	if t == nil {
+		return sqlite.StringExp(sqlite.NULL)
+	}
+	return sqlite.String(sqliteent.SQLiteTime(*t))
+}

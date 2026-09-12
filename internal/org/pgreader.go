@@ -75,7 +75,7 @@ func (s *postgresStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Me
 	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID))).
-		ORDER_BY(s.members.CreatedAt.ASC())
+		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
 	var rows []pgMembershipRow
 	if err := stmt.QueryContext(ctx, tx, &rows); err != nil {
 		return nil, fmt.Errorf("org.postgres: ListMembers: %w", err)
@@ -105,7 +105,7 @@ func (s *postgresStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID)
 	).
 		FROM(s.members.INNER_JOIN(s.users, s.users.ID.EQ(s.members.UserID))).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID))).
-		ORDER_BY(s.members.CreatedAt.ASC())
+		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
 	var rows []pgMemberProfileRow
 	if err := stmt.QueryContext(ctx, tx, &rows); err != nil {
 		return nil, fmt.Errorf("org.postgres: ListMemberProfiles: %w", err)

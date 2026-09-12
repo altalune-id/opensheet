@@ -7,7 +7,7 @@ import (
 
 templ Layout(d web.LayoutData) {
 	<!DOCTYPE html>
-	<html lang={ layoutLang(d) } dir={ layoutDir(d) }>
+	<html lang={ layoutLang(d) } dir={ layoutDir(d) } data-copied-label={ d.Tr("common.copied") }>
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -96,8 +96,63 @@ templ Layout(d web.LayoutData) {
 					});
 				});
 			</script>
+			@copyScript()
 		</body>
 	</html>
+}
+
+// copyScript wires one delegated clipboard handler for [data-copy] and [data-copy-curl] controls.
+templ copyScript() {
+	<script>
+		(function() {
+			var COPIED = document.documentElement.getAttribute('data-copied-label') || 'Copied';
+			function flash(btn) {
+				var label = btn.querySelector('[data-copy-label]');
+				if (!label) return;
+				if (btn.dataset.copyBusy) return;
+				btn.dataset.copyBusy = '1';
+				var was = label.textContent;
+				label.textContent = COPIED;
+				window.setTimeout(function() {
+					label.textContent = was;
+					delete btn.dataset.copyBusy;
+				}, 1500);
+			}
+			// navigator.clipboard needs a secure context; the textarea path covers plain-http hosts.
+			function write(text, btn) {
+				if (navigator.clipboard && window.isSecureContext) {
+					navigator.clipboard.writeText(text).then(function() { flash(btn); });
+					return;
+				}
+				var ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', '');
+				ta.style.position = 'fixed';
+				ta.style.opacity = '0';
+				document.body.appendChild(ta);
+				ta.select();
+				try { document.execCommand('copy'); flash(btn); } catch (e) {}
+				document.body.removeChild(ta);
+			}
+			function curlFor(btn) {
+				var method = btn.getAttribute('data-method') || 'GET';
+				var url = window.location.origin + (btn.getAttribute('data-path') || '');
+				var parts = ['curl'];
+				if (method !== 'GET') parts.push('-X ' + method);
+				parts.push("'" + url + "'");
+				if (btn.getAttribute('data-public') !== '1') {
+					parts.push("-H 'Authorization: Bearer $OPENSHEET_API_KEY'");
+				}
+				return parts.join(' \\\n  ');
+			}
+			document.addEventListener('click', function(e) {
+				var curl = e.target.closest('[data-copy-curl]');
+				if (curl) { write(curlFor(curl), curl); return; }
+				var plain = e.target.closest('[data-copy]');
+				if (plain) { write(plain.getAttribute('data-copy') || '', plain); }
+			});
+		})();
+	</script>
 }
 
 templ topNav(d web.LayoutData) {
@@ -394,8 +449,8 @@ templ themeApplyScript() {
 		}
 		// Wire event listeners exactly once, even when this script is included
 		// multiple times (topNav + sidebar footers).
-		if (!window.__altemplThemeWired) {
-			window.__altemplThemeWired = true;
+		if (!window.__opensheetThemeWired) {
+			window.__opensheetThemeWired = true;
 			document.addEventListener('click', function(e) {
 				var t = e.target.closest('button[data-theme-key]');
 				if (t) { setTheme(t.getAttribute('data-theme-key')); closeParentDetails(t); return; }
@@ -485,8 +540,17 @@ templ projectMenu(d web.LayoutData, slug string) {
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
 			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
 		</a>
-		<a href={ templ.SafeURL(d.ProjectPath(slug, "/todos")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "todos") }>
-			@icons.Icon("list-checks", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.todos") }</span>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/credentials")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "credentials") }>
+			@icons.Icon("shield", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.credentials") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/spreadsheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "spreadsheets") }>
+			@icons.Icon("file-spreadsheet", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.spreadsheets") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/sheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "sheets") }>
+			@icons.Icon("table-2", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.sheets") }</span>
+		</a>
+		<a href={ templ.SafeURL(d.ProjectPath(slug, "/keys")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "keys") }>
+			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.keys") }</span>
 		</a>
 	</nav>
 }
@@ -608,6 +672,15 @@ func layoutDir(d web.LayoutData) string {
 	}
 	return "ltr"
 }
+
+// Destructive-action styling. Shared so every delete/revoke/unpublish control reads the same.
+const (
+	dangerIconButton = "rounded p-1.5 text-red-600 transition hover:bg-red-50 hover:text-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+	dangerPillButton = "rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+	dangerButton     = "inline-flex items-center gap-2 rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:border-red-400 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+)
+
+const copyButton = "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 func flashClass(kind string) string {
 	switch kind {

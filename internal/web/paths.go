@@ -18,3 +18,9 @@ func Path(basePath, sub string) string {
 	}
 	return bp + s
 }
+
+// DataPath returns the path the data plane serves a published sheet's rows from.
+// NOTE: internal/data owns this route shape and is mounted at <basePath>/api/v1/.
+func DataPath(basePath, orgSlug, projectSlug, sheetSlug string) string {
+	return Path(basePath, "/api/v1/orgs/"+orgSlug+"/projects/"+projectSlug+"/sheets/"+sheetSlug)
+}

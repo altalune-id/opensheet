@@ -73,7 +73,7 @@ func (s *postgresStore) List(ctx context.Context, orgID uuid.UUID) ([]*Project, 
 	).
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(postgres.UUID(orgID))).
-		ORDER_BY(s.table.CreatedAt.ASC())
+		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []pgProjectRow
 	if qErr := stmt.QueryContext(ctx, tx, &rows); qErr != nil {
 		return nil, fmt.Errorf("project.postgres.List: %w", qErr)

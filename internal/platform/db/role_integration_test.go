@@ -64,13 +64,13 @@ func TestOpen_UnknownRoleFailsLoudly(t *testing.T) {
 
 	start := time.Now()
 	_, err := db.Open(t.Context(), db.DBConfig{
-		Driver: db.DriverPostgres, DSN: h.DSN, Role: "altempl_role_does_not_exist",
+		Driver: db.DriverPostgres, DSN: h.DSN, Role: "opensheet_role_does_not_exist",
 		ConnectTimeout: 30 * time.Second, ConnectBackoff: 250 * time.Millisecond,
 	}, nil)
 	elapsed := time.Since(start)
 
 	require.Error(t, err, "an unknown role must not open silently")
-	require.Contains(t, err.Error(), "altempl_role_does_not_exist")
+	require.Contains(t, err.Error(), "opensheet_role_does_not_exist")
 	require.Less(t, elapsed, 5*time.Second,
 		"a server-rejected SET ROLE is permanent and must not burn the whole connect budget (%s)", elapsed)
 }
@@ -89,5 +89,5 @@ func uniqueRoleName(t *testing.T) string {
 	// NOTE: pgtest reuses TEST_PG_DSN when set, so a fixed role name collides on the second run.
 	suffix, err := nanoid.New(10)
 	require.NoError(t, err)
-	return "altempl_test_" + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(suffix))
+	return "opensheet_test_" + strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(suffix))
 }

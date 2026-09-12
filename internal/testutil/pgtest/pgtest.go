@@ -68,7 +68,7 @@ func New(t *testing.T) *Handle {
 	defer cancel()
 
 	c, err := postgres.Run(ctx, "postgres:17-alpine",
-		postgres.WithDatabase("altempl_test"),
+		postgres.WithDatabase("opensheet_test"),
 		postgres.WithUsername("opensheet"),
 		postgres.WithPassword("opensheet"),
 		testcontainers.WithLabels(map[string]string{labelOwner: "true"}),

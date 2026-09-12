@@ -18,20 +18,24 @@ Exact names.
 | `store.go`                     | `Store` interface (the driven port)                             |
 | `errors.go`                    | Typed error structs + `Is<TypeName>` helpers + `ToAppError()`   |
 | `service.go`                   | `type Service struct` + application methods + `NewService(...)` |
-| `factory.go`                   | `NewStore(cfg, db, pc) Store` — driver dispatch                 |
-| `postgres.go`                  | `postgresStore` on `pgx` via `tenant.PgConn`                    |
-| `sqlite.go`                    | `sqliteStore` on `*sql.DB`                                      |
+| `factory.go`                   | `NewStore(cfg, pool, pc) Store` — driver dispatch               |
+| `postgres.go`                  | `postgresStore` + `newPostgresStore` + row structs + tx helpers |
+| `pgreader.go`                  | Postgres read methods on `postgresStore` (`ByID`, `List`, …)    |
+| `pgwriter.go`                  | Postgres write methods on `postgresStore` (`Save`, `Delete`, …) |
+| `sqlite.go`                    | `sqliteStore` on `*sql.DB` — reads and writes in one file       |
 | `<name>_test.go`               | Aggregate invariant tests                                       |
 | `service_test.go`              | Application tests using `internal/testutil/fakes.<Name>`        |
 | `sqlite_test.go`               | SQLite `:memory:` unit tests                                    |
 | `postgres_integration_test.go` | `//go:build integration`; requires `TEST_PG_DSN`                |
 
-Optional, only when the module has periodic work:
+Optional, only when the module has background work:
 
 | File                | Purpose                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------- |
 | `scheduler.go`      | Optional. `Scheduler` adapter implementing `scheduler.Provider` — one `Job` per periodic task |
 | `scheduler_test.go` | Job metadata + `Run` behavior, using the module's fake `Store`                                |
+| `worker.go`         | Optional. A `worker.Worker` — one long-lived loop, for work the module needs off a request    |
+| `worker_test.go`    | `Name`, the loop's flush/shutdown behavior, and failure containment, using the fake `Store`   |
 
 Stateful workflows may live in their own file (see Section 3).
 
@@ -45,11 +49,13 @@ Stateful workflows may live in their own file (see Section 3).
   (enforced by depguard): stdlib, `github.com/google/uuid`,
   `altalune.id/opensheet/internal/platform/tenant`,
   `altalune.id/opensheet/internal/apperror`,
-  `altalune.id/opensheet/gen/go/apperror/v1`. Nothing else — no `net/http`,
+  `altalune.id/opensheet/gen/go/apperror/v1`, `altalune.id/opensheet/reqid`,
+  `google.golang.org/grpc/codes`. Nothing else — no `net/http`,
   no `database/sql`, no `config`.
 - `service.go` may add `log/slog`, `go.opentelemetry.io/otel`, and other
   modules' aggregate types by ID only (never mutate another module's aggregate).
-- `postgres.go` / `sqlite.go` may import persistence packages.
+- `postgres.go` / `pgreader.go` / `pgwriter.go` / `sqlite.go` may import
+  persistence packages.
 
 ### Aggregate
 
@@ -83,16 +89,20 @@ Two helpers compose:
   (`set_config('app.current_org_id', ...)` so RLS sees the current org).
   Same `db.CurrentTx` slot. Tenant-scoped flows.
 
-Store method contract:
+Store method contract — `postgres.go` carries the two helpers every reader and
+writer opens with:
+`txAcquire` returns the outer `db.CurrentTx(ctx)` when one is enrolled and
+otherwise opens its own via `pc.BeginTenanted`, reporting which case it took;
+`endTx` commits or rolls back only the transaction it owns.
 
 ```go
 func (s *postgresStore) Save(ctx context.Context, t *Todo) error {
-    if tx := db.CurrentTx(ctx); tx != nil {
-        return s.saveTx(ctx, tx, t)      // enroll in outer UoW
+    tx, owned, tc, err := s.txAcquire(ctx)
+    if err != nil {
+        return err
     }
-    return s.pc.BeginTenanted(ctx, func(tx *sql.Tx) error {
-        return s.saveTx(ctx, tx, t)
-    })
+    // … build and exec the statement …
+    return s.endTx(tx, owned, execErr)
 }
 ```
 
@@ -150,11 +160,11 @@ func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFun
 ### Factory
 
 ```go
-func NewStore(cfg config.DBConfig, db *sql.DB, pc *tenant.PgConn) Store {
-    if cfg.Driver == config.DriverPostgres {
-        return newPostgresStore(pc)
+func NewStore(cfg db.DBConfig, pool db.Pool, pc *tenant.PgConn) Store {
+    if cfg.Driver == db.DriverPostgres {
+        return newPostgresStore(pool, pc, cfg.Schema, cfg.TablePrefix)
     }
-    return newSQLiteStore(db)
+    return newSQLiteStore(pool.W, cfg.TablePrefix)
 }
 ```
 
@@ -162,18 +172,19 @@ Each module owns its factory. No central `newRepos(...)` tuple.
 
 ### Adapters
 
-- `type postgresStore struct { pc *tenant.PgConn }` — Postgres uses the
-  tenant-scoped connection.
-- `type sqliteStore struct { db *sql.DB }` — SQLite adds `WHERE org_id = ?`
-  from `tenant.From(ctx)`.
-- Translate driver errors to typed domain errors — never leak `*pgx.PgError`
+- `type postgresStore struct { pool db.Pool; pc *tenant.PgConn; table *pgent.<Names> }`
+  — Postgres uses the tenant-scoped connection.
+- `type sqliteStore struct { db *sql.DB; table *sqliteent.<Names> }` — SQLite adds
+  `WHERE org_id = ?` from `tenant.From(ctx)`.
+- Translate driver errors to typed domain errors — never leak `*pgconn.PgError`
   or `sqlite3.Error`:
   ```go
-  if errors.Is(err, sql.ErrNoRows) { return nil, &NotFoundError{ID: id.String()} }
-  if isUniqueViolation(err) { return nil, &AlreadyExistsError{Field: "slug", Value: slug} }
+  if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) { return nil, &NotFoundError{ID: id.String()} }
+  if isPgUniqueViolation(err) { return nil, &AlreadyExistsError{Field: "slug", Value: slug} }
   ```
-- Use `pgx.CollectRows` + `pgx.RowToStructByName` — no manual scanning
-  unless irregular.
+- Build statements with go-jet against the generated table types in
+  `internal/platform/db/entity/{postgres,sqlite}`, and project into a row
+  struct tagged `alias:"<table>.<column>"` — no manual `rows.Scan`.
 
 ### Tests
 
@@ -200,11 +211,28 @@ becomes its own struct in its own file. Examples:
 Rule: function unless it has state or 3+ deps. Then struct with a
 constructor + one primary method. The `Service` composes it.
 
-## 3a. Periodic work
+## 3a. Background work
 
-A module with periodic work adds `scheduler.go` holding a `Scheduler`
-struct and `SchedulerJobs() []scheduler.Job` (`scheduler.Provider`).
-Reference impl: `internal/todo/scheduler.go`.
+Two kinds. Pick by what triggers the work; they are not interchangeable.
+
+- **A clock triggers it** → `scheduler.go`: a `Scheduler` struct plus
+  `SchedulerJobs() []scheduler.Job` (`scheduler.Provider`). The Runner owns
+  the timing and, for `ScopeTenant`, fans each tick out over every tenant.
+  Register the adapter in `internal/boot/schedulers.go` — add it to
+  `schedulerProviders` and name the module in `schedulerDomains`; the wiring
+  assertion fails the boot if a slot is missing. Reference impl:
+  `internal/todo/scheduler.go`.
+- **A request produces work something must drain** → `worker.go`: a type
+  satisfying `worker.Worker` (`Name() string` + `Run(ctx) error`) — one
+  long-lived goroutine draining an in-process queue for the whole process
+  lifetime, not a unit of work invoked on a schedule. Construct it in
+  `internal/boot/services.go`, hold it on a `Services` field, and
+  `sup.Register(...)` it in `internal/boot/server.go`. `Run` returns only on
+  `ctx.Done()`, drains what is buffered before returning, and never lets one
+  failure escape and kill the process. Reference impl:
+  `internal/apikey/worker.go`.
+
+Scheduler jobs, additionally:
 
 - A `Job.Run` body calls the module's own `Service` — never a `Store`
   directly, and never another module's internals.
@@ -214,9 +242,6 @@ Reference impl: `internal/todo/scheduler.go`.
   the Runner fans out over tenants and sets the tenant scope before
   each call, so the job needs no RLS or `org_id` handling of its own.
 - A `ScopeSystem` job runs once per tick with no tenant scope.
-- Register the adapter in `internal/boot/schedulers.go` and add the
-  module to `schedulerDomains` there — the wiring assertion fails the
-  boot if a slot is missing.
 
 ## 4. When to split into subdomains
 
@@ -265,14 +290,16 @@ internal/todo/tag/
 2. Rename package (`todo` → `<name>`), type (`Todo` → `<Name>`),
    identifier prefixes. `sed -i` works; run `goimports` after.
 3. Add fake at `internal/testutil/fakes/<name>.go` implementing `<name>.Store`.
-4. Add one line to `internal/boot/server.go`:
+4. Add one line to `buildServices` in `internal/boot/services.go`:
    ```go
-   <names> := <name>.NewService(<name>.NewStore(cfg.DB, db, pgConn), log, reporter.Unexpected)
+   <names> := <name>.NewService(<name>.NewStore(cfg.DB, pool, pgConn), log, reporter.Unexpected)
    ```
-   Plus one field on `type Server struct { … }`.
+   Plus a field on `type Services struct { … }` there, and — if a surface
+   needs it — one on `type Server struct { … }` in `internal/boot/server.go`.
 5. Add migrations under `schema/migrations/{postgres,sqlite}/` named
-   `NNN_create_<names>.{up,down}.sql`. If tenant-scoped, add the RLS
-   policy in the Postgres migration and run `make tenant-tables`.
+   `NNN_<subject>.sql`, with `-- +goose Up` and `-- +goose Down` sections in
+   the one file. If tenant-scoped, add the RLS policy in the Postgres
+   migration and run `make tenant-tables`.
 6. Exposing on the API? Add `api/<name>/v1/*.proto` and `make generate`.
 
 ## 7. Review checklist
@@ -292,5 +319,5 @@ internal/todo/tag/
 - Postgres integration tests exist under `//go:build integration`.
 - Coverage on aggregate ≥ 90%, service ≥ 85%.
 - `depguard` clean.
-- Adapter file names are `postgres.go` / `sqlite.go`.
+- Adapter file names are `postgres.go` / `pgreader.go` / `pgwriter.go` / `sqlite.go`.
 - `errors.go` has 1-line godoc on exported types only.

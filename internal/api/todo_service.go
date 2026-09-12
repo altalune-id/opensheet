@@ -5,13 +5,9 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	todov1 "altalune.id/opensheet/gen/go/todo/v1"
-	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
@@ -31,7 +27,7 @@ func NewTodoService(todos *todo.Service, todoStore todo.Store, projects *project
 
 // Create persists a new todo bound to the request's project.
 func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.CreateRequest]) (*connect.Response[todov1.CreateResponse], error) {
-	tctx, err := s.scopeToProject(ctx, req.Msg.GetProjectId())
+	tctx, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +40,7 @@ func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.Cr
 
 // List returns todos in the request's project.
 func (s *TodoService) List(ctx context.Context, req *connect.Request[todov1.ListRequest]) (*connect.Response[todov1.ListResponse], error) {
-	tctx, err := s.scopeToProject(ctx, req.Msg.GetProjectId())
+	tctx, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -84,30 +80,6 @@ func (s *TodoService) Delete(ctx context.Context, req *connect.Request[todov1.De
 	return connect.NewResponse(&todov1.DeleteResponse{}), nil
 }
 
-func (s *TodoService) scopeToProject(ctx context.Context, projectIDRaw string) (context.Context, error) {
-	p, err := principal(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pid, err := parseUUID("project_id", projectIDRaw)
-	if err != nil {
-		return nil, err
-	}
-	scoped := tenant.Into(ctx, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
-	proj, err := s.projects.ByID(scoped, pid)
-	if err != nil {
-		return nil, err
-	}
-	if proj.OrgID != p.ActiveOrgID {
-		return nil, forbiddenErr("project belongs to another org", "project_id", pid.String())
-	}
-	return tenant.Into(ctx, tenant.Context{
-		OrgID:     proj.OrgID,
-		ProjectID: proj.ID,
-		UserID:    p.UserID,
-	}), nil
-}
-
 func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (context.Context, uuid.UUID, error) {
 	p, err := principal(ctx)
 	if err != nil {
@@ -129,47 +101,6 @@ func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (contex
 		ProjectID: t.ProjectID,
 		UserID:    p.UserID,
 	}), tid, nil
-}
-
-func principal(ctx context.Context) (session.Principal, error) {
-	p := session.PrincipalFrom(ctx)
-	if p.UserID == uuid.Nil {
-		return session.Principal{}, apperror.New(
-			apperror.CodeUnauthenticated,
-			"No principal in context",
-			codes.Unauthenticated,
-			&apperrorv1.ErrorDetail{Code: apperror.CodeUnauthenticated},
-		)
-	}
-	return p, nil
-}
-
-func parseUUID(field, raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, apperror.New(
-			apperror.CodeValidation,
-			field+" must be a uuid",
-			codes.InvalidArgument,
-			&apperrorv1.ErrorDetail{
-				Code: apperror.CodeValidation,
-				Meta: map[string]string{"field": field},
-			},
-		).WithCause(err)
-	}
-	return id, nil
-}
-
-func forbiddenErr(msg, field, value string) error {
-	return apperror.New(
-		apperror.CodeForbidden,
-		msg,
-		codes.PermissionDenied,
-		&apperrorv1.ErrorDetail{
-			Code: apperror.CodeForbidden,
-			Meta: map[string]string{field: value},
-		},
-	)
 }
 
 func toProto(t *todo.Todo) *todov1.Todo {

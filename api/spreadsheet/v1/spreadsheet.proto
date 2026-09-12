@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package spreadsheet.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "altalune.id/opensheet/gen/go/spreadsheet/v1;spreadsheetv1";
+
+service SpreadsheetService {
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc ListTabs(ListTabsRequest) returns (ListTabsResponse);
+}
+
+message Spreadsheet {
+  string id = 1;
+  string project_id = 2;
+  string credential_id = 3;
+  string google_file_id = 4;
+  string title = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  bool writable = 8;
+}
+
+message ListRequest {
+  string project_id = 1;
+}
+
+message ListResponse {
+  repeated Spreadsheet spreadsheets = 1;
+}
+
+message CreateRequest {
+  string project_id = 1;
+  string credential_id = 2;
+  string google_file_id = 3;
+  string title = 4;
+}
+
+message CreateResponse {
+  Spreadsheet spreadsheet = 1;
+}
+
+message GetRequest {
+  string project_id = 1;
+  string spreadsheet_id = 2;
+}
+
+message GetResponse {
+  Spreadsheet spreadsheet = 1;
+}
+
+message UpdateRequest {
+  string project_id = 1;
+  string spreadsheet_id = 2;
+  optional string title = 3;
+  optional string credential_id = 4;
+  optional bool writable = 5;
+}
+
+message UpdateResponse {
+  Spreadsheet spreadsheet = 1;
+}
+
+message DeleteRequest {
+  string project_id = 1;
+  string spreadsheet_id = 2;
+}
+
+message DeleteResponse {}
+
+message ListTabsRequest {
+  string project_id = 1;
+  string spreadsheet_id = 2;
+}
+
+message ListTabsResponse {
+  repeated string tabs = 1;
+}

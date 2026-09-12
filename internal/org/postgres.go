@@ -42,7 +42,8 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 		members:           pgent.NewMemberships(schema, tablePrefix),
 		users:             pgent.NewUsers(schema, tablePrefix),
 		resolveBySlugStmt: orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
-		listForUserStmt:   orgFuncSelect + fnPrefix + "list_orgs_for_user(#userID) AS o",
+		// NOTE: the outer ORDER BY is the guarantee — Postgres may inline the LANGUAGE sql SRF and drop its internal one.
+		listForUserStmt: orgFuncSelect + fnPrefix + "list_orgs_for_user(#userID) AS o ORDER BY o.created_at ASC, o.id ASC",
 	}
 }
 

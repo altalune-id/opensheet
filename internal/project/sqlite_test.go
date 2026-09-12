@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"altalune.id/opensheet/internal/platform/config"
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/schema"
 )
@@ -37,15 +38,15 @@ func seedUserAndOrg(t *testing.T, db *sql.DB) (userID, orgID uuid.UUID) {
 	t.Helper()
 	userID = uuid.New()
 	orgID = uuid.New()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := sqliteent.SQLiteTime(time.Now())
 	if _, err := db.Exec(
-		`INSERT INTO altempl_users (id, email, name, avatar_url, is_admin, created_at, updated_at)
+		`INSERT INTO opensheet_users (id, email, name, avatar_url, is_admin, created_at, updated_at)
 		 VALUES (?, ?, '', '', 0, ?, ?)`,
 		userID.String(), userID.String()+"@example.com", now, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(
-		`INSERT INTO altempl_orgs (id, slug, name, created_by, created_at, updated_at)
+		`INSERT INTO opensheet_orgs (id, slug, name, created_by, created_at, updated_at)
 		 VALUES (?, ?, 'Org', ?, ?, ?)`,
 		orgID.String(), orgID.String()[:8], userID.String(), now, now); err != nil {
 		t.Fatal(err)

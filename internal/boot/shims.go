@@ -2,13 +2,22 @@ package boot
 
 import (
 	"context"
+	"slices"
 
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 
+	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/data"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/capabilities"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/user"
 )
 
@@ -190,4 +199,114 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 		})
 	}
 	return out
+}
+
+type capsForSheet struct{ caps capabilities.Capabilities }
+
+func (c capsForSheet) PublicSheetsEnabled() bool { return c.caps.PublicSheets }
+
+type spreadsheetsForSheet struct{ svc *spreadsheet.Service }
+
+func (s spreadsheetsForSheet) SourceFor(ctx context.Context, spreadsheetID uuid.UUID) (sheet.Source, error) {
+	sp, err := s.svc.ByID(ctx, spreadsheetID)
+	if err != nil {
+		return sheet.Source{}, err
+	}
+	return sheet.Source{GoogleFileID: sp.GoogleFileID, CredentialID: sp.CredentialID}, nil
+}
+
+type tokensForSheetRead struct{ svc *credential.Service }
+
+func (t tokensForSheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+}
+
+type tokensForSheetWrite struct{ svc *credential.Service }
+
+func (t tokensForSheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
+}
+
+type tokensForSpreadsheetRead struct{ svc *credential.Service }
+
+func (t tokensForSpreadsheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+}
+
+type tokensForSpreadsheetWrite struct{ svc *credential.Service }
+
+func (t tokensForSpreadsheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
+	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
+}
+
+var (
+	_ sheet.TokenSources       = tokensForSheetRead{}
+	_ sheet.TokenSources       = tokensForSheetWrite{}
+	_ spreadsheet.TokenSources = tokensForSpreadsheetRead{}
+	_ spreadsheet.TokenSources = tokensForSpreadsheetWrite{}
+)
+
+type credentialsForSheet struct{ svc *credential.Service }
+
+func (c credentialsForSheet) MarkReauthNeeded(ctx context.Context, credentialID uuid.UUID) error {
+	_, err := c.svc.MarkReauthNeeded(ctx, credentialID)
+	return err
+}
+
+type sheetStoreForAPIKey struct{ store sheet.Store }
+
+func (s sheetStoreForAPIKey) IDsInProject(ctx context.Context, orgID, projectID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
+	sheets, err := s.store.List(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, sh := range sheets {
+		if slices.Contains(ids, sh.ID) {
+			out = append(out, sh.ID)
+		}
+	}
+	return out, nil
+}
+
+func membershipsFor(orgs *org.Service) auth.MembershipsFn {
+	return func(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+		list, err := orgs.List(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]uuid.UUID, 0, len(list))
+		for _, o := range list {
+			ids = append(ids, o.ID)
+		}
+		return ids, nil
+	}
+}
+
+type orgsForData struct{ svc *org.Service }
+
+func (o orgsForData) BySlug(ctx context.Context, slug string) (data.OrgRef, error) {
+	found, err := o.svc.BySlug(ctx, slug)
+	if err != nil {
+		return data.OrgRef{}, err
+	}
+	return data.OrgRef{ID: found.ID}, nil
+}
+
+type projectsForData struct{ svc *project.Service }
+
+func (p projectsForData) BySlug(ctx context.Context, orgID uuid.UUID, slug string) (data.ProjectRef, error) {
+	found, err := p.svc.BySlug(tenant.WithOrg(ctx, orgID), orgID, slug)
+	if err != nil {
+		return data.ProjectRef{}, err
+	}
+	return data.ProjectRef{ID: found.ID}, nil
+}
+
+type sheetsForData struct{ svc *sheet.Service }
+
+// NOTE: sheet.Service.BySlug reads org and project off the context, so the shim scopes them explicitly.
+func (s sheetsForData) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (*sheet.Sheet, error) {
+	scoped := tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID})
+	return s.svc.BySlug(scoped, slug)
 }

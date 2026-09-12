@@ -44,3 +44,18 @@ func (s *MemoryStore) Delete(_ context.Context, sid string) error {
 	delete(s.rows, sid)
 	return nil
 }
+
+// DeleteExpired removes sessions whose expiry has passed and reports how many went.
+func (s *MemoryStore) DeleteExpired(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	n := 0
+	for sid, r := range s.rows {
+		if now.After(r.exp) {
+			delete(s.rows, sid)
+			n++
+		}
+	}
+	return n, nil
+}

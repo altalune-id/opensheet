@@ -23,13 +23,13 @@ How opensheet isolates tenants and routes sign-ins. Read in five minutes.
 
 ## Three connection tiers (Postgres, production)
 
-| Role               | Purpose                                        | BYPASSRLS |
-| ------------------ | ---------------------------------------------- | --------- |
-| `altempl_owner`    | Owns objects (tables, indices)                 | no        |
-| `altempl_migrator` | Runs migrations under `SET ROLE altempl_owner` | no        |
-| `altempl_service`  | Runtime connection                             | no        |
+| Role                 | Purpose                                          | BYPASSRLS |
+| -------------------- | ------------------------------------------------ | --------- |
+| `opensheet_owner`    | Owns objects (tables, indices)                   | no        |
+| `opensheet_migrator` | Runs migrations under `SET ROLE opensheet_owner` | no        |
+| `opensheet_service`  | Runtime connection                               | no        |
 
-Provision via `scripts/db/provision.sh` (`APP=opensheet DB_NAME=opensheet`). Point `OPENSHEET_DB_MIGRATOR_DSN` at `altempl_migrator` (`OPENSHEET_DB_MIGRATOR_ROLE=altempl_owner`) and `OPENSHEET_DB_DSN` at `altempl_service`. Boot uses migrator briefly for migrations, closes it, then serves from service.
+Provision via `scripts/db/provision.sh` (`APP=opensheet DB_NAME=opensheet`). Point `OPENSHEET_DB_MIGRATOR_DSN` at `opensheet_migrator` (`OPENSHEET_DB_MIGRATOR_ROLE=opensheet_owner`) and `OPENSHEET_DB_DSN` at `opensheet_service`. Boot uses migrator briefly for migrations, closes it, then serves from service.
 
 ## Reader / writer
 
@@ -113,9 +113,9 @@ flowchart TD
 ## Common pitfalls
 
 - **Inlining `current_setting('app.current_org_id')::uuid` in a policy** → a transaction-local `set_config` resets to `''`, not NULL, when the transaction ends, so any pooled connection that once served a tenant makes `''::uuid` raise `22P02` on every later cross-tenant read. Use `{{.Schema}}.{{.TablePrefix}}current_org_id()`, which wraps it in `NULLIF`.
-- **Reading a tenant table before a tenant exists** — invite-by-token, invite-by-email, org-by-slug. RLS hides every row, so the query returns empty rather than failing. Add a `SECURITY DEFINER` wrapper in `005_definer_functions.sql` and read through it.
+- **Reading a tenant table before a tenant exists** — invite-by-token, invite-by-email, org-by-slug. RLS hides every row, so the query returns empty rather than failing. Read through a `SECURITY DEFINER` wrapper. The five that exist today are declared in `005_definer_functions.sql`, which is a template file — add a **new** one in a migration this project owns, never by editing `005`. See "The template boundary" in [`../schema/README.md`](../schema/README.md).
 
-- **Forgetting `set_config` in a tx** → RLS blocks all rows for `altempl_service`. Symptom: empty result sets in prod, works in dev under superuser. Fix: use `tenant.PgConn.BeginTenanted` (stores already do).
+- **Forgetting `set_config` in a tx** → RLS blocks all rows for `opensheet_service`. Symptom: empty result sets in prod, works in dev under superuser. Fix: use `tenant.PgConn.BeginTenanted` (stores already do).
 - **Cross-tenant leak in a service method** — a service that accepts `orgID` as a parameter but doesn't compare against `tenant.From(ctx).OrgID`. Always use the org from ctx as source of truth; parameters are for scoping within the same tenant only.
 - **Silent user-row leak on rejected OIDC signup (selfhosted)** — fixed via `AllowSignupFn` pre-persistence check. If you add a new sign-in path, gate it the same way.
 

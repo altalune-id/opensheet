@@ -110,3 +110,35 @@ func IsNotInvitedError(err error) bool {
 	_, ok := errors.AsType[*NotInvitedError](err)
 	return ok
 }
+
+// OrgUnresolvedError signals a bearer token that names no org and no single membership to fall back on.
+type OrgUnresolvedError struct {
+	Reason string
+}
+
+func (e *OrgUnresolvedError) Error() string {
+	if e.Reason == "" {
+		return "auth: token: org unresolved"
+	}
+	return "auth: token: org unresolved: " + e.Reason
+}
+
+// ToAppError maps OrgUnresolvedError to the canonical tenant-missing envelope.
+func (e *OrgUnresolvedError) ToAppError() *apperror.AppError {
+	meta := map[string]string{}
+	if e.Reason != "" {
+		meta["reason"] = e.Reason
+	}
+	return apperror.New(
+		apperror.CodeTenantMissing,
+		"Token names no org; present an org-scoped token",
+		codes.Unauthenticated,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeTenantMissing, Meta: meta},
+	)
+}
+
+// IsOrgUnresolvedError reports whether err's tree contains a *OrgUnresolvedError.
+func IsOrgUnresolvedError(err error) bool {
+	_, ok := errors.AsType[*OrgUnresolvedError](err)
+	return ok
+}

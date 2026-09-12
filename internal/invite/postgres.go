@@ -38,8 +38,9 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 		pc:    pc,
 		table: pgent.NewInvites(schema, tablePrefix),
 		// NOTE: RawStatement because go-jet has no builder for a set-returning function in FROM position.
-		byTokenHashStmt:    "SELECT " + cols + " FROM " + fn + "resolve_invite_by_token_hash(#hash) i",
-		pendingByEmailStmt: "SELECT " + cols + " FROM " + fn + "list_pending_invites_for_email(#email) i",
+		byTokenHashStmt: "SELECT " + cols + " FROM " + fn + "resolve_invite_by_token_hash(#hash) i",
+		// NOTE: the outer ORDER BY is the guarantee — Postgres may inline the LANGUAGE sql SRF and drop its internal one.
+		pendingByEmailStmt: "SELECT " + cols + " FROM " + fn + "list_pending_invites_for_email(#email) i ORDER BY i.created_at ASC, i.id ASC",
 	}
 }
 

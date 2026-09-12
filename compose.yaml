@@ -54,6 +54,11 @@ services:
       OPENSHEET_DB_ALLOW_BYPASS_RLS: "true"
       OPENSHEET_DB_AUTO_MIGRATE: "true"
 
+      # both secrets below: 32 bytes, `openssl rand -hex 32` (base64 also accepted); required with db.driver=postgres
+      OPENSHEET_SECURITY_ENCRYPTION_KEY: "92ffe7e38aea660083a2354e1fccdfb7afdac5376c1b598bbd4408fa040eaf82"
+      # rotating this one invalidates every in-flight session
+      OPENSHEET_HTTP_STATE_SECRET: "d10021d4fe160ef91697fccf3b30bccc35d96964ba9aa384c246500c32fb05f0"
+
       OPENSHEET_MAIL_DRIVER: smtp
       OPENSHEET_MAIL_FROM: "no-reply@opensheet.local"
       OPENSHEET_MAIL_SMTP_HOST: mailpit

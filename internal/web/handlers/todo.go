@@ -4,10 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
-	"altalune.id/opensheet/internal/org"
-	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/web/templates"
@@ -23,46 +19,6 @@ type TodoHandler struct {
 func NewTodoHandler(d Deps, projects *project.Service, todos *todo.Service) *TodoHandler {
 	d.Projects = projects
 	return &TodoHandler{Deps: d, Todos: todos}
-}
-
-// projectScope is the org and project a todo route acts on, with a request already carrying both scopes.
-type projectScope struct {
-	principal session.Principal
-	sid       string
-	org       *org.Org
-	project   *project.Project
-	req       *http.Request
-}
-
-// requireProject resolves the org and project the path names, gating membership before any row is read.
-func (h *TodoHandler) requireProject(w http.ResponseWriter, r *http.Request) (projectScope, bool) {
-	p, sid, ok := h.LoadSession(r)
-	if !ok {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return projectScope{}, false
-	}
-	o, r, ok := h.OrgScopeFor(w, r, p, r.PathValue("org"))
-	if !ok {
-		return projectScope{}, false
-	}
-	proj, r, ok := h.ProjectScopeFor(w, r, o.ID, r.PathValue("project"))
-	if !ok {
-		return projectScope{}, false
-	}
-	return projectScope{principal: p, sid: sid, org: o, project: proj, req: r.WithContext(r.Context())}, true
-}
-
-// remember stores the org and project as the session's last-used pair, which only /  reads.
-func (h *TodoHandler) remember(sc projectScope) {
-	if sc.principal.ActiveOrgID == sc.org.ID && sc.principal.ActiveProjectID == sc.project.ID {
-		return
-	}
-	updated := sc.principal
-	updated.ActiveOrgID = sc.org.ID
-	updated.ActiveProjectID = sc.project.ID
-	if err := h.UpdateSession(sc.req, sc.sid, updated); err != nil {
-		h.LogErr("web todo: update session", err)
-	}
 }
 
 // GetOverview renders the project overview page.
@@ -158,7 +114,7 @@ func (h *TodoHandler) PostToggle(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Toggle failed", "Could not update that todo.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoRowFragment(h.Base(sc.req, ""), todoRow(sc.org.Slug, sc.project.Slug, updated)))
+	Render(w, sc.req, templates.TodoRowFragment(h.fragment(sc), todoRow(sc.org.Slug, sc.project.Slug, updated)))
 }
 
 // Delete removes the row.
@@ -192,9 +148,8 @@ func (h *TodoHandler) requireTodo(w http.ResponseWriter, r *http.Request) (proje
 	if !ok {
 		return projectScope{}, nil, false
 	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed todo id.")
+	id, ok := h.pathID(w, r, "todo")
+	if !ok {
 		return projectScope{}, nil, false
 	}
 	t, err := h.Todos.ByID(sc.req.Context(), id)
@@ -217,7 +172,7 @@ func (h *TodoHandler) writeListFragment(w http.ResponseWriter, sc projectScope) 
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load todos.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoList(h.Base(sc.req, ""), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
+	Render(w, sc.req, templates.TodoList(h.fragment(sc), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
 }
 
 // Register wires the todo routes onto mux.
