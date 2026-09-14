@@ -150,10 +150,10 @@ func (h *SpreadsheetHandler) GetTabs(w http.ResponseWriter, r *http.Request) {
 	tabs, err := h.Spreadsheets.ListTabs(sc.req.Context(), sp.ID)
 	if err != nil {
 		h.LogErr("web spreadsheet: list tabs", err)
-		Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), nil, tabsMessage(err)))
+		Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), nil, tabsMessage(err), ErrorRef(err)))
 		return
 	}
-	Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), tabs, ""))
+	Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), tabs, "", ""))
 }
 
 // Register wires the spreadsheet routes onto mux.

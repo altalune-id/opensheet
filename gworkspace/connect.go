@@ -122,3 +122,19 @@ func accountEmail(tok *oauth2.Token) string {
 	}
 	return strings.TrimSpace(claims.Email)
 }
+
+// ProjectNumber returns the Cloud project number a Google OAuth client ID was issued under, or ""
+// when clientID does not carry one. The Picker needs it as the Drive App ID for the drive.file scope.
+// https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
+func ProjectNumber(clientID string) string {
+	num, _, ok := strings.Cut(strings.TrimSpace(clientID), "-")
+	if !ok || num == "" {
+		return ""
+	}
+	for _, r := range num {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return num
+}

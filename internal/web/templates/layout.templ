@@ -257,7 +257,8 @@ templ orgSidebar(d web.LayoutData) {
 			@orgMenu(d, d.ActiveOrg.Slug)
 		} else {
 			<p class="mt-4 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.workspace") }</p>
-			<a href={ templ.SafeURL(d.Href("/orgs/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_organization") }</span></a>
+			<a href={ templ.SafeURL(d.Href("/orgs/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+<span>{ d.Tr("nav.create_organization") }</span></a>
 		}
 	</div>
 }
@@ -509,16 +510,20 @@ func localeOptionClass(active bool) string {
 templ orgMenu(d web.LayoutData, slug string) {
 	<nav class="flex flex-col gap-0.5">
 		<a href={ templ.SafeURL(d.Href("/orgs/" + slug)) } class={ orgItemClass(d.ActiveNav.OrgKey == "overview") }>
-			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
+			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.overview") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.OrgPath("/projects")) } class={ orgItemClass(d.ActiveNav.OrgKey == "projects" || d.ActiveNav.Scope == web.NavScopeProject) }>
-			@icons.Icon("folder", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.projects") }</span>
+			@icons.Icon("folder", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.projects") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/members")) } class={ orgItemClass(d.ActiveNav.OrgKey == "members") }>
-			@icons.Icon("users", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.members") }</span>
+			@icons.Icon("users", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.members") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.Href("/orgs/" + slug + "/invites")) } class={ orgItemClass(d.ActiveNav.OrgKey == "invites") }>
-			@icons.Icon("mail", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.invites") }</span>
+			@icons.Icon("mail", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.invites") }</span>
 		</a>
 	</nav>
 }
@@ -530,7 +535,8 @@ templ projectSidebar(d web.LayoutData) {
 			@projectMenu(d, d.ActiveProject.Slug)
 		} else {
 			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.project") }</p>
-			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+<span>{ d.Tr("nav.create_project") }</span></a>
 		}
 	</div>
 }
@@ -538,19 +544,24 @@ templ projectSidebar(d web.LayoutData) {
 templ projectMenu(d web.LayoutData, slug string) {
 	<nav class="flex flex-col gap-0.5">
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/overview")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "overview") }>
-			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.overview") }</span>
+			@icons.Icon("layout-dashboard", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.overview") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/credentials")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "credentials") }>
-			@icons.Icon("shield", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.credentials") }</span>
+			@icons.Icon("shield", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.credentials") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/spreadsheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "spreadsheets") }>
-			@icons.Icon("file-spreadsheet", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.spreadsheets") }</span>
+			@icons.Icon("file-spreadsheet", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.spreadsheets") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/sheets")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "sheets") }>
-			@icons.Icon("table-2", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.sheets") }</span>
+			@icons.Icon("table-2", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.sheets") }</span>
 		</a>
 		<a href={ templ.SafeURL(d.ProjectPath(slug, "/keys")) } class={ orgItemClass(d.ActiveNav.ProjectKey == "keys") }>
-			@icons.Icon("key", "h-4 w-4 shrink-0") <span>{ d.Tr("nav.keys") }</span>
+			@icons.Icon("key", "h-4 w-4 shrink-0")
+			<span>{ d.Tr("nav.keys") }</span>
 		</a>
 	</nav>
 }
@@ -588,7 +599,8 @@ templ orgSwitcherPill(d web.LayoutData) {
 			if d.Caps.OrgCreation {
 				<div class="my-1 border-t border-subtle"></div>
 				<a href={ templ.SafeURL(d.Href("/orgs/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
-					@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_organization") }</span>
+					@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+					<span>{ d.Tr("nav.new_organization") }</span>
 				</a>
 			}
 		</div>
@@ -624,7 +636,8 @@ templ projectSwitcherPill(d web.LayoutData) {
 			}
 			<div class="my-1 border-t border-subtle"></div>
 			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
-				@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_project") }</span>
+				@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+				<span>{ d.Tr("nav.new_project") }</span>
 			</a>
 		</div>
 	</details>
