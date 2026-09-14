@@ -13,11 +13,15 @@ import "altalune.id/opensheet/internal/web"
 type GooglePickerView struct {
 	ProjectSlug string
 	APIKey      string
+	AppID       string
 	AccessToken string
 	ReturnURL   string
 }
 
 // GooglePickerPage opens Google's file chooser and hands the picked document back to the registry form.
+// NOTE: setAppId is what records the drive.file grant for the picked document. Without it the Picker still
+// returns a file id, but every later Sheets read of that id fails with 404.
+// https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
 // NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so an
 // OPENSHEET_UI_MODE=vendored deployment keeps one external runtime dependency on this page alone.
 // https://developers.google.com/drive/picker/guides/overview
@@ -49,7 +53,7 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		var templ_7745c5c3_Var2 templ.SafeURL
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 19, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 23, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -62,7 +66,7 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs("← " + d.Tr("nav.spreadsheets"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 19, Col: 171}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 23, Col: 171}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -75,7 +79,7 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.title"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 20, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 24, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -88,7 +92,7 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.subtitle"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 21, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 25, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -101,65 +105,78 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.APIKey)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 25, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 29, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-access-token=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-app-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.AccessToken)
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.AppID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 26, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 30, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" data-return-url=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" data-access-token=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.ReturnURL)
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.AccessToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 27, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 31, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" class=\"mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" data-return-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var9 string
-		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.loading"))
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.ReturnURL)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 30, Col: 27}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 32, Col: 32}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div><noscript><p class=\"mt-4 text-sm text-muted-foreground\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" class=\"mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
-		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.noscript"))
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.loading"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 33, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 35, Col: 27}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</p></noscript><script src=\"https://apis.google.com/js/api.js\" async defer onload=\"opensheetPickerReady()\"></script><script>\n\t\tfunction opensheetPickerReady() {\n\t\t\tvar host = document.getElementById('opensheet-picker');\n\t\t\tif (!host || !window.gapi) return;\n\t\t\tgapi.load('picker', function() {\n\t\t\t\tvar view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);\n\t\t\t\tview.setIncludeFolders(true);\n\t\t\t\tvar picker = new google.picker.PickerBuilder()\n\t\t\t\t\t.setDeveloperKey(host.getAttribute('data-api-key'))\n\t\t\t\t\t.setOAuthToken(host.getAttribute('data-access-token'))\n\t\t\t\t\t.addView(view)\n\t\t\t\t\t.setCallback(function(data) {\n\t\t\t\t\t\tif (data.action !== google.picker.Action.PICKED) return;\n\t\t\t\t\t\tvar doc = data.docs[0];\n\t\t\t\t\t\tvar url = host.getAttribute('data-return-url') +\n\t\t\t\t\t\t\t'?google_file_id=' + encodeURIComponent(doc.id) +\n\t\t\t\t\t\t\t'&title=' + encodeURIComponent(doc.name || '');\n\t\t\t\t\t\twindow.location.assign(url);\n\t\t\t\t\t})\n\t\t\t\t\t.build();\n\t\t\t\tpicker.setVisible(true);\n\t\t\t});\n\t\t}\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div><noscript><p class=\"mt-4 text-sm text-muted-foreground\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var11 string
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(d.Tr("picker.noscript"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 38, Col: 74}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</p></noscript><script src=\"https://apis.google.com/js/api.js\" async defer onload=\"opensheetPickerReady()\"></script><script>\n\t\tfunction opensheetPickerReady() {\n\t\t\tvar host = document.getElementById('opensheet-picker');\n\t\t\tif (!host || !window.gapi) return;\n\t\t\tgapi.load('picker', function() {\n\t\t\t\tvar view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);\n\t\t\t\tview.setIncludeFolders(true);\n\t\t\t\tvar builder = new google.picker.PickerBuilder()\n\t\t\t\t\t.setDeveloperKey(host.getAttribute('data-api-key'))\n\t\t\t\t\t.setOAuthToken(host.getAttribute('data-access-token'))\n\t\t\t\t\t.addView(view);\n\t\t\t\tvar appId = host.getAttribute('data-app-id');\n\t\t\t\tif (appId) builder.setAppId(appId);\n\t\t\t\tvar picker = builder\n\t\t\t\t\t.setCallback(function(data) {\n\t\t\t\t\t\tif (data.action !== google.picker.Action.PICKED) return;\n\t\t\t\t\t\tvar doc = data.docs[0];\n\t\t\t\t\t\tvar url = host.getAttribute('data-return-url') +\n\t\t\t\t\t\t\t'?google_file_id=' + encodeURIComponent(doc.id) +\n\t\t\t\t\t\t\t'&title=' + encodeURIComponent(doc.name || '');\n\t\t\t\t\t\twindow.location.assign(url);\n\t\t\t\t\t})\n\t\t\t\t\t.build();\n\t\t\t\tpicker.setVisible(true);\n\t\t\t});\n\t\t}\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -183,9 +200,9 @@ func GooglePickerLayout(d web.LayoutData, v GooglePickerView) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var11 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var11 == nil {
-			templ_7745c5c3_Var11 = templ.NopComponent
+		templ_7745c5c3_Var12 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var12 == nil {
+			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = Layout(web.WithContent(d, GooglePickerPage(d, v))).Render(ctx, templ_7745c5c3_Buffer)

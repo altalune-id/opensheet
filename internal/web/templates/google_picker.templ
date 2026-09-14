@@ -3,13 +3,17 @@ package templates
 import "altalune.id/opensheet/internal/web"
 
 type GooglePickerView struct {
-	ProjectSlug  string
-	APIKey       string
-	AccessToken  string
-	ReturnURL    string
+	ProjectSlug string
+	APIKey      string
+	AppID       string
+	AccessToken string
+	ReturnURL   string
 }
 
 // GooglePickerPage opens Google's file chooser and hands the picked document back to the registry form.
+// NOTE: setAppId is what records the drive.file grant for the picked document. Without it the Picker still
+// returns a file id, but every later Sheets read of that id fails with 404.
+// https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
 // NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so an
 // OPENSHEET_UI_MODE=vendored deployment keeps one external runtime dependency on this page alone.
 // https://developers.google.com/drive/picker/guides/overview
@@ -23,6 +27,7 @@ templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 		<div
 			id="opensheet-picker"
 			data-api-key={ v.APIKey }
+			data-app-id={ v.AppID }
 			data-access-token={ v.AccessToken }
 			data-return-url={ v.ReturnURL }
 			class="mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm"
@@ -40,10 +45,13 @@ templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 			gapi.load('picker', function() {
 				var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
 				view.setIncludeFolders(true);
-				var picker = new google.picker.PickerBuilder()
+				var builder = new google.picker.PickerBuilder()
 					.setDeveloperKey(host.getAttribute('data-api-key'))
 					.setOAuthToken(host.getAttribute('data-access-token'))
-					.addView(view)
+					.addView(view);
+				var appId = host.getAttribute('data-app-id');
+				if (appId) builder.setAppId(appId);
+				var picker = builder
 					.setCallback(function(data) {
 						if (data.action !== google.picker.Action.PICKED) return;
 						var doc = data.docs[0];

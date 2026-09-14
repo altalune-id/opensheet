@@ -213,10 +213,10 @@ func (h *SheetHandler) PostPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Sheets.PurgeCache(sc.req.Context(), sh.ID); err != nil {
 		h.LogErr("web sheet: purge", err)
-		Render(w, sc.req, templates.SheetPurged(h.fragment(sc), "Could not purge the cache."))
+		Render(w, sc.req, templates.SheetPurged(h.fragment(sc), "Could not purge the cache.", ErrorRef(err)))
 		return
 	}
-	Render(w, sc.req, templates.SheetPurged(h.fragment(sc), ""))
+	Render(w, sc.req, templates.SheetPurged(h.fragment(sc), "", ""))
 }
 
 // GetPreview renders one read of the sheet, which may cost a Google round-trip.
@@ -228,7 +228,7 @@ func (h *SheetHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Read.Rows(sc.req.Context(), sh)
 	if err != nil {
 		h.LogErr("web sheet: preview", err)
-		Render(w, sc.req, templates.SheetPreviewFragment(h.fragment(sc), templates.SheetPreview{Failure: previewMessage(err)}))
+		Render(w, sc.req, templates.SheetPreviewFragment(h.fragment(sc), templates.SheetPreview{Failure: previewMessage(err), FailureCode: ErrorRef(err)}))
 		return
 	}
 	Render(w, sc.req, templates.SheetPreviewFragment(h.fragment(sc), previewOf(rows)))
@@ -303,7 +303,7 @@ func (h *SheetHandler) bulkPanel(sc projectScope, sp *spreadsheet.Spreadsheet) t
 	tabs, err := h.Spreadsheets.ListTabs(sc.req.Context(), sp.ID)
 	if err != nil {
 		h.LogErr("web sheet: bulk list tabs", err)
-		view.Unavailable = tabsMessage(err)
+		view.Unavailable, view.UnavailableCode = tabsMessage(err), ErrorRef(err)
 		return view
 	}
 	published := h.publishedTabs(sc, sp.ID)
@@ -373,7 +373,7 @@ func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, 
 	})
 	if err != nil {
 		h.LogErr("web sheet: bulk create", err)
-		row.Failure = publishMessage(i18n.TranslatorFrom(sc.req.Context()), err)
+		row.Failure, row.FailureCode = publishMessage(i18n.TranslatorFrom(sc.req.Context()), err), ErrorRef(err)
 		return
 	}
 	row.Published, row.Created, row.SheetID = true, true, sh.ID.String()

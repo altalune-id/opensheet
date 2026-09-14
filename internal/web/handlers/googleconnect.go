@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
@@ -132,6 +133,7 @@ func (h *GoogleConnectHandler) GetPicker(w http.ResponseWriter, r *http.Request)
 		templates.GooglePickerView{
 			ProjectSlug: sc.project.Slug,
 			APIKey:      h.Cfg.Google.Picker.APIKey,
+			AppID:       gworkspace.ProjectNumber(h.Cfg.Google.OAuth.ClientID),
 			AccessToken: token,
 			ReturnURL:   web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, "/spreadsheets")),
 		},

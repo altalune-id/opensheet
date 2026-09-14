@@ -128,8 +128,8 @@ templ KeySection(d web.LayoutData, v KeysView) {
 						if !k.Revoked {
 							<form
 								method="post"
-								action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/revoke")) }
-								hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/revoke") }
+								action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/"+k.ID+"/revoke")) }
+								hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/"+k.ID+"/revoke") }
 								hx-target="#keys-section"
 								hx-swap="outerHTML"
 								class="inline"
@@ -139,8 +139,8 @@ templ KeySection(d web.LayoutData, v KeysView) {
 						}
 						<form
 							method="post"
-							action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/delete")) }
-							hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/" + k.ID + "/delete") }
+							action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/keys/"+k.ID+"/delete")) }
+							hx-post={ d.ProjectPath(v.ProjectSlug, "/keys/"+k.ID+"/delete") }
 							hx-target="#keys-section"
 							hx-swap="outerHTML"
 							hx-confirm={ d.Tr("keys.delete_confirm") }

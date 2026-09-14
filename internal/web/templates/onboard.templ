@@ -7,19 +7,19 @@ import (
 )
 
 type OnboardView struct {
-	Error         string
-	ErrorCode string
-	FieldErrors   map[string]string
-	LocalAuth     bool
-	OIDCAuth      bool
-	OIDCFinalize  bool
-	Email         string
-	Name          string
-	OrgSlug       string
-	OrgName       string
-	ProjectSlug   string
-	ProjectName   string
-	SetupToken    string
+	Error        string
+	ErrorCode    string
+	FieldErrors  map[string]string
+	LocalAuth    bool
+	OIDCAuth     bool
+	OIDCFinalize bool
+	Email        string
+	Name         string
+	OrgSlug      string
+	OrgName      string
+	ProjectSlug  string
+	ProjectName  string
+	SetupToken   string
 }
 
 func fieldErr(m map[string]string, key string) string {

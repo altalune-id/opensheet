@@ -6,13 +6,13 @@ import (
 )
 
 type TodosView struct {
-	OrgSlug string
+	OrgSlug     string
 	ProjectID   string
 	ProjectSlug string
 	ProjectName string
 	Items       []TodoRow
 	Error       string
-	ErrorCode string
+	ErrorCode   string
 }
 
 // TodoList is the HTMX-swappable list section — POST to /todos targets #todo-list.

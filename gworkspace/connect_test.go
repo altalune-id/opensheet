@@ -314,3 +314,28 @@ func TestNewConnector_DefaultsToTheExchangeTimeout(t *testing.T) {
 		t.Fatalf("timeout = %v, want 1s", got)
 	}
 }
+
+func TestProjectNumber(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		clientID string
+		want     string
+	}{
+		{"web client id", "160924975100-38kk88psfv2g410jmjve6nkvp5neg732.apps.googleusercontent.com", "160924975100"},
+		{"bare prefix", "160924975100-abc", "160924975100"},
+		{"surrounding space", "  160924975100-abc.apps.googleusercontent.com  ", "160924975100"},
+		{"empty", "", ""},
+		{"no separator", "160924975100.apps.googleusercontent.com", ""},
+		{"non numeric prefix", "client-id.apps.googleusercontent.com", ""},
+		{"empty prefix", "-abc.apps.googleusercontent.com", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ProjectNumber(tt.clientID); got != tt.want {
+				t.Errorf("ProjectNumber(%q) = %q, want %q", tt.clientID, got, tt.want)
+			}
+		})
+	}
+}

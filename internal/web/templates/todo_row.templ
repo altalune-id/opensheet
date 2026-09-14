@@ -17,8 +17,8 @@ templ TodoRowFragment(d web.LayoutData, t TodoRow) {
 	<li id={ "todo-" + t.ID } class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
 		<form
 			method="post"
-			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/toggle")) }
-			hx-post={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/toggle") }
+			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/"+t.ID+"/toggle")) }
+			hx-post={ d.ProjectPath(t.ProjectSlug, "/todos/"+t.ID+"/toggle") }
 			hx-target={ "#todo-" + t.ID }
 			hx-swap="outerHTML"
 			class="inline"
@@ -40,8 +40,8 @@ templ TodoRowFragment(d web.LayoutData, t TodoRow) {
 		<span class={ "flex-1 text-sm", templ.KV("text-muted-foreground/70 line-through", t.Done), templ.KV("text-foreground", !t.Done) }>{ t.Title }</span>
 		<form
 			method="post"
-			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID + "/delete")) }
-			hx-delete={ d.ProjectPath(t.ProjectSlug, "/todos/" + t.ID) }
+			action={ templ.SafeURL(d.ProjectPath(t.ProjectSlug, "/todos/"+t.ID+"/delete")) }
+			hx-delete={ d.ProjectPath(t.ProjectSlug, "/todos/"+t.ID) }
 			hx-target={ "#todo-" + t.ID }
 			hx-swap="outerHTML"
 			class="inline"

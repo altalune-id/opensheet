@@ -47,15 +47,16 @@ type SheetView struct {
 }
 
 type SheetPreview struct {
-	Columns   []string
-	Rows      [][]string
-	Warnings  []string
-	ETag      string
-	FetchedAt string
-	Cached    bool
-	Stale     bool
-	Truncated bool
-	Failure   string
+	Columns     []string
+	Rows        [][]string
+	Warnings    []string
+	ETag        string
+	FetchedAt   string
+	Cached      bool
+	Stale       bool
+	Truncated   bool
+	Failure     string
+	FailureCode string
 }
 
 templ SheetSection(d web.LayoutData, v SheetsView) {
@@ -143,7 +144,7 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 				for _, s := range v.Rows {
 					<li>
-						<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + s.ID)) } class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/60">
+						<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/"+s.ID)) } class="group flex items-center gap-3 px-4 py-3 hover:bg-muted/60">
 							<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground group-hover:text-foreground">
 								@icons.Icon("table-2", "h-4 w-4")
 							</span>
@@ -246,7 +247,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 				<p class="mt-2 text-xs text-muted-foreground">{ d.Tr("sheets.url_key_hint") }</p>
 			}
 		</div>
-		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID)) } class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID)) } class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm">
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div>
 					<label for="sheet-edit-tab" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.tab") }</label>
@@ -271,8 +272,8 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 					<span id="purge-status" class="text-xs text-muted-foreground"></span>
 					<form
 						method="post"
-						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/purge")) }
-						hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/purge") }
+						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/purge")) }
+						hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/purge") }
 						hx-target="#purge-status"
 						hx-swap="innerHTML"
 						class="inline"
@@ -286,7 +287,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 			</div>
 			<div
 				id="sheet-preview"
-				hx-get={ d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/preview") }
+				hx-get={ d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/preview") }
 				hx-trigger="load"
 				hx-swap="innerHTML"
 				class="mt-4 text-sm text-muted-foreground"
@@ -294,7 +295,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 				{ d.Tr("common.loading") }
 			</div>
 		</div>
-		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/" + v.ID + "/delete")) } class="mt-6">
+		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/delete")) } class="mt-6">
 			<button type="submit" class={ dangerButton }>
 				@icons.Icon("trash-2", "h-4 w-4")
 				<span>{ d.Tr("sheets.delete") }</span>
@@ -311,7 +312,9 @@ templ SheetLayout(d web.LayoutData, v SheetView) {
 // data plane drops — a blank or duplicate header changes the JSON keys a consumer sees.
 templ SheetPreviewFragment(d web.LayoutData, v SheetPreview) {
 	if v.Failure != "" {
-		<p data-error="preview" class="text-sm text-red-600 dark:text-red-400">{ v.Failure }</p>
+		<div data-error="preview">
+			@ErrorBanner(d, v.Failure, v.FailureCode)
+		</div>
 	} else {
 		<div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 			if v.Cached {
@@ -363,9 +366,14 @@ templ SheetPreviewFragment(d web.LayoutData, v SheetPreview) {
 }
 
 // SheetPurged is the purge button's HTMX response.
-templ SheetPurged(d web.LayoutData, failure string) {
+templ SheetPurged(d web.LayoutData, failure, code string) {
 	if failure != "" {
-		<span data-error="purge" class="text-red-600 dark:text-red-400">{ failure }</span>
+		<span data-error="purge" class="text-red-600 dark:text-red-400">
+			{ failure }
+			if code != "" {
+				<span class="ml-1 font-mono">{ "(" + code + ")" }</span>
+			}
+		</span>
 	} else {
 		<span data-purged>{ d.Tr("sheets.purged") }</span>
 	}

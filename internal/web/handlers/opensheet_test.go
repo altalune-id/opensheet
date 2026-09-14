@@ -27,6 +27,7 @@ import (
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apikey"
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
@@ -45,6 +46,8 @@ const (
 	testFileID      = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 	testAccessToken = "picker-access-token"
 	testPickerKey   = "picker-api-key"
+	testProjectNum  = "160924975100"
+	testClientID    = testProjectNum + "-38kk88psfv2g410jmjve6nkvp5neg732.apps.googleusercontent.com"
 	serviceAccount  = `{"type":"service_account","project_id":"p","private_key_id":"k",` +
 		`"private_key":"-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----\n",` +
 		`"client_email":"sa@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}`
@@ -135,6 +138,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		fn(&caps)
 	}
 	base.Cfg.Google.Picker.APIKey = testPickerKey
+	base.Cfg.Google.OAuth.ClientID = testClientID
 
 	google := newFakeSheetsAPI(t)
 	clients := func(ctx context.Context, ts oauth2.TokenSource) (*gsheet.Client, error) {
@@ -398,6 +402,13 @@ func (f *fakeSheetsAPI) breakGoogle() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rowsStatus, f.metaStatus = http.StatusInternalServerError, http.StatusInternalServerError
+}
+
+// hideDocument mirrors a document the drive.file grant never covered: Google answers 404, not 403.
+func (f *fakeSheetsAPI) hideDocument() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rowsStatus, f.metaStatus = http.StatusNotFound, http.StatusNotFound
 }
 
 func (f *fakeSheetsAPI) dropRefreshToken() {
@@ -1082,6 +1093,19 @@ func TestGoogleConnectHandler_PickerRendersTheAPIKeyForAConnectedCredential(t *t
 	assert.Contains(t, body, "apis.google.com")
 }
 
+func TestGoogleConnectHandler_PickerSetsTheDriveAppIDForTheDriveFileGrant(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+
+	rec := f.do(t, http.MethodGet, f.pickerPath(t, c.ID), "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.Contains(t, body, "setAppId",
+		"without setAppId the Picker records no drive.file grant and every later read 404s")
+	assert.Contains(t, body, testProjectNum)
+}
+
 func TestGoogleConnectHandler_PickerRefusesAServiceAccountCredential(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
@@ -1125,6 +1149,50 @@ func TestSpreadsheetHandler_TabsReportsAGoogleFailure(t *testing.T) {
 	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/tabs"), "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `data-error="tabs"`)
+}
+
+func TestSpreadsheetHandler_TabsFailureCarriesTheErrorCode(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	f.Google.hideDocument()
+
+	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/tabs"), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `data-error="tabs"`)
+	assert.Contains(t, body, apperror.CodeGoogleNotFound,
+		"a user reporting this banner must be able to quote a code that maps to the log line")
+}
+
+func TestSheetHandler_BulkTabsUnavailableCarriesTheErrorCode(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	f.Google.hideDocument()
+
+	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `data-notice="bulk-tabs-unavailable"`)
+	assert.Contains(t, body, apperror.CodeGoogleNotFound)
+}
+
+func TestSheetHandler_PreviewFailureCarriesTheErrorCode(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	sh := f.seedSheet(t, sp.ID, "q1", sheet.VisibilityKey)
+	f.Google.hideDocument()
+
+	rec := f.do(t, http.MethodGet, f.path("/sheets/"+sh.ID.String()+"/preview"), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `data-error="preview"`)
+	assert.Contains(t, body, apperror.CodeGoogleNotFound)
 }
 
 func TestSheetHandler_UpdateWithABadTTLRendersTheDetailPage(t *testing.T) {
