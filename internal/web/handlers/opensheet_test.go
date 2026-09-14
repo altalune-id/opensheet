@@ -240,6 +240,12 @@ func (f *sheetsFixture) path(suffix string) string {
 	return "/orgs/" + f.Org.Slug + "/projects/" + f.Project.Slug + suffix
 }
 
+// dataURL mirrors SheetHandler.dataURL so the tests assert the same string the page renders.
+func (f *sheetsFixture) dataURL(slug string) string {
+	return strings.TrimRight(f.Cfg.HTTP.BaseURL, "/") +
+		web.DataPath(f.Cfg.HTTP.BasePath, f.Org.Slug, f.Project.Slug, slug)
+}
+
 func (f *sheetsFixture) mux(t *testing.T) *http.ServeMux {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -284,6 +290,15 @@ func (f *sheetsFixture) seedSpreadsheet(t *testing.T, credID uuid.UUID) *spreads
 func (f *sheetsFixture) seedSheet(t *testing.T, sprdID uuid.UUID, slug string, vis sheet.Visibility) *sheet.Sheet {
 	t.Helper()
 	sh, err := f.Sheets.Create(f.ctx(), sheet.CreateRequest{SpreadsheetID: sprdID, Slug: slug, Visibility: vis})
+	require.NoError(t, err)
+	return sh
+}
+
+func (f *sheetsFixture) seedWritableSheet(t *testing.T, sprdID uuid.UUID, slug string) *sheet.Sheet {
+	t.Helper()
+	sh, err := f.Sheets.Create(f.ctx(), sheet.CreateRequest{
+		SpreadsheetID: sprdID, Slug: slug, Visibility: sheet.VisibilityKey, Writable: true,
+	})
 	require.NoError(t, err)
 	return sh
 }
@@ -1193,6 +1208,67 @@ func TestSheetHandler_PreviewFailureCarriesTheErrorCode(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, `data-error="preview"`)
 	assert.Contains(t, body, apperror.CodeGoogleNotFound)
+}
+
+func TestSheetHandler_DetailListsEveryDataPlaneEndpoint(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	sh := f.seedWritableSheet(t, sp.ID, "tx")
+
+	rec := f.do(t, http.MethodGet, f.path("/sheets/"+sh.ID.String()), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Every route internal/data registers for a sheet slug must be discoverable here.
+	for _, want := range []string{
+		`data-method="GET" data-path="` + f.dataURL("tx") + `"`,
+		`data-method="POST" data-path="` + f.dataURL("tx") + `"`,
+		`data-method="GET" data-path="` + f.dataURL("tx") + `/rows/$ROW_ID"`,
+		`data-method="POST" data-path="` + f.dataURL("tx") + `/rows"`,
+		`data-method="POST" data-path="` + f.dataURL("tx") + `/rows/batch"`,
+		`data-method="PUT" data-path="` + f.dataURL("tx") + `/rows/$ROW_ID"`,
+		`data-method="PATCH" data-path="` + f.dataURL("tx") + `/rows/$ROW_ID"`,
+		`data-method="DELETE" data-path="` + f.dataURL("tx") + `/rows/$ROW_ID"`,
+		`data-method="GET" data-path="` + f.dataURL("tx") + `/capabilities"`,
+		`data-method="DELETE" data-path="` + f.dataURL("tx") + `/cache"`,
+	} {
+		assert.Contains(t, body, want)
+	}
+}
+
+func TestSheetHandler_DetailMarksWriteEndpointsOnANonWritableSheet(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	sh := f.seedSheet(t, sp.ID, "ro", sheet.VisibilityKey)
+
+	rec := f.do(t, http.MethodGet, f.path("/sheets/"+sh.ID.String()), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `data-endpoint-disabled`,
+		"write routes must be visibly unavailable until the sheet is made writable")
+	assert.Contains(t, body, `>PATCH</span>`,
+		"they stay listed so the writable toggle is discoverable")
+	assert.NotContains(t, body, `data-method="PATCH"`,
+		"but offer no curl to copy, since the call would be refused")
+}
+
+func TestSheetHandler_DetailShowsTheScopeEachEndpointNeeds(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	sp := f.seedSpreadsheet(t, c.ID)
+	sh := f.seedWritableSheet(t, sp.ID, "tx")
+
+	rec := f.do(t, http.MethodGet, f.path("/sheets/"+sh.ID.String()), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	for _, scope := range []string{authn.ScopeSheetsRead, authn.ScopeSheetsWrite, authn.ScopeCachePurge} {
+		assert.Contains(t, body, scope)
+	}
 }
 
 func TestSheetHandler_UpdateWithABadTTLRendersTheDetailPage(t *testing.T) {

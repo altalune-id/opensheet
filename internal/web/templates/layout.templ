@@ -134,14 +134,24 @@ templ copyScript() {
 				try { document.execCommand('copy'); flash(btn); } catch (e) {}
 				document.body.removeChild(ta);
 			}
+			// data-path is absolute when http.baseURL is configured and relative when it is not,
+			// so only prepend the origin to the relative form.
+			function endpointURL(btn) {
+				var path = btn.getAttribute('data-path') || '';
+				if (/^https?:\/\//.test(path)) return path;
+				return window.location.origin + path;
+			}
 			function curlFor(btn) {
 				var method = btn.getAttribute('data-method') || 'GET';
-				var url = window.location.origin + (btn.getAttribute('data-path') || '');
 				var parts = ['curl'];
 				if (method !== 'GET') parts.push('-X ' + method);
-				parts.push("'" + url + "'");
+				parts.push("'" + endpointURL(btn) + "'");
 				if (btn.getAttribute('data-public') !== '1') {
 					parts.push("-H 'Authorization: Bearer $OPENSHEET_API_KEY'");
+				}
+				if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+					parts.push("-H 'Content-Type: application/json'");
+					parts.push("-d '" + (btn.getAttribute('data-body') || '{"column": "value"}') + "'");
 				}
 				return parts.join(' \\\n  ');
 			}
@@ -257,8 +267,10 @@ templ orgSidebar(d web.LayoutData) {
 			@orgMenu(d, d.ActiveOrg.Slug)
 		} else {
 			<p class="mt-4 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.workspace") }</p>
-			<a href={ templ.SafeURL(d.Href("/orgs/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
-<span>{ d.Tr("nav.create_organization") }</span></a>
+			<a href={ templ.SafeURL(d.Href("/orgs/new")) } class={ orgItemClass(false) }>
+				@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+				<span>{ d.Tr("nav.create_organization") }</span>
+			</a>
 		}
 	</div>
 }
@@ -535,8 +547,10 @@ templ projectSidebar(d web.LayoutData) {
 			@projectMenu(d, d.ActiveProject.Slug)
 		} else {
 			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.project") }</p>
-			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
-<span>{ d.Tr("nav.create_project") }</span></a>
+			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>
+				@icons.Icon("plus", "h-4 w-4 text-muted-foreground")
+				<span>{ d.Tr("nav.create_project") }</span>
+			</a>
 		}
 	</div>
 }
