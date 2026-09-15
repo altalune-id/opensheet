@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/icons"
 )
@@ -238,8 +239,16 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 			<h2 class="text-sm font-semibold text-foreground">{ d.Tr("sheets.endpoints_heading") }</h2>
 			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("sheets.endpoints_subtitle") }</p>
 			<ul data-endpoints class="mt-3 divide-y divide-border/50 overflow-hidden rounded-md border border-border">
-				@endpointRow(d, v, "GET", v.DataURL, d.Tr("sheets.endpoint_rows"))
-				@endpointRow(d, v, "DELETE", v.DataURL+"/cache", d.Tr("sheets.endpoint_purge"))
+				@endpointRow(d, v, "GET", v.DataURL, d.Tr("sheets.endpoint_rows"), authn.ScopeSheetsRead, false)
+				@endpointRow(d, v, "GET", v.DataURL+"/rows/$ROW_ID", d.Tr("sheets.endpoint_row_by_id"), authn.ScopeSheetsRead, false)
+				@endpointRow(d, v, "GET", v.DataURL+"/capabilities", d.Tr("sheets.endpoint_capabilities"), authn.ScopeSheetsRead, false)
+				@endpointRow(d, v, "POST", v.DataURL, d.Tr("sheets.endpoint_append"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "POST", v.DataURL+"/rows", d.Tr("sheets.endpoint_create_row"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "POST", v.DataURL+"/rows/batch", d.Tr("sheets.endpoint_create_rows"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "PUT", v.DataURL+"/rows/$ROW_ID", d.Tr("sheets.endpoint_replace_row"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "PATCH", v.DataURL+"/rows/$ROW_ID", d.Tr("sheets.endpoint_patch_row"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "DELETE", v.DataURL+"/rows/$ROW_ID", d.Tr("sheets.endpoint_delete_row"), authn.ScopeSheetsWrite, true)
+				@endpointRow(d, v, "DELETE", v.DataURL+"/cache", d.Tr("sheets.endpoint_purge"), authn.ScopeCachePurge, false)
 			</ul>
 			if v.Public {
 				<p data-public-warning class="mt-2 text-xs text-red-700 dark:text-red-300">{ d.Tr("sheets.public_warning") }</p>
@@ -379,28 +388,45 @@ templ SheetPurged(d web.LayoutData, failure, code string) {
 	}
 }
 
-templ endpointRow(d web.LayoutData, v SheetView, method, path, hint string) {
-	<li class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+// endpointRow renders one data-plane route. needsWrite marks the routes the sheet's writable flag gates;
+// they stay listed when writes are off so the toggle that unlocks them is discoverable.
+templ endpointRow(d web.LayoutData, v SheetView, method, path, hint, scope string, needsWrite bool) {
+	<li
+		class={ "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5", templ.KV("opacity-50", needsWrite && !v.Writable) }
+		if needsWrite && !v.Writable {
+			data-endpoint-disabled
+		}
+	>
 		<span class={ "shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold", methodBadgeClass(method) }>{ method }</span>
 		<code class="min-w-0 flex-1 break-all font-mono text-xs text-foreground">{ path }</code>
-		<button
-			type="button"
-			data-copy-curl
-			data-method={ method }
-			data-path={ path }
-			data-public={ publicFlag(v.Public, method) }
-			class={ copyButton }
-		>
-			@icons.Icon("clipboard", "h-3.5 w-3.5")
-			<span data-copy-label>{ d.Tr("sheets.copy_curl") }</span>
-		</button>
+		<span class="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{ scope }</span>
+		if needsWrite && !v.Writable {
+			<span class="shrink-0 text-xs text-muted-foreground">{ d.Tr("sheets.endpoint_needs_writable") }</span>
+		} else {
+			<button
+				type="button"
+				data-copy-curl
+				data-method={ method }
+				data-path={ path }
+				data-public={ publicFlag(v.Public, method) }
+				class={ copyButton }
+			>
+				@icons.Icon("clipboard", "h-3.5 w-3.5")
+				<span data-copy-label>{ d.Tr("sheets.copy_curl") }</span>
+			</button>
+		}
 		<p class="w-full text-xs text-muted-foreground">{ hint }</p>
 	</li>
 }
 
 func methodBadgeClass(method string) string {
-	if method == "DELETE" {
+	switch method {
+	case "DELETE":
 		return "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+	case "POST":
+		return "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+	case "PUT", "PATCH":
+		return "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
 	}
 	return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
 }
