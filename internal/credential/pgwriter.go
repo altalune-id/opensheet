@@ -8,8 +8,6 @@ import (
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 const (
@@ -18,11 +16,7 @@ const (
 )
 
 func (s *postgresStore) Save(ctx context.Context, c *Credential) error {
-	tc, err := tenant.From(ctx)
-	if err != nil {
-		return err
-	}
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,11 +56,7 @@ func (s *postgresStore) Save(ctx context.Context, c *Credential) error {
 }
 
 func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {
-	tc, err := tenant.From(ctx)
-	if err != nil {
-		return err
-	}
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
 	}

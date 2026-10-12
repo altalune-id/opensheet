@@ -12,7 +12,7 @@ import (
 )
 
 func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Credential, error) {
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, _, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Credential, er
 }
 
 func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*Credential, error) {
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, _, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -54,19 +54,20 @@ func (r *pgSpreadsheetRow) toSpreadsheet() *Spreadsheet {
 }
 
 // NOTE: the spreadsheets row carries no created_by, so the resolved tenant.Context stays inside this helper.
-func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
+func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, tenant.Context, error) {
 	if tx, ok := pdb.CurrentTx(ctx); ok {
-		return tx, false, nil
+		tc, _ := tenant.From(ctx)
+		return tx, false, tc, nil
 	}
 	tc, err := tenant.From(ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, false, tenant.Context{}, err
 	}
 	tx, err := s.pc.BeginTenanted(ctx, tc)
 	if err != nil {
-		return nil, false, fmt.Errorf("spreadsheet.postgres: begin: %w", err)
+		return nil, false, tenant.Context{}, fmt.Errorf("spreadsheet.postgres: begin: %w", err)
 	}
-	return tx, true, nil
+	return tx, true, tc, nil
 }
 
 func (s *postgresStore) endTx(tx *sql.Tx, owned bool, err error) error {
