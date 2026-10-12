@@ -17,15 +17,35 @@ import (
 	"altalune.id/opensheet/internal/web/templates"
 )
 
-// googlePickerPath is one of the two Google routes that cannot sit under a project: Google requires
-// an exact-match redirect URI, so the tenant travels in a signed state instead of the path.
+// NOTE: cannot sit under a project because Google requires an exact-match redirect URI, so the tenant travels in a signed state.
 const googlePickerPath = "/credentials/google/picker"
 
-// driveFileScope is the only Drive scope opensheet requests.
 // https://developers.google.com/workspace/sheets/api/scopes
 const driveFileScope = "https://www.googleapis.com/auth/drive.file"
 
-var errPickerState = errors.New("web: picker state invalid")
+// PickerStateError reports a Picker state that is missing, tampered with or malformed.
+type PickerStateError struct{}
+
+func (*PickerStateError) Error() string { return "web: picker state invalid" }
+
+// IsPickerStateError reports whether err is a PickerStateError.
+func IsPickerStateError(err error) bool {
+	var target *PickerStateError
+	return errors.As(err, &target)
+}
+
+// DriveFileNotGrantedError reports a Google consent that dropped the drive.file scope.
+type DriveFileNotGrantedError struct{}
+
+func (*DriveFileNotGrantedError) Error() string {
+	return "web: google grant is missing the drive.file scope"
+}
+
+// IsDriveFileNotGrantedError reports whether err is a DriveFileNotGrantedError.
+func IsDriveFileNotGrantedError(err error) bool {
+	var target *DriveFileNotGrantedError
+	return errors.As(err, &target)
+}
 
 // GoogleConnectHandler owns the fixed Google callback and the Picker page.
 type GoogleConnectHandler struct {
@@ -40,15 +60,13 @@ func NewGoogleConnectHandler(d Deps, projects *project.Service, credentials *cre
 	return &GoogleConnectHandler{Deps: d, Credentials: credentials, Connect: connect}
 }
 
-// pickerState is the tenancy the Picker page acts on, signed because the path cannot carry it.
 type pickerState struct {
 	Org          string `json:"org"`
 	Project      string `json:"project"`
 	CredentialID string `json:"credential_id"`
 }
 
-// PickerStateFor signs the org, project and credential the Picker page will act on.
-// SECURITY: the state names a tenant, it does not grant one — the page re-checks membership through OrgScopeFor.
+// PickerStateFor signs the org, project and credential the Picker page will act on. SECURITY: the state names a tenant, it does not grant one — the page re-checks membership through RequireProject.
 func PickerStateFor(secret []byte, orgSlug, projectSlug string, credentialID uuid.UUID) string {
 	raw, err := json.Marshal(pickerState{Org: orgSlug, Project: projectSlug, CredentialID: credentialID.String()})
 	if err != nil {
@@ -60,18 +78,18 @@ func PickerStateFor(secret []byte, orgSlug, projectSlug string, credentialID uui
 func decodePickerState(secret []byte, signed string) (pickerState, error) {
 	value, err := web.VerifyCookie(secret, signed)
 	if err != nil {
-		return pickerState{}, errPickerState
+		return pickerState{}, &PickerStateError{}
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return pickerState{}, errPickerState
+		return pickerState{}, &PickerStateError{}
 	}
 	var st pickerState
 	if err := json.Unmarshal(raw, &st); err != nil {
-		return pickerState{}, errPickerState
+		return pickerState{}, &PickerStateError{}
 	}
 	if st.Org == "" || st.Project == "" {
-		return pickerState{}, errPickerState
+		return pickerState{}, &PickerStateError{}
 	}
 	return st, nil
 }
@@ -128,6 +146,7 @@ func (h *GoogleConnectHandler) GetPicker(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	widenCSP(w.Header(), googlePickerCSP())
 	Render(w, sc.req, templates.GooglePickerLayout(
 		h.LayoutForProject(sc.req, "Pick a spreadsheet · "+sc.project.Name, sc.org.Slug, sc.project, "spreadsheets"),
 		templates.GooglePickerView{
@@ -141,14 +160,13 @@ func (h *GoogleConnectHandler) GetPicker(w http.ResponseWriter, r *http.Request)
 }
 
 // Register wires the two fixed Google routes onto mux.
-func (h *GoogleConnectHandler) Register(mux *http.ServeMux) {
+func (h *GoogleConnectHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /credentials/google/callback", h.GetCallback)
 	mux.HandleFunc("GET /credentials/google/picker", h.GetPicker)
 }
 
-// browserToken mints the access token the Picker runs on.
 // SECURITY: only a google_oauth grant is eligible — a service-account token would let the browser act as the service account.
-func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc projectScope, credID uuid.UUID) (string, bool) {
+func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc ProjectScope, credID uuid.UUID) (string, bool) {
 	c, err := h.Credentials.ByID(sc.req.Context(), credID)
 	if err != nil {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Credential not found", "That credential no longer exists in this project.", err)
@@ -175,15 +193,13 @@ func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc projectSco
 	return token.AccessToken, true
 }
 
-// checkDriveFileGranted refuses a consent the user narrowed below what a read needs.
-// NOTE: Google echoes the granted scopes on the callback; an absent parameter is not treated as a
-// refusal, because that would turn a change in Google's response shape into a total connect outage.
+// NOTE: an absent granted-scopes parameter is not a refusal, so a change in Google's response shape cannot become a total connect outage.
 func checkDriveFileGranted(raw string) error {
 	granted := strings.Fields(raw)
 	if len(granted) == 0 || slices.Contains(granted, driveFileScope) {
 		return nil
 	}
-	return errors.New("web: google grant is missing the drive.file scope")
+	return &DriveFileNotGrantedError{}
 }
 
 func connectStatus(err error) int {

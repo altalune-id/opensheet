@@ -18,7 +18,6 @@ type removalFixture struct {
 	orgID uuid.UUID
 }
 
-// newRemovalFixture seeds one membership per role given and returns the ids in the same order.
 func newRemovalFixture(t *testing.T, roles ...org.Role) (*removalFixture, []uuid.UUID) {
 	t.Helper()
 	store := fakes.NewOrg()
@@ -35,7 +34,6 @@ func newRemovalFixture(t *testing.T, roles ...org.Role) (*removalFixture, []uuid
 	return f, ids
 }
 
-// as returns a context carrying actor as the caller, the way every transport supplies it.
 func (f *removalFixture) as(t *testing.T, actor uuid.UUID) context.Context {
 	t.Helper()
 	return tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, UserID: actor})
@@ -93,8 +91,7 @@ func TestRemoveMember_OwnerCanRemoveAPlainMember(t *testing.T) {
 	require.False(t, f.stillAMember(t, owner, member))
 }
 
-// TestRemoveMember_LastOwnerCannotBeRemoved is the invariant the two rules produce together:
-// only an owner removes an owner, and nobody removes themselves — so an org always keeps one owner.
+// TestRemoveMember_LastOwnerCannotBeRemoved is the invariant the two rules produce together: only an owner removes an owner, and nobody removes themselves — so an org always keeps one owner.
 func TestRemoveMember_LastOwnerCannotBeRemoved(t *testing.T) {
 	f, ids := newRemovalFixture(t, org.RoleOwner, org.RoleAdmin, org.RoleMember)
 	owner, admin, member := ids[0], ids[1], ids[2]

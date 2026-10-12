@@ -39,8 +39,9 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 		table: pgent.NewInvites(schema, tablePrefix),
 		// NOTE: RawStatement because go-jet has no builder for a set-returning function in FROM position.
 		byTokenHashStmt: "SELECT " + cols + " FROM " + fn + "resolve_invite_by_token_hash(#hash) i",
-		// NOTE: the outer ORDER BY is the guarantee — Postgres may inline the LANGUAGE sql SRF and drop its internal one.
-		pendingByEmailStmt: "SELECT " + cols + " FROM " + fn + "list_pending_invites_for_email(#email) i ORDER BY i.created_at ASC, i.id ASC",
+		// NOTE: a SELECT without ORDER BY has no guaranteed row order, whatever ordering the wrapper body carries.
+		pendingByEmailStmt: "SELECT " + cols + " FROM " + fn + "list_pending_invites_for_email(#email) i" +
+			" ORDER BY i.created_at ASC, i.id ASC",
 	}
 }
 
@@ -62,8 +63,8 @@ func (r *pgInviteRow) toInvite() *Invite {
 		Email:     r.Email,
 		Role:      Role(r.Role),
 		TokenHash: r.TokenHash,
-		ExpiresAt: r.ExpiresAt,
-		CreatedAt: r.CreatedAt,
+		ExpiresAt: r.ExpiresAt.UTC(),
+		CreatedAt: r.CreatedAt.UTC(),
 	}
 	if r.AcceptedAt != nil {
 		t := r.AcceptedAt.UTC()
@@ -126,7 +127,7 @@ func pgNullableTime(t *time.Time) any {
 
 func pgNullableTimeExpr(t *time.Time) postgres.TimestampzExpression {
 	if t == nil {
-		return postgres.TimestampzExp(postgres.NULL)
+		return pgent.NullTimestampz()
 	}
 	return postgres.TimestampzT(t.UTC())
 }

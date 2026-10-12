@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package org.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/gen/go/org/v1;orgv1";
+
+service MemberService {
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse) {
+    option (mcp.v1.tool) = {
+      name: "member_list"
+      description: "List the members of the calling credential's organization, with each member's name, email and role. Needs the organization-level members:read scope."
+    };
+  }
+}
+
+message Member {
+  string user_id = 1;
+  string email = 2;
+  string name = 3;
+  // Role is owner, admin or member
+  string role = 4;
+  google.protobuf.Timestamp joined_at = 5;
+}
+
+message ListMembersRequest {}
+
+message ListMembersResponse {
+  repeated Member members = 1;
+}

@@ -18,13 +18,18 @@ import (
 func newTestService(t *testing.T) (*project.Service, *fakes.Project) {
 	t.Helper()
 	store := fakes.NewProject()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
+	return project.NewService(store, discardLog(), failOnUnexpected(t)), store
+}
+
+func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func failOnUnexpected(t *testing.T) apperror.UnexpectedFunc {
+	t.Helper()
+	return func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
 		t.Helper()
 		t.Errorf("unexpected() called: %s: %v", msg, cause)
 		return nil
 	}
-	return project.NewService(store, log, unexpected), store
 }
 
 func tenantCtx(orgID, userID uuid.UUID) context.Context {

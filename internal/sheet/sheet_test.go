@@ -244,6 +244,26 @@ func TestRetab(t *testing.T) {
 			t.Errorf("Tab = %q, want empty", sh.Tab)
 		}
 	})
+	t.Run("forgets the header row of the tab it leaves", func(t *testing.T) {
+		sh := mustSheet(t, "prices", VisibilityKey, 0)
+		sh.HeaderColumns = []string{"id", "name"}
+
+		sh.Retab("Kamar")
+
+		if sh.HeaderColumns != nil {
+			t.Errorf("HeaderColumns = %#v, want nil until the new tab is read", sh.HeaderColumns)
+		}
+	})
+	t.Run("keeps the header row when the tab is unchanged", func(t *testing.T) {
+		sh := mustSheet(t, "prices", VisibilityKey, 0)
+		sh.HeaderColumns = []string{"id", "name"}
+
+		sh.Retab(sh.Tab)
+
+		if len(sh.HeaderColumns) != 2 {
+			t.Errorf("HeaderColumns = %#v, want the header row kept", sh.HeaderColumns)
+		}
+	})
 }
 
 func TestSetTTL(t *testing.T) {
@@ -425,8 +445,6 @@ func assertAppError(t *testing.T, ae *apperror.AppError, wantCode string) {
 	}
 }
 
-// The store column is cache_ttl_secs, so a value the aggregate accepts must be
-// representable in whole seconds — otherwise it silently truncates on save.
 func TestNew_RejectsSubSecondTTL(t *testing.T) {
 	for _, ttl := range []time.Duration{1500 * time.Millisecond, 2*time.Second + time.Nanosecond, 90*time.Second + 500*time.Millisecond} {
 		_, err := New(NewParams{OrgID: uuid.Must(uuid.NewV7()), ProjectID: uuid.Must(uuid.NewV7()), SpreadsheetID: uuid.Must(uuid.NewV7()), Tab: "Q1", Slug: "prices", Visibility: VisibilityKey, CacheTTL: ttl})

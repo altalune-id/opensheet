@@ -15,7 +15,7 @@ func TestValidateRoleIdent(t *testing.T) {
 		ok   bool
 	}{
 		{"simple", "opensheet_owner", true},
-		{"mixed case", "AltemplOwner", true},
+		{"mixed case", "OpensheetOwner", true},
 		{"leading underscore", "_owner", true},
 		{"empty", "", false},
 		{"nul byte", "own\x00er", false},

@@ -50,6 +50,7 @@ type Sheet struct {
 	ContractReason string
 	SoftDelete     bool
 	ContentDigest  string
+	HeaderColumns  []string
 }
 
 // NewParams is the input to New.
@@ -125,6 +126,9 @@ func (s *Sheet) Publish(vis Visibility) error {
 
 // Retab repoints the sheet at another tab; empty means the spreadsheet's first tab, resolved at read time.
 func (s *Sheet) Retab(tab string) {
+	if tab != s.Tab {
+		s.HeaderColumns = nil
+	}
 	s.Tab = tab
 	s.UpdatedAt = time.Now().UTC()
 }

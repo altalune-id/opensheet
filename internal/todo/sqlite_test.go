@@ -141,6 +141,70 @@ func TestSQLiteStore_SaveAndByID(t *testing.T) {
 	}
 }
 
+func seedAPIKey(t *testing.T, sqlDB *sql.DB, prefix string, orgID, projID uuid.UUID) uuid.UUID {
+	t.Helper()
+	keyID := uuid.New()
+	now := sqliteent.SQLiteTime(time.Now())
+	if _, err := sqlDB.Exec(
+		"INSERT INTO "+prefix+"api_keys (id, org_id, project_id, name, secret_hash, created_at) "+
+			"VALUES (?, ?, ?, 'ci', x'00', ?)",
+		keyID.String(), orgID.String(), projID.String(), now); err != nil {
+		t.Fatal(err)
+	}
+	return keyID
+}
+
+func TestSQLiteStore_Save_KeyAuthorPersistsNullUserID(t *testing.T) {
+	store, sqlDB, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+	keyID := seedAPIKey(t, sqlDB, config.Defaults().DB.TablePrefix, tc.OrgID, tc.ProjectID)
+
+	td, err := todo.New(tc.OrgID, tc.ProjectID, "minted by a key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	td.Author = todo.AuthorKey(keyID)
+	if err := store.Save(ctx, td); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.ByID(ctx, td.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Author.KeyID != keyID {
+		t.Errorf("Author.KeyID=%v want %v", got.Author.KeyID, keyID)
+	}
+	if got.Author.UserID != uuid.Nil {
+		t.Errorf("Author.UserID=%v want nil", got.Author.UserID)
+	}
+}
+
+func TestSQLiteStore_Save_UserAuthorPersistsNullKeyID(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	td, err := todo.New(tc.OrgID, tc.ProjectID, "written by a person")
+	if err != nil {
+		t.Fatal(err)
+	}
+	td.Author = todo.AuthorUser(tc.UserID)
+	if err := store.Save(ctx, td); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.ByID(ctx, td.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if got.Author.UserID != tc.UserID {
+		t.Errorf("Author.UserID=%v want %v", got.Author.UserID, tc.UserID)
+	}
+	if got.Author.KeyID != uuid.Nil {
+		t.Errorf("Author.KeyID=%v want nil", got.Author.KeyID)
+	}
+}
+
 func TestSQLiteStore_ByID_NotFound(t *testing.T) {
 	store, _, tc := newSQLiteStoreForTest(t)
 	ctx := tenant.Into(context.Background(), tc)
@@ -298,6 +362,44 @@ func TestSQLiteStore_MarkDoneOlderThan(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(open) != 1 || open[0].Title != "recent-open" {
+		t.Errorf("open todos after sweep: %+v", open)
+	}
+}
+
+func TestSQLiteStore_MarkDoneOlderThan_CutoffIsExclusiveOnAWholeSecond(t *testing.T) {
+	store, _, tc := newSQLiteStoreForTest(t)
+	ctx := tenant.Into(context.Background(), tc)
+
+	cutoff := time.Now().UTC().Add(-20 * 24 * time.Hour).Truncate(time.Second)
+
+	seed := func(title string, created time.Time) {
+		td, err := todo.New(tc.OrgID, tc.ProjectID, title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		td.CreatedAt = created
+		td.UpdatedAt = created
+		if err := store.Save(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("older-than-cutoff", cutoff.Add(-time.Second))
+	seed("exactly-at-cutoff", cutoff)
+
+	n, err := store.MarkDoneOlderThan(ctx, tc.OrgID, cutoff, 10)
+	if err != nil {
+		t.Fatalf("MarkDoneOlderThan: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("swept=%d want 1; stored rows and the cutoff must use the same padded rendering", n)
+	}
+
+	no := false
+	open, err := store.List(ctx, tc.OrgID, tc.ProjectID, todo.ListOpts{Done: &no})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Title != "exactly-at-cutoff" {
 		t.Errorf("open todos after sweep: %+v", open)
 	}
 }

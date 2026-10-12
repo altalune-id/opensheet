@@ -101,8 +101,7 @@ func TestWriter_AppendSendsRawAndInsertsRows(t *testing.T) {
 	}
 }
 
-// SECURITY: this is the control from spec 3.3. Under USER_ENTERED a caller could inject
-// =Payroll!A1 to read another tab, or =IMPORTXML to exfiltrate through Google's servers.
+// SECURITY: this is the control from spec 3.3. Under USER_ENTERED a caller could inject =Payroll!A1 to read another tab, or =IMPORTXML to exfiltrate through Google's servers.
 func TestWriter_FormulaPrefixesAreSentAsLiteralTextUnderRaw(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"=Payroll!A1", "+1+1", "-1-1", `=IMPORTXML("http://x/","//a")`} {

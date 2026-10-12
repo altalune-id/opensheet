@@ -2,22 +2,15 @@ package boot
 
 import (
 	"context"
-	"slices"
 
 	"github.com/google/uuid"
-	"golang.org/x/oauth2"
 
-	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/auth"
-	"altalune.id/opensheet/internal/credential"
-	"altalune.id/opensheet/internal/data"
+	"altalune.id/opensheet/internal/dataplane"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
-	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
-	"altalune.id/opensheet/internal/sheet"
-	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/user"
 )
 
@@ -94,19 +87,23 @@ func (s userStoreForAuth) Save(ctx context.Context, u *auth.UserRef) error {
 
 type orgStoreForOnboard struct{ store org.Store }
 
-func (s orgStoreForOnboard) BySlug(ctx context.Context, slug string) (*user.OrgRef, error) {
-	o, err := s.store.BySlug(ctx, slug)
+func (s orgStoreForOnboard) SystemOrg(ctx context.Context) (*user.OrgRef, error) {
+	o, err := s.store.SystemOrg(ctx)
 	if err != nil {
 		if org.IsNotFoundError(err) {
-			return nil, &user.SingletonOrgMissingError{Slug: slug}
+			return nil, &user.SingletonOrgMissingError{}
 		}
 		return nil, err
 	}
-	return &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt}, nil
+	return orgRefForOnboard(o), nil
 }
 
 func (s orgStoreForOnboard) Save(ctx context.Context, o *user.OrgRef) error {
-	return s.store.Save(ctx, &org.Org{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt})
+	return s.store.Save(ctx, &org.Org{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt, System: o.System})
+}
+
+func orgRefForOnboard(o *org.Org) *user.OrgRef {
+	return &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt, System: o.System}
 }
 
 func (s orgStoreForOnboard) ListForUser(ctx context.Context, userID uuid.UUID) ([]*user.OrgRef, error) {
@@ -116,7 +113,7 @@ func (s orgStoreForOnboard) ListForUser(ctx context.Context, userID uuid.UUID) (
 	}
 	out := make([]*user.OrgRef, 0, len(orgs))
 	for _, o := range orgs {
-		out = append(out, &user.OrgRef{ID: o.ID, Slug: o.Slug, Name: o.Name, OwnerID: o.OwnerID, CreatedAt: o.CreatedAt})
+		out = append(out, orgRefForOnboard(o))
 	}
 	return out, nil
 }
@@ -201,112 +198,47 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 	return out
 }
 
-type capsForSheet struct{ caps capabilities.Capabilities }
+type orgServiceForDataplane struct{ svc *org.Service }
 
-func (c capsForSheet) PublicSheetsEnabled() bool { return c.caps.PublicSheets }
-
-type spreadsheetsForSheet struct{ svc *spreadsheet.Service }
-
-func (s spreadsheetsForSheet) SourceFor(ctx context.Context, spreadsheetID uuid.UUID) (sheet.Source, error) {
-	sp, err := s.svc.ByID(ctx, spreadsheetID)
+func (s orgServiceForDataplane) BySlug(ctx context.Context, slug string) (dataplane.OrgRef, error) {
+	o, err := s.svc.BySlug(ctx, slug)
 	if err != nil {
-		return sheet.Source{}, err
+		return dataplane.OrgRef{}, err
 	}
-	return sheet.Source{GoogleFileID: sp.GoogleFileID, CredentialID: sp.CredentialID}, nil
+	return dataplane.OrgRef{ID: o.ID}, nil
 }
 
-type tokensForSheetRead struct{ svc *credential.Service }
+type projectServiceForDataplane struct{ svc *project.Service }
 
-func (t tokensForSheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
+func (s projectServiceForDataplane) BySlug(ctx context.Context, orgID uuid.UUID, slug string) (dataplane.ProjectRef, error) {
+	p, err := s.svc.BySlug(ctx, orgID, slug)
+	if err != nil {
+		return dataplane.ProjectRef{}, err
+	}
+	return dataplane.ProjectRef{ID: p.ID}, nil
 }
 
-type tokensForSheetWrite struct{ svc *credential.Service }
+type projectServiceForAPIKeys struct{ svc *project.Service }
 
-func (t tokensForSheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
-}
-
-type tokensForSpreadsheetRead struct{ svc *credential.Service }
-
-func (t tokensForSpreadsheetRead) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadOnly)
-}
-
-type tokensForSpreadsheetWrite struct{ svc *credential.Service }
-
-func (t tokensForSpreadsheetWrite) TokenSourceFor(ctx context.Context, id uuid.UUID) (oauth2.TokenSource, error) {
-	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
-}
-
-var (
-	_ sheet.TokenSources       = tokensForSheetRead{}
-	_ sheet.TokenSources       = tokensForSheetWrite{}
-	_ spreadsheet.TokenSources = tokensForSpreadsheetRead{}
-	_ spreadsheet.TokenSources = tokensForSpreadsheetWrite{}
-)
-
-type credentialsForSheet struct{ svc *credential.Service }
-
-func (c credentialsForSheet) MarkReauthNeeded(ctx context.Context, credentialID uuid.UUID) error {
-	_, err := c.svc.MarkReauthNeeded(ctx, credentialID)
-	return err
-}
-
-type sheetStoreForAPIKey struct{ store sheet.Store }
-
-func (s sheetStoreForAPIKey) IDsInProject(ctx context.Context, orgID, projectID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
-	sheets, err := s.store.List(ctx, orgID, projectID)
+// NOTE: tenant.WithOrg scopes the read to orgID, so the key service can check a grant before any project scope exists.
+func (s projectServiceForAPIKeys) ProjectIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	list, err := s.svc.List(tenant.WithOrg(ctx, orgID), orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]uuid.UUID, 0, len(ids))
-	for _, sh := range sheets {
-		if slices.Contains(ids, sh.ID) {
-			out = append(out, sh.ID)
-		}
+	ids := make([]uuid.UUID, 0, len(list))
+	for _, p := range list {
+		ids = append(ids, p.ID)
 	}
-	return out, nil
+	return ids, nil
 }
 
-func membershipsFor(orgs *org.Service) auth.MembershipsFn {
-	return func(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
-		list, err := orgs.List(ctx, userID)
-		if err != nil {
-			return nil, err
-		}
-		ids := make([]uuid.UUID, 0, len(list))
-		for _, o := range list {
-			ids = append(ids, o.ID)
-		}
-		return ids, nil
-	}
-}
+type projectSlugs struct{ svc *project.Service }
 
-type orgsForData struct{ svc *org.Service }
-
-func (o orgsForData) BySlug(ctx context.Context, slug string) (data.OrgRef, error) {
-	found, err := o.svc.BySlug(ctx, slug)
+func (s projectSlugs) SlugOf(ctx context.Context, projectID uuid.UUID) (string, error) {
+	p, err := s.svc.ByID(ctx, projectID)
 	if err != nil {
-		return data.OrgRef{}, err
+		return "", err
 	}
-	return data.OrgRef{ID: found.ID}, nil
-}
-
-type projectsForData struct{ svc *project.Service }
-
-func (p projectsForData) BySlug(ctx context.Context, orgID uuid.UUID, slug string) (data.ProjectRef, error) {
-	found, err := p.svc.BySlug(tenant.WithOrg(ctx, orgID), orgID, slug)
-	if err != nil {
-		return data.ProjectRef{}, err
-	}
-	return data.ProjectRef{ID: found.ID}, nil
-}
-
-type sheetsForData struct{ svc *sheet.Service }
-
-// NOTE: sheet.Service.BySlug reads org and project off the context, so the shim scopes them explicitly.
-func (s sheetsForData) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (*sheet.Sheet, error) {
-	scoped := tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID})
-	return s.svc.BySlug(scoped, slug)
+	return p.Slug, nil
 }

@@ -22,12 +22,11 @@ const (
 
 // Policy carries the deployment-mode inputs OnboardWorkflow needs.
 type Policy struct {
-	Mode             string
-	SingletonOrgSlug string
+	Mode string
 }
 
 type orgStore interface {
-	BySlug(ctx context.Context, slug string) (*OrgRef, error)
+	SystemOrg(ctx context.Context) (*OrgRef, error)
 	Save(ctx context.Context, o *OrgRef) error
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]*OrgRef, error)
 	MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*MembershipRef, error)
@@ -53,6 +52,7 @@ type OrgRef struct {
 	Name      string
 	OwnerID   uuid.UUID
 	CreatedAt time.Time
+	System    bool
 }
 
 // MembershipRef is the projection of a membership record.
@@ -136,13 +136,12 @@ func (w *OnboardWorkflow) Onboard(ctx context.Context, userID uuid.UUID, userEma
 }
 
 func (w *OnboardWorkflow) onboardSelfhosted(ctx context.Context, userID uuid.UUID, userEmail string) (OnboardResult, error) {
-	slug := w.policy.SingletonOrgSlug
-	o, err := w.orgs.BySlug(ctx, slug)
+	o, err := w.orgs.SystemOrg(ctx)
 	if err != nil {
 		if IsSingletonOrgMissingError(err) {
 			return OnboardResult{}, &SignupRequiredError{UserID: userID.String(), Email: userEmail}
 		}
-		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: singleton org lookup", err, slog.String("slug", slug))
+		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: singleton org lookup", err)
 	}
 
 	if _, mErr := w.orgs.MembershipOf(tenant.WithOrg(ctx, o.ID), o.ID, userID); mErr == nil {

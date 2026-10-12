@@ -8,15 +8,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"altalune.id/opensheet/authl"
-	"altalune.id/opensheet/internal/api"
+	"altalune.id/opensheet/httpclient"
 	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
-	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
@@ -25,16 +27,18 @@ import (
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
 	"altalune.id/opensheet/internal/platform/notify"
+	"altalune.id/opensheet/internal/platform/outbox"
+	"altalune.id/opensheet/internal/platform/queue"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
-	"altalune.id/opensheet/internal/sheet"
-	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/webhook"
 	"altalune.id/opensheet/logger"
 	"altalune.id/opensheet/mailer"
+	rootmcp "altalune.id/opensheet/mcp"
 	"altalune.id/opensheet/nanoid"
 	"altalune.id/opensheet/scheduler"
 	"altalune.id/opensheet/telemetry"
@@ -43,42 +47,55 @@ import (
 
 const setupTokenLen = 32
 
+const (
+	webhookTimeout       = 10 * time.Second
+	webhookResponseLimit = 64 << 10
+)
+
 // Server is the fully-wired dependency graph produced by BootServer.
 type Server struct {
 	Cfg      *config.Config
 	Caps     capabilities.Capabilities
 	Platform *platform.Kernel
 
-	Auth         *auth.Service
-	Users        *user.Service
-	Orgs         *org.Service
-	Projects     *project.Service
-	Todos        *todo.Service
-	Invites      *invite.Service
-	Onboards     *onboard.Service
-	Credentials  *credential.Service
-	Spreadsheets *spreadsheet.Service
-	Sheets       *sheet.Service
-	APIKeys      *apikey.Service
+	Auth     *auth.Service
+	Users    *user.Service
+	Orgs     *org.Service
+	Projects *project.Service
+	Todos    *todo.Service
+	Invites  *invite.Service
+	Onboards *onboard.Service
+	APIKeys  *apikey.Service
+	Webhooks *webhook.Service
+
+	opensheetServices
+	// SECURITY: StateSecret is the single resolved http.stateSecret — the HMAC key behind every signed cookie and OAuth state.
+	StateSecret []byte
 
 	Onboard *user.OnboardWorkflow
-	Read    *sheet.ReadWorkflow
-	Connect *credential.ConnectWorkflow
 
 	Onboarded bool
 
 	// SetupToken gates /onboard while onboarding is still required; empty once onboarded.
 	SetupToken string
 
-	// SECURITY: StateSecret is the single resolved http.stateSecret — the HMAC key behind every signed cookie and OAuth state.
-	StateSecret []byte
-
-	Web        http.Handler
-	API        *api.Server
-	Scheduler  *scheduler.Runner
+	Web http.Handler
+	// Routes are the app-route patterns the web handlers registered, taken from the mux.
+	Routes    []string
+	API       *controlplane.Server
+	MCP       *rootmcp.Server
+	Scheduler *scheduler.Runner
+	// Consumer runs this instance's queue jobs; nil when it does not run here.
+	Consumer *queue.Consumer
+	// Listener applies broadcasts to this instance; nil when the queue is disabled.
+	Listener   *queue.Listen
 	Health     *db.HealthMonitor
 	Supervisor *worker.Supervisor
 
+	// CompleteOnboarding clears the setup gate here and on every other running instance.
+	CompleteOnboarding func(ctx context.Context)
+
+	httpHandler  http.Handler
 	shutdownOTel func(context.Context) error
 }
 
@@ -92,11 +109,6 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	log := o.logger
 	if log == nil {
 		log = logger.New(cfg.Log)
-	}
-
-	stateSecret, err := resolveStateSecret(cfg, log)
-	if err != nil {
-		return nil, err
 	}
 
 	tp, mp, shutdownOTel, err := telemetry.Setup(ctx, cfg.Telemetry, log)
@@ -129,6 +141,13 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: tokens: %w", err)
 	}
 
+	stateSecret, err := resolveStateSecret(cfg, log)
+	if err != nil {
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+		return nil, err
+	}
+
 	altAuth, err := buildAltAuth(ctx, cfg, stateSecret)
 	if err != nil {
 		_ = pool.Close()
@@ -136,14 +155,14 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, fmt.Errorf("boot: authl: %w", err)
 	}
 
-	sealed, err := buildSealer(cfg, log)
+	sl, err := buildSealer(cfg, log)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
 		return nil, err
 	}
 
-	sessions := session.NewStore(cfg.DB, pool, sealed, reporter.Unexpected)
+	sessions := session.NewStore(cfg.DB, pool, sl, reporter.Unexpected)
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{
@@ -152,6 +171,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Log:      log,
 		Reporter: reporter,
 		Sessions: sessions,
+		Sealer:   sl,
 		Verifier: verifier,
 		Mail:     mail,
 		AltAuth:  altAuth,
@@ -160,7 +180,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Notify:   sinks,
 		Nano:     nanoid.New,
 		Caps:     caps,
-		Sealer:   sealed,
+		Outbox:   outbox.NewStore(cfg.DB, pool, pgConn),
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {
@@ -169,17 +189,49 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	}
 	kernel.AddCloser(pool)
 
-	svcs, err := buildServices(cfg, kernel, caps, stateSecret)
+	q, err := openQueue(ctx, cfg, kernel, reporter, log)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
+		return nil, fmt.Errorf("boot: queue: %w", err)
+	}
+	kernel.Queue = q
+	kernel.AddCloser(q)
+	abort := func() {
+		_ = q.Close()
+		_ = pool.Close()
+		_ = shutdownOTel(context.Background())
+	}
+
+	startSeq, err := q.BroadcastStartSeq(ctx)
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("boot: queue: %w", err)
+	}
+
+	required := &atomic.Bool{}
+
+	svcs, err := buildServices(cfg, kernel, caps)
+	if err != nil {
+		abort()
+		return nil, err
+	}
+	svcs.opensheetServices, err = buildOpensheetServices(cfg, kernel, caps, stateSecret)
+	if err != nil {
+		abort()
+		return nil, err
+	}
+
+	gate := &onboardingGate{required: required, queue: q, unexpected: reporter.Unexpected}
+	hs, ls, err := declareQueue(q, svcs, gate, log)
+	if err != nil {
+		abort()
 		return nil, err
 	}
 
 	onboarded, err := bootstrap(ctx, cfg, svcs.Users, svcs.Onboards, log)
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, fmt.Errorf("boot: bootstrap: %w", err)
 	}
 	caps.OnboardingRequired = !onboarded
@@ -200,109 +252,152 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	sup := worker.New(log)
 	sup.Register(health)
-	sup.Register(svcs.KeyUsage)
+	sup.Register(svcs.APIKeyUsage)
+	sup.Register(outbox.NewWorker(kernel.Outbox, dispatchDeliverer(o, kernel, svcs, log), orgEnumerator(cfg, kernel, log), log, o.dispatch))
 	if cfg.Telemetry.Metrics.Prometheus.Enabled {
 		sup.Register(telemetry.PrometheusWorker(cfg.Telemetry.Metrics.Prometheus, log))
 	}
 
 	var runner *scheduler.Runner
-	switch {
-	case !o.scheduler:
-		log.Info("boot: scheduler disabled by WithScheduler(false)")
-	case !cfg.Scheduler.Enabled:
-		log.Info("boot: scheduler disabled by scheduler.enabled=false")
-	default:
+	switch off := schedulerOff(o, cfg); off {
+	case "":
 		r, sErr := buildScheduler(cfg, kernel, svcs, log)
 		if sErr != nil {
-			_ = pool.Close()
-			_ = shutdownOTel(context.Background())
+			abort()
 			return nil, sErr
 		}
 		runner = r
 		sup.Register(runner)
+	default:
+		log.Info("boot: scheduler disabled by " + off)
 	}
 
 	if o.schedulerOnly && runner == nil {
-		disabledBy := "scheduler.enabled=false"
-		if !o.scheduler {
-			disabledBy = "WithScheduler(false)"
-		}
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, fmt.Errorf(
-			"boot: --scheduler-only requires the scheduler, but the scheduler is disabled by %s", disabledBy)
+			"boot: --scheduler-only requires the scheduler, but the scheduler is disabled by %s", schedulerOff(o, cfg))
+	}
+
+	var consumer *queue.Consumer
+	switch off := consumerOff(o, cfg); off {
+	case "":
+		c, cErr := queue.NewConsumer(ctx, q, hs)
+		if cErr != nil {
+			abort()
+			return nil, fmt.Errorf("boot: queue consumer: %w", cErr)
+		}
+		consumer = c
+		sup.Register(consumer)
+	default:
+		log.Info("boot: consumer disabled by " + off)
+	}
+
+	if o.consumerOnly && consumer == nil {
+		abort()
+		return nil, fmt.Errorf(
+			"boot: --consumer-only requires the queue, but the queue is disabled by %s", consumerOff(o, cfg))
+	}
+
+	var listener *queue.Listen
+	if cfg.Queue.Enabled {
+		l, lErr := queue.NewListener(q, ls, startSeq)
+		if lErr != nil {
+			abort()
+			return nil, fmt.Errorf("boot: queue listener: %w", lErr)
+		}
+		listener = l
+		sup.Register(listener)
 	}
 
 	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
+	dataHandler := buildDataHandler(cfg, caps, log, svcs)
+
+	mcpSurf, err := buildMCPSurface(ctx, cfg, log, svcs, apiSrv)
+	if err != nil {
+		abort()
+		return nil, err
+	}
 
 	bundle, defaultLoc, err := buildI18nBundle(cfg)
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, err
 	}
 
 	healthOK := health.Ready
 
-	required := &atomic.Bool{}
 	required.Store(!onboarded)
 
 	var setup string
 	if required.Load() {
 		t, tErr := setupToken(cfg)
 		if tErr != nil {
-			_ = pool.Close()
-			_ = shutdownOTel(context.Background())
+			abort()
 			return nil, fmt.Errorf("boot: setup token: %w", tErr)
 		}
 		setup = t
 		logSetupToken(cfg, log, setup)
 	}
 
-	dataHandler := buildDataHandler(cfg, caps, log, svcs)
-
-	webHandler, err := buildWebHandler(cfg, kernel, caps, log, reporter, healthOK,
-		svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Todos, svcs.Invites, svcs, svcs.Onboards, required, setup,
-		apiHandler, dataHandler, bundle, defaultLoc, stateSecret)
+	webHandler, webRoutes, err := buildWebHandler(webHandlerDeps{
+		Cfg:         cfg,
+		Kernel:      kernel,
+		Caps:        caps,
+		Log:         log,
+		Reporter:    reporter,
+		HealthOK:    healthOK,
+		Services:    svcs,
+		Required:    required,
+		OnComplete:  gate.Complete,
+		SetupToken:  setup,
+		StateSecret: stateSecret,
+		APIHandler:  apiHandler,
+		DataHandler: dataHandler,
+		MCP:         mcpSurf,
+		Bundle:      bundle,
+		DefaultLoc:  defaultLoc,
+	})
 	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
+		abort()
 		return nil, err
 	}
 
 	httpHandler := webHandler
-	if o.schedulerOnly {
+	if o.schedulerOnly || o.consumerOnly {
 		httpHandler = healthOnlyHandler(cfg, healthOK)
 	}
 	sup.Register(worker.HTTP("http", cfg.HTTP.Addr, httpHandler, log))
 
 	return &Server{
-		Cfg:          cfg,
-		Caps:         caps,
-		Platform:     kernel,
-		Auth:         svcs.Auth,
-		Users:        svcs.Users,
-		Orgs:         svcs.Orgs,
-		Projects:     svcs.Projects,
-		Todos:        svcs.Todos,
-		Invites:      svcs.Invites,
-		Onboards:     svcs.Onboards,
-		Credentials:  svcs.Credentials,
-		Spreadsheets: svcs.Spreadsheets,
-		Sheets:       svcs.Sheets,
-		APIKeys:      svcs.APIKeys,
-		Onboarded:    onboarded,
-		SetupToken:   setup,
-		StateSecret:  stateSecret,
-		Onboard:      svcs.Onboard,
-		Read:         svcs.Read,
-		Connect:      svcs.Connect,
-		Web:          webHandler,
-		API:          apiSrv,
-		Scheduler:    runner,
-		Health:       health,
-		Supervisor:   sup,
-		shutdownOTel: shutdownOTel,
+		Cfg:                cfg,
+		Caps:               caps,
+		Platform:           kernel,
+		Auth:               svcs.Auth,
+		Users:              svcs.Users,
+		Orgs:               svcs.Orgs,
+		Projects:           svcs.Projects,
+		Todos:              svcs.Todos,
+		Invites:            svcs.Invites,
+		Onboards:           svcs.Onboards,
+		APIKeys:            svcs.APIKeys,
+		Webhooks:           svcs.Webhooks,
+		opensheetServices:  svcs.opensheetServices,
+		StateSecret:        stateSecret,
+		Onboarded:          onboarded,
+		Routes:             webRoutes,
+		SetupToken:         setup,
+		Onboard:            svcs.Onboard,
+		Web:                webHandler,
+		API:                apiSrv,
+		MCP:                mcpSurf.Server,
+		Scheduler:          runner,
+		Consumer:           consumer,
+		Listener:           listener,
+		CompleteOnboarding: gate.Complete,
+		httpHandler:        httpHandler,
+		Health:             health,
+		Supervisor:         sup,
+		shutdownOTel:       shutdownOTel,
 	}, nil
 }
 
@@ -327,6 +422,22 @@ func (s *Server) Close() error {
 	return errors.Join(errs...)
 }
 
+func dispatchDeliverer(o *options, k *platform.Kernel, svcs *Services, log *slog.Logger) outbox.Deliverer {
+	if o.deliverer != nil {
+		return o.deliverer
+	}
+	return webhook.NewDeliverer(svcs.WebhookStore, k.Sealer, webhookHTTPClient(), log)
+}
+
+// SECURITY: otel stays off — otelhttp records url.full including the query string, and webhook.Deliver's own span is the only trace a delivery should leave.
+func webhookHTTPClient() *http.Client {
+	return httpclient.New(
+		httpclient.WithTimeout(webhookTimeout),
+		httpclient.WithResponseBodyLimit(webhookResponseLimit),
+		httpclient.WithOtel(false),
+	)
+}
+
 func setupToken(cfg *config.Config) (string, error) {
 	if t := strings.TrimSpace(cfg.Onboard.SetupToken); t != "" {
 		return t, nil
@@ -341,8 +452,7 @@ func logSetupToken(cfg *config.Config, log *slog.Logger, token string) {
 			slog.String("url", url))
 		return
 	}
-	// SECURITY: the token rides in the url value because logger.Redact masks any attr key matching /token/,
-	// which would otherwise leave a fresh deployment unable to reach its own setup page.
+	// SECURITY: the token rides in the url value because logger.Redact masks any attr key matching /token/.
 	log.Info("boot: setup required — open this one-time onboarding URL",
 		slog.String("url", url+"?token="+token),
 	)
@@ -361,7 +471,7 @@ func oidcRedirectURL(cfg *config.Config) string {
 		strings.TrimRight(cfg.HTTP.BaseURL, "/"), cfg.HTTP.BasePath)
 }
 
-func buildAltAuth(ctx context.Context, cfg *config.Config, stateSecret []byte) (*authl.Client, error) {
+func buildAltAuth(ctx context.Context, cfg *config.Config, secret []byte) (*authl.Client, error) {
 	if cfg.OIDC.Issuer == "" {
 		return nil, nil
 	}
@@ -376,12 +486,11 @@ func buildAltAuth(ctx context.Context, cfg *config.Config, stateSecret []byte) (
 		RememberLastUser: true,
 		LastUserCookie:   "opensheet_last_user",
 		StateCookie:      "opensheet_oidc_state",
-		StateSecret:      stateSecret,
+		StateSecret:      secret,
 		CookieSecure:     cfg.HTTP.CookieSecure,
 	})
 }
 
-// SECURITY: belt-and-braces — config.Validate already rejects a bad value; boot refuses to key a cookie on one regardless.
 func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	if cfg.HTTP.StateSecret != "" {
 		return config.ParseStateSecret(cfg.HTTP.StateSecret)
@@ -411,4 +520,58 @@ func mailerConfig(m config.MailConfig) mailer.Config {
 			MaxAttempts: m.Resend.MaxAttempts,
 		},
 	}
+}
+
+func openQueue(ctx context.Context, cfg *config.Config, k *platform.Kernel, reporter *apperror.Reporter, log *slog.Logger) (*queue.Client, error) {
+	if !cfg.Queue.Enabled {
+		return queue.Disabled(log), nil
+	}
+	return queue.Connect(ctx, queue.Options{
+		URL:            cfg.Queue.URL,
+		Token:          cfg.Queue.Token,
+		User:           cfg.Queue.User,
+		Password:       cfg.Queue.Password,
+		ConnectTimeout: cfg.Queue.ConnectTimeout,
+		Log:            log,
+		Tracer:         k.Tracer,
+		Meter:          k.Meter,
+		Unexpected:     reporter.Unexpected,
+	})
+}
+
+func declareQueue(q *queue.Client, svcs *Services, gate *onboardingGate, log *slog.Logger) ([]queue.Handler, []queue.Listener, error) {
+	providers := consumerProviders(svcs, log)
+	if err := assertConsumerWiring(providers); err != nil {
+		return nil, nil, err
+	}
+	hs := handlersOf(publishedConsumers(providers))
+	ls := listenersOf(slices.Concat(listenerProviders(gate), opensheetListenerProviders(svcs)))
+	if err := q.Declare(jobsOf(hs), broadcastsOf(ls)); err != nil {
+		return nil, nil, fmt.Errorf("boot: queue declare: %w", err)
+	}
+	return hs, ls, nil
+}
+
+func schedulerOff(o *options, cfg *config.Config) string {
+	switch {
+	case !o.scheduler:
+		return "WithScheduler(false)"
+	case o.consumerOnly:
+		return "--consumer-only"
+	case !cfg.Scheduler.Enabled:
+		return "scheduler.enabled=false"
+	}
+	return ""
+}
+
+func consumerOff(o *options, cfg *config.Config) string {
+	switch {
+	case !o.consumer:
+		return "WithConsumer(false)"
+	case o.schedulerOnly:
+		return "--scheduler-only"
+	case !cfg.Queue.Enabled:
+		return "queue.enabled=false"
+	}
+	return ""
 }

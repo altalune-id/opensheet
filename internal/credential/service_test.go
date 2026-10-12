@@ -661,8 +661,7 @@ func TestService_TokenSourceFor_ReturnsNoPlaintext(t *testing.T) {
 	}
 }
 
-// NOTE: serviceAccountJSON's private_key is base64 of an ASCII string, so nothing ever parses it and
-// a scope test built on it would pass while proving nothing. This one is a real RSA key.
+// NOTE: serviceAccountJSON's private_key is base64 of an ASCII string, so nothing ever parses it and a scope test built on it would pass while proving nothing. This one is a real RSA key.
 func realServiceAccountJSON(t *testing.T) []byte {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -689,8 +688,7 @@ func realServiceAccountJSON(t *testing.T) []byte {
 	return out
 }
 
-// NOTE: this proves a write scope is accepted, not that it reaches the minted token — asserting
-// propagation needs a seam credential does not have.
+// NOTE: this proves a write scope is accepted, not that it reaches the minted token — asserting propagation needs a seam credential does not have.
 func TestService_TokenSourceForAcceptsAWriteScope(t *testing.T) {
 	scopes := []struct {
 		name  string

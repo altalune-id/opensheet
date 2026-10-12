@@ -89,15 +89,24 @@ func (s *sqliteStore) Save(ctx context.Context, i *Invite) error {
 			sqliteent.SQLiteTime(i.CreatedAt),
 		).
 		ON_CONFLICT(s.table.ID).
+		// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping an attacker-supplied row id from updating another org's row.
 		DO_UPDATE(sqlite.SET(
 			s.table.Email.SET(sqlite.String(i.Email)),
 			s.table.Role.SET(sqlite.String(string(i.Role))),
 			s.table.TokenHash.SET(sqlite.String(i.TokenHash)),
 			s.table.ExpiresAt.SET(sqlite.String(sqliteent.SQLiteTime(i.ExpiresAt))),
 			s.table.AcceptedAt.SET(sqliteNullableTimeExpr(i.UsedAt)),
-		))
-	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+		).WHERE(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	res, err := stmt.ExecContext(ctx, s.db)
+	if err != nil {
 		return fmt.Errorf("invite.sqlite.Save: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("invite.sqlite.Save: rows affected: %w", err)
+	}
+	if n == 0 {
+		return &NotFoundError{ID: i.ID.String()}
 	}
 	return nil
 }
@@ -218,7 +227,7 @@ func sqliteNullableTimeArg(t *time.Time) any {
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
-		return sqlite.StringExp(sqlite.NULL)
+		return sqliteent.NullText()
 	}
 	return sqlite.String(sqliteent.SQLiteTime(*t))
 }

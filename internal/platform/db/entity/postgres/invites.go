@@ -16,8 +16,7 @@ type Invites struct {
 	InvitedBy  postgres.ColumnString
 	CreatedAt  postgres.ColumnTimestampz
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewInvites builds the invites binding.
@@ -36,20 +35,18 @@ func NewInvites(schema, tablePrefix string) *Invites {
 		invitedBy  = postgres.StringColumn("invited_by")
 		createdAt  = postgres.TimestampzColumn("created_at")
 		all        = postgres.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt}
-		mutable    = postgres.ColumnList{orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy}
 	)
 	return &Invites{
-		Table:          postgres.NewTable(schema, tablePrefix+"invites", "invites", all...),
-		ID:             id,
-		OrgID:          orgID,
-		Email:          email,
-		Role:           role,
-		TokenHash:      tokenHash,
-		ExpiresAt:      expiresAt,
-		AcceptedAt:     acceptedAt,
-		InvitedBy:      invitedBy,
-		CreatedAt:      createdAt,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"invites", "invites", all...),
+		ID:         id,
+		OrgID:      orgID,
+		Email:      email,
+		Role:       role,
+		TokenHash:  tokenHash,
+		ExpiresAt:  expiresAt,
+		AcceptedAt: acceptedAt,
+		InvitedBy:  invitedBy,
+		CreatedAt:  createdAt,
+		AllColumns: all,
 	}
 }

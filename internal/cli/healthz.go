@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -14,20 +15,15 @@ import (
 )
 
 func newHealthzCmd() *cobra.Command {
-	var (
-		url     string
-		timeout time.Duration
-	)
+	var timeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:     "healthz",
 		Short:   "Probe /healthz and exit 0 iff the server is healthy",
 		GroupID: "meta",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			target := url
-			if target == "" {
-				target = defaultHealthzURL(cmd.Context())
-			}
+			target := healthzTarget(cmd)
 			res, doErr := httpclient.NewProber(httpclient.WithTimeout(timeout)).Probe(cmd.Context(), target)
 			elapsed := res.Elapsed.Truncate(time.Millisecond)
 			status := res.StatusCode
@@ -63,13 +59,32 @@ func newHealthzCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&url, "url", "",
-		"health URL to probe (default: http://127.0.0.1:<http.addr port>/healthz)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Second, "request timeout")
 	return cmd
 }
 
 var errHealthzUnhealthy = errors.New("healthz: unhealthy")
+
+// NOTE: diverges from spec #2.5 — only an explicit --url/OPENSHEET_URL moves the probe, because a liveness probe must reach the listener beside it, never a saved profile or http.baseURL.
+func healthzTarget(cmd *cobra.Command) string {
+	base := explicitURL(cmd)
+	if base == "" {
+		return defaultHealthzURL(cmd.Context())
+	}
+	return withHealthzPath(base)
+}
+
+func withHealthzPath(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	if u.Path != "" && u.Path != "/" {
+		return base
+	}
+	u.Path = "/healthz"
+	return u.String()
+}
 
 func defaultHealthzURL(ctx context.Context) string {
 	addr := ":5150"

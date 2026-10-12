@@ -195,9 +195,7 @@ func (e *NotWritableError) Error() string {
 	return fmt.Sprintf("spreadsheet: not writable: id=%s google_file_id=%q", e.ID, e.GoogleFileID)
 }
 
-// ToAppError maps NotWritableError to a PermissionDenied envelope.
-// SECURITY: the envelope names no Google file id — the data plane's tabs routes are addressed by our
-// UUID, so the id is not the caller's to learn. Error() keeps it for the log and the span.
+// ToAppError maps NotWritableError to a PermissionDenied envelope. SECURITY: the envelope names no Google file id — the data plane's tabs routes are addressed by our UUID, so the id is not the caller's to learn. Error() keeps it for the log and the span.
 func (e *NotWritableError) ToAppError() *apperror.AppError {
 	meta := map[string]string{}
 	if e.ID != "" {

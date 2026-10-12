@@ -5,635 +5,385 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
-type harness struct {
-	svc    *apikey.Service
-	store  *fakes.APIKey
-	sheets *fakes.APIKeySheets
-	unex   *int
-	ctx    context.Context //nolint:containedctx // fixture convenience
-	tc     tenant.Context
-}
-
-func newHarness(t *testing.T) *harness {
+func newAPIKeyService(t *testing.T, store apikey.Store) (*apikey.Service, *int) {
 	t.Helper()
-	store := fakes.NewAPIKey()
-	sheets := fakes.NewAPIKeySheets()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	calls := 0
 	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
 		calls++
 		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return &harness{
-		svc:    apikey.NewService(store, log, unexpected, sheets),
-		store:  store,
-		sheets: sheets,
-		unex:   &calls,
-		ctx:    tenant.Into(context.Background(), tc),
-		tc:     tc,
-	}
+	return apikey.NewService(store, apikey.Scheme{}, fakes.PermissiveMembers(), fakes.NewOrgProjects(), log, unexpected), &calls
 }
 
-func (h *harness) mint(t *testing.T, scopes ...string) (*apikey.APIKey, string) {
+func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
 	t.Helper()
-	if len(scopes) == 0 {
-		scopes = []string{authn.ScopeSheetsRead}
-	}
-	k, plaintext, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: "ci", Scopes: scopes})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
+	return tenant.Into(t.Context(), tc), tc
+}
+
+func mintSeeded(t *testing.T, store *fakes.APIKey, orgID, projectID uuid.UUID, scopes []string, resourceIDs []uuid.UUID) (*apikey.APIKey, string) {
+	t.Helper()
+	k, plaintext, err := apikey.Scheme{}.Mint(orgID, projectID, "test key", scopes, resourceIDs, nil, time.Now().UTC())
+	require.NoError(t, err)
+	store.Seed(k)
 	return k, plaintext
 }
 
-func TestService_Create(t *testing.T) {
-	t.Run("happy path returns a usable plaintext once", func(t *testing.T) {
-		h := newHarness(t)
-		k, plaintext := h.mint(t)
+func mustAuthenticate(t *testing.T) session.Principal {
+	t.Helper()
+	store := fakes.NewAPIKey()
+	_, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
 
-		if !plaintextPattern.MatchString(plaintext) {
-			t.Fatalf("plaintext = %q, want the osk wire format", plaintext)
-		}
-		if k.OrgID != h.tc.OrgID || k.ProjectID != h.tc.ProjectID {
-			t.Error("the key was not minted in the caller's tenant scope")
-		}
-		if h.store.Len() != 1 {
-			t.Errorf("stored keys = %d, want 1", h.store.Len())
-		}
-		if *h.unex != 0 {
-			t.Errorf("unexpected() called %d times", *h.unex)
-		}
-
-		got, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate with the returned plaintext: %v", err)
-		}
-		if got.ID != k.ID {
-			t.Error("Authenticate resolved a different key")
-		}
-	})
-	t.Run("off-catalog scope is rejected", func(t *testing.T) {
-		h := newHarness(t)
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: "ci", Scopes: []string{"sheets:destroy"}})
-		if !apikey.IsInvalidScopeError(err) {
-			t.Fatalf("err = %v, want *InvalidScopeError", err)
-		}
-		app, ok := apperror.AsAppError(err)
-		if !ok || app.Code() != apperror.CodeAPIKeyInvalidScope {
-			t.Errorf("AsAppError = (%v, %v), want KEY003", app, ok)
-		}
-		if *h.unex != 0 {
-			t.Error("an invariant failure must not route through unexpected")
-		}
-	})
-	t.Run("empty scope set is rejected", func(t *testing.T) {
-		h := newHarness(t)
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: "ci"})
-		if !apikey.IsInvalidScopeError(err) {
-			t.Fatalf("err = %v, want *InvalidScopeError", err)
-		}
-	})
-	t.Run("invalid name is rejected", func(t *testing.T) {
-		h := newHarness(t)
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: " ", Scopes: []string{authn.ScopeSheetsRead}})
-		if !apikey.IsInvalidNameError(err) {
-			t.Fatalf("err = %v, want *InvalidNameError", err)
-		}
-	})
-	t.Run("past expiry is rejected", func(t *testing.T) {
-		h := newHarness(t)
-		past := time.Now().UTC().Add(-time.Hour)
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, ExpiresAt: &past,
-		})
-		if !apikey.IsInvalidExpiryError(err) {
-			t.Fatalf("err = %v, want *InvalidExpiryError", err)
-		}
-	})
-	t.Run("sheet in the caller's project is granted", func(t *testing.T) {
-		h := newHarness(t)
-		sheetID := uuid.New()
-		h.sheets.Add(h.tc.OrgID, h.tc.ProjectID, sheetID)
-
-		k, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, SheetIDs: []uuid.UUID{sheetID},
-		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if len(k.SheetIDs) != 1 || k.SheetIDs[0] != sheetID {
-			t.Fatalf("SheetIDs = %v, want [%v]", k.SheetIDs, sheetID)
-		}
-	})
-	t.Run("sheet outside the caller's project is rejected", func(t *testing.T) {
-		h := newHarness(t)
-		foreign := uuid.New()
-		h.sheets.Add(h.tc.OrgID, uuid.New(), foreign)
-
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, SheetIDs: []uuid.UUID{foreign},
-		})
-		if !apikey.IsUnknownSheetError(err) {
-			t.Fatalf("err = %v, want *UnknownSheetError", err)
-		}
-		if h.store.Len() != 0 {
-			t.Error("a rejected grant must not persist a key")
-		}
-	})
-	t.Run("missing tenant scope is refused", func(t *testing.T) {
-		h := newHarness(t)
-		_, _, err := h.svc.Create(context.Background(), apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead},
-		})
-		if !tenant.IsMissingError(err) {
-			t.Fatalf("err = %v, want tenant.MissingError", err)
-		}
-	})
-	t.Run("sheet lookup failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		h.sheets.Err = errors.New("boom")
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, SheetIDs: []uuid.UUID{uuid.New()},
-		})
-		if err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
-	t.Run("unwired sheets dependency routes through unexpected", func(t *testing.T) {
-		calls := 0
-		unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
-			calls++
-			return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
-				&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
-		}
-		svc := apikey.NewService(fakes.NewAPIKey(), slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected, nil)
-		ctx := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
-		if _, _, err := svc.Create(ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, SheetIDs: []uuid.UUID{uuid.New()},
-		}); err == nil {
-			t.Fatal("want an error")
-		}
-		if calls != 1 {
-			t.Errorf("unexpected() called %d times, want 1", calls)
-		}
-	})
-	t.Run("store save failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		h.store.SaveErr = errors.New("boom")
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: "ci", Scopes: []string{authn.ScopeSheetsRead}})
-		if err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
-	t.Run("prefix collision bubbles AlreadyExistsError", func(t *testing.T) {
-		h := newHarness(t)
-		h.store.SaveErr = &apikey.AlreadyExistsError{Field: "key_prefix", Value: "x"}
-		_, _, err := h.svc.Create(h.ctx, apikey.CreateRequest{Name: "ci", Scopes: []string{authn.ScopeSheetsRead}})
-		if !apikey.IsAlreadyExistsError(err) {
-			t.Fatalf("err = %v, want *AlreadyExistsError", err)
-		}
-		if *h.unex != 0 {
-			t.Error("a typed store error must not route through unexpected")
-		}
-	})
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	p, err := auth.Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+	return p
 }
 
-func TestService_List_CarriesNoSecretMaterial(t *testing.T) {
-	h := newHarness(t)
-	h.mint(t)
-	h.mint(t)
+func TestAuthenticateRejectsForeignShape(t *testing.T) {
+	store := fakes.NewAPIKey()
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
 
-	got, err := h.svc.List(h.ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("List len = %d, want 2", len(got))
-	}
-	for _, k := range got {
-		if len(k.SecretHash) != 0 {
-			t.Errorf("key %s carries secret material in a List result", k.ID)
-		}
-		if k.KeyPrefix == "" {
-			t.Errorf("key %s lost its public prefix", k.ID)
-		}
-	}
+	_, err := auth.Authenticate(t.Context(), "aaa.bbb.ccc")
+	assert.True(t, authn.IsUnauthorizedError(err), "got %T: %v", err, err)
+	assert.False(t, store.BySecretHashCalled, "a JWT-shaped credential must never reach the store")
 }
 
-func TestService_List(t *testing.T) {
-	t.Run("another project's keys are not listed", func(t *testing.T) {
-		h := newHarness(t)
-		h.mint(t)
+func TestAuthenticateRejectsRevokedKey(t *testing.T) {
+	store := fakes.NewAPIKey()
+	k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
+	now := time.Now().UTC()
+	k.RevokedAt = &now
+	store.Seed(k)
 
-		other := tenant.Into(context.Background(), tenant.Context{OrgID: h.tc.OrgID, ProjectID: uuid.New()})
-		got, err := h.svc.List(other)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(got) != 0 {
-			t.Errorf("List len = %d, want 0", len(got))
-		}
-	})
-	t.Run("missing tenant scope is refused", func(t *testing.T) {
-		h := newHarness(t)
-		if _, err := h.svc.List(context.Background()); !tenant.IsMissingError(err) {
-			t.Fatalf("err = %v, want tenant.MissingError", err)
-		}
-	})
-	t.Run("store failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		h.store.ListErr = errors.New("boom")
-		if _, err := h.svc.List(h.ctx); err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	_, err := auth.Authenticate(t.Context(), plaintext)
+	assert.True(t, authn.IsUnauthorizedError(err), "got %T: %v", err, err)
+	assert.False(t, apikey.IsNotFoundError(err), "a revoked key must not surface as a distinguishable NotFoundError")
 }
 
-func TestService_Revoke(t *testing.T) {
-	t.Run("revoked key stops authenticating and keeps its hash", func(t *testing.T) {
-		h := newHarness(t)
-		k, plaintext := h.mint(t)
+func TestAuthenticateCollapsesStoreOutage(t *testing.T) {
+	store := fakes.NewAPIKey()
+	store.BySecretHashErr = errors.New("connection refused")
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
 
-		got, err := h.svc.Revoke(h.ctx, k.ID)
-		if err != nil {
-			t.Fatalf("Revoke: %v", err)
-		}
-		if got.RevokedAt == nil {
-			t.Fatal("RevokedAt is nil after Revoke")
-		}
-		if _, err := h.svc.Authenticate(context.Background(), plaintext); !apikey.IsUnauthorizedError(err) {
-			t.Fatalf("err = %v, want *UnauthorizedError", err)
-		}
-
-		stored, err := h.store.ByPrefix(context.Background(), k.KeyPrefix)
-		if err != nil {
-			t.Fatalf("ByPrefix: %v", err)
-		}
-		if len(stored.SecretHash) == 0 {
-			t.Fatal("Revoke blanked the stored secret hash")
-		}
-	})
-	t.Run("a second Revoke is idempotent", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		first, err := h.svc.Revoke(h.ctx, k.ID)
-		if err != nil {
-			t.Fatalf("Revoke: %v", err)
-		}
-		second, err := h.svc.Revoke(h.ctx, k.ID)
-		if err != nil {
-			t.Fatalf("second Revoke: %v", err)
-		}
-		if !second.RevokedAt.Equal(*first.RevokedAt) {
-			t.Errorf("RevokedAt moved from %v to %v", first.RevokedAt, second.RevokedAt)
-		}
-	})
-	t.Run("another org's key is not found", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		foreign := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
-		if _, err := h.svc.Revoke(foreign, k.ID); !apikey.IsNotFoundError(err) {
-			t.Fatalf("err = %v, want *NotFoundError", err)
-		}
-	})
-	t.Run("another project in the same org is not found", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		sibling := tenant.Into(context.Background(), tenant.Context{OrgID: h.tc.OrgID, ProjectID: uuid.New()})
-		if _, err := h.svc.Revoke(sibling, k.ID); !apikey.IsNotFoundError(err) {
-			t.Fatalf("err = %v, want *NotFoundError", err)
-		}
-	})
-	t.Run("unknown id is not found", func(t *testing.T) {
-		h := newHarness(t)
-		if _, err := h.svc.Revoke(h.ctx, uuid.New()); !apikey.IsNotFoundError(err) {
-			t.Fatalf("err = %v, want *NotFoundError", err)
-		}
-	})
-	t.Run("missing tenant scope is refused", func(t *testing.T) {
-		h := newHarness(t)
-		if _, err := h.svc.Revoke(context.Background(), uuid.New()); !tenant.IsMissingError(err) {
-			t.Fatalf("err = %v, want tenant.MissingError", err)
-		}
-	})
-	t.Run("lookup failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		h.store.ByIDErr = errors.New("boom")
-		if _, err := h.svc.Revoke(h.ctx, uuid.New()); err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
-	t.Run("save failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		h.store.SaveErr = errors.New("boom")
-		if _, err := h.svc.Revoke(h.ctx, k.ID); err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
+	_, err := auth.Authenticate(t.Context(), apikey.DefaultPrefix+"whatever")
+	assert.True(t, authn.IsUnauthorizedError(err), "a store outage must collapse to the same opaque error as a bad credential, got %T: %v", err, err)
 }
 
-func TestService_Delete(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		if err := h.svc.Delete(h.ctx, k.ID); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if h.store.Len() != 0 {
-			t.Errorf("stored keys = %d, want 0", h.store.Len())
-		}
-	})
-	t.Run("another org's key is not found", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		foreign := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
-		if err := h.svc.Delete(foreign, k.ID); !apikey.IsNotFoundError(err) {
-			t.Fatalf("err = %v, want *NotFoundError", err)
-		}
-		if h.store.Len() != 1 {
-			t.Error("a cross-org Delete removed the key")
-		}
-	})
-	t.Run("unknown id is not found", func(t *testing.T) {
-		h := newHarness(t)
-		if err := h.svc.Delete(h.ctx, uuid.New()); !apikey.IsNotFoundError(err) {
-			t.Fatalf("err = %v, want *NotFoundError", err)
-		}
-	})
-	t.Run("missing tenant scope is refused", func(t *testing.T) {
-		h := newHarness(t)
-		if err := h.svc.Delete(context.Background(), uuid.New()); !tenant.IsMissingError(err) {
-			t.Fatalf("err = %v, want tenant.MissingError", err)
-		}
-	})
-	t.Run("store failure routes through unexpected", func(t *testing.T) {
-		h := newHarness(t)
-		k, _ := h.mint(t)
-		h.store.DeleteErr = errors.New("boom")
-		if err := h.svc.Delete(h.ctx, k.ID); err == nil {
-			t.Fatal("want an error")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
-		}
-	})
-}
-
-// TestService_Authenticate_EveryFailurePathIsByteIdentical is the point of the module: telling an
-// attacker which guesses were closer is the leak, so all five rejections must be indistinguishable.
-func TestService_Authenticate_EveryFailurePathIsByteIdentical(t *testing.T) {
-	collect := func(t *testing.T, name string, fn func(h *harness) error) (string, string) {
-		t.Helper()
-		h := newHarness(t)
-		err := fn(h)
-		if err == nil {
-			t.Fatalf("%s: want an error", name)
-		}
-		if !apikey.IsUnauthorizedError(err) {
-			t.Fatalf("%s: err = %#v, want *UnauthorizedError", name, err)
-		}
-		if *h.unex != 0 {
-			t.Fatalf("%s: an authentication failure must not route through unexpected", name)
-		}
-		app, ok := apperror.AsAppError(err)
-		if !ok {
-			t.Fatalf("%s: err does not convert to an AppError", name)
-		}
-		return err.Error(), app.Code()
-	}
-
-	paths := []struct {
-		name string
-		fn   func(h *harness) error
+func TestAuthenticateReturnsAnIdenticalErrorForEveryRejectionCause(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, store *fakes.APIKey) string
 	}{
-		{name: "missing", fn: func(h *harness) error {
-			_, err := h.svc.Authenticate(context.Background(), "")
-			return err
-		}},
-		{name: "malformed", fn: func(h *harness) error {
-			_, err := h.svc.Authenticate(context.Background(), "osk_nope_nope")
-			return err
-		}},
-		{name: "unknown", fn: func(h *harness) error {
-			_, plaintext := h.mint(t)
-			h.store = fakes.NewAPIKey()
-			svc := apikey.NewService(h.store, slog.New(slog.NewTextHandler(io.Discard, nil)),
-				func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
-					*h.unex++
-					return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
-						&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
-				}, h.sheets)
-			_, err := svc.Authenticate(context.Background(), plaintext)
-			return err
-		}},
-		{name: "wrong secret", fn: func(h *harness) error {
-			k, _ := h.mint(t)
-			_, err := h.svc.Authenticate(context.Background(), "osk_"+k.KeyPrefix+"_"+strings.Repeat("A", 43))
-			return err
-		}},
-		{name: "revoked", fn: func(h *harness) error {
-			k, plaintext := h.mint(t)
-			if _, rErr := h.svc.Revoke(h.ctx, k.ID); rErr != nil {
-				t.Fatalf("Revoke: %v", rErr)
-			}
-			_, err := h.svc.Authenticate(context.Background(), plaintext)
-			return err
-		}},
-		{name: "expired", fn: func(h *harness) error {
-			soon := time.Now().UTC().Add(50 * time.Millisecond)
-			k, plaintext, cErr := h.svc.Create(h.ctx, apikey.CreateRequest{
-				Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, ExpiresAt: &soon,
-			})
-			if cErr != nil {
-				t.Fatalf("Create: %v", cErr)
-			}
-			expired := soon.Add(-time.Hour)
-			k.ExpiresAt = &expired
-			if sErr := h.store.Save(context.Background(), k); sErr != nil {
-				t.Fatalf("Save: %v", sErr)
-			}
-			_, err := h.svc.Authenticate(context.Background(), plaintext)
-			return err
-		}},
+		{
+			name:  "empty credential",
+			setup: func(*testing.T, *fakes.APIKey) string { return "" },
+		},
+		{
+			name:  "malformed credential",
+			setup: func(*testing.T, *fakes.APIKey) string { return "not-a-credential" },
+		},
+		{
+			name:  "jwt shaped credential",
+			setup: func(*testing.T, *fakes.APIKey) string { return "aaa.bbb.ccc" },
+		},
+		{
+			name:  "well-formed unknown key",
+			setup: func(*testing.T, *fakes.APIKey) string { return apikey.DefaultPrefix + "unknown" },
+		},
+		{
+			name: "revoked key",
+			setup: func(t *testing.T, store *fakes.APIKey) string {
+				k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
+				now := time.Now().UTC()
+				k.RevokedAt = &now
+				store.Seed(k)
+				return plaintext
+			},
+		},
+		{
+			name: "expired key",
+			setup: func(t *testing.T, store *fakes.APIKey) string {
+				k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
+				past := time.Now().UTC().Add(-time.Hour)
+				k.ExpiresAt = &past
+				store.Seed(k)
+				return plaintext
+			},
+		},
+		{
+			name: "store outage",
+			setup: func(_ *testing.T, store *fakes.APIKey) string {
+				store.BySecretHashErr = errors.New("connection refused")
+				return apikey.DefaultPrefix + "whatever"
+			},
+		},
 	}
 
-	var messages, codesSeen []string
-	for _, p := range paths {
-		msg, code := collect(t, p.name, p.fn)
-		messages = append(messages, msg)
-		codesSeen = append(codesSeen, code)
-	}
-	for i := range messages {
-		if messages[i] != messages[0] {
-			t.Errorf("%s message = %q, want %q — the rejection is distinguishable",
-				paths[i].name, messages[i], messages[0])
-		}
-		if codesSeen[i] != apperror.CodeAPIKeyUnauthorized {
-			t.Errorf("%s code = %q, want KEY004", paths[i].name, codesSeen[i])
-		}
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := fakes.NewAPIKey()
+			raw := tt.setup(t, store)
+			auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
 
-// TestService_Authenticate_UnknownPrefixPaysTheDummyHashCost pins the timing-oracle defence: the
-// unknown-prefix path must run the same hash-and-compare a hit runs.
-func TestService_Authenticate_UnknownPrefixPaysTheDummyHashCost(t *testing.T) {
-	h := newHarness(t)
-	_, plaintext := h.mint(t)
-
-	if got := h.svc.DummyVerifications(); got != 0 {
-		t.Fatalf("DummyVerifications = %d, want 0 before any miss", got)
-	}
-	if _, err := h.svc.Authenticate(context.Background(), plaintext); err != nil {
-		t.Fatalf("Authenticate: %v", err)
-	}
-	if got := h.svc.DummyVerifications(); got != 0 {
-		t.Errorf("DummyVerifications = %d after a hit, want 0", got)
-	}
-
-	unknown := "osk_" + strings.Repeat("0", 16) + "_" + strings.Repeat("A", 43)
-	if _, err := h.svc.Authenticate(context.Background(), unknown); !apikey.IsUnauthorizedError(err) {
-		t.Fatalf("err = %v, want *UnauthorizedError", err)
-	}
-	if got := h.svc.DummyVerifications(); got != 1 {
-		t.Fatalf("DummyVerifications = %d after one miss, want exactly 1 — "+
-			"0 means the compare was skipped, 2 means the dummy hash matched", got)
-	}
-
-	if _, err := h.svc.Authenticate(context.Background(), unknown); !apikey.IsUnauthorizedError(err) {
-		t.Fatalf("err = %v, want *UnauthorizedError", err)
-	}
-	if got := h.svc.DummyVerifications(); got != 2 {
-		t.Errorf("DummyVerifications = %d after two misses, want 2", got)
-	}
-}
-
-func TestService_Authenticate(t *testing.T) {
-	t.Run("a resolved key carries its own tenant identity", func(t *testing.T) {
-		h := newHarness(t)
-		k, plaintext := h.mint(t)
-		got, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate: %v", err)
-		}
-		if got.OrgID != k.OrgID || got.ProjectID != k.ProjectID {
-			t.Error("the resolved key does not carry the minting tenant")
-		}
-	})
-	t.Run("another org's scope is refused", func(t *testing.T) {
-		h := newHarness(t)
-		_, plaintext := h.mint(t)
-		foreign := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New()})
-		if _, err := h.svc.Authenticate(foreign, plaintext); !apikey.IsUnauthorizedError(err) {
-			t.Fatalf("err = %v, want *UnauthorizedError", err)
-		}
-	})
-	t.Run("its own org's scope is honoured", func(t *testing.T) {
-		h := newHarness(t)
-		k, plaintext := h.mint(t)
-		got, err := h.svc.Authenticate(h.ctx, plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate: %v", err)
-		}
-		if got.ID != k.ID {
-			t.Error("Authenticate resolved a different key")
-		}
-	})
-	t.Run("the resolved key carries no secret material out", func(t *testing.T) {
-		h := newHarness(t)
-		_, plaintext := h.mint(t)
-		got, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate: %v", err)
-		}
-		if len(got.SecretHash) != 0 {
-			t.Error("Authenticate handed the secret digest to its caller")
-		}
-	})
-	t.Run("the granted sheet set survives the round trip", func(t *testing.T) {
-		h := newHarness(t)
-		sheetID := uuid.New()
-		h.sheets.Add(h.tc.OrgID, h.tc.ProjectID, sheetID)
-		_, plaintext, err := h.svc.Create(h.ctx, apikey.CreateRequest{
-			Name: "ci", Scopes: []string{authn.ScopeSheetsRead}, SheetIDs: []uuid.UUID{sheetID},
+			p, err := auth.Authenticate(t.Context(), raw)
+			assert.Equal(t, &authn.UnauthorizedError{}, err, "every rejection must be the same opaque error")
+			assert.Equal(t, session.Principal{}, p, "a rejection must not leak a partial principal")
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate: %v", err)
-		}
-		if !got.Allows(authn.ScopeSheetsRead, sheetID) {
-			t.Error("Allows = false for the granted sheet")
-		}
-		if got.Allows(authn.ScopeSheetsRead, uuid.New()) {
-			t.Error("Allows = true for a sheet outside the grant")
+	}
+}
+
+func TestAuthorizeChecksOrgProjectAndScope(t *testing.T) {
+	store := fakes.NewAPIKey()
+	orgID, projectID := uuid.New(), uuid.New()
+	k, plaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+
+	t.Run("wrong org denies", func(t *testing.T) {
+		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, uuid.New(), projectID, uuid.New())
+		assert.Error(t, err)
+	})
+	t.Run("wrong project denies", func(t *testing.T) {
+		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, orgID, uuid.New(), uuid.New())
+		assert.Error(t, err)
+	})
+	t.Run("missing scope denies", func(t *testing.T) {
+		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, uuid.New())
+		assert.True(t, authn.IsInsufficientScopeError(err), "got %T: %v", err, err)
+	})
+	t.Run("matching grant admits", func(t *testing.T) {
+		p, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, orgID, projectID, uuid.New())
+		require.NoError(t, err)
+		assert.Equal(t, k.OrgID, p.ActiveOrgID)
+		assert.Equal(t, session.SourceAPIKey, p.Source)
+	})
+}
+
+func TestAuthorizeProjectRefusesRestrictedKey(t *testing.T) {
+	store := fakes.NewAPIKey()
+	orgID, projectID, resourceID := uuid.New(), uuid.New(), uuid.New()
+	_, restrictedPlaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, []uuid.UUID{resourceID})
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+
+	_, err := auth.AuthorizeProject(t.Context(), restrictedPlaintext, authn.ScopeSheetsRead, orgID, projectID)
+	assert.True(t, authn.IsInsufficientScopeError(err), "a resource-restricted key must not pass a project-wide check, got %T: %v", err, err)
+
+	_, unrestrictedPlaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
+	p, err := auth.AuthorizeProject(t.Context(), unrestrictedPlaintext, authn.ScopeSheetsRead, orgID, projectID)
+	require.NoError(t, err)
+	assert.Equal(t, session.SourceAPIKey, p.Source)
+}
+
+func TestAuthorizeRefusesAnUnlistedResource(t *testing.T) {
+	store := fakes.NewAPIKey()
+	orgID, projectID, listed := uuid.New(), uuid.New(), uuid.New()
+	_, plaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsWrite}, []uuid.UUID{listed})
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+
+	_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, listed)
+	require.NoError(t, err, "the listed resource must stay reachable")
+
+	_, err = auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, uuid.New())
+	assert.True(t, authn.IsInsufficientScopeError(err), "an unlisted resource must be refused, got %T: %v", err, err)
+}
+
+// SECURITY: the control plane and the MCP surface bound a key by the grant its principal carries, so the principal must carry the key's project and resources.
+func TestPrincipalCarriesTheKeysGrant(t *testing.T) {
+	store := fakes.NewAPIKey()
+	projectID, resourceID := uuid.New(), uuid.New()
+	_, plaintext := mintSeeded(t, store, uuid.New(), projectID, []string{authn.ScopeSheetsRead}, []uuid.UUID{resourceID})
+
+	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{projectID}, p.ProjectIDs)
+	assert.Equal(t, []uuid.UUID{resourceID}, p.ResourceIDs)
+}
+
+func TestPrincipalCarriesNoUserIDAndNoSecret(t *testing.T) {
+	// SECURITY: a key is not a person. A key principal must never carry a UserID, or a
+	// membership check elsewhere will treat it as a signed-in human.
+	p := mustAuthenticate(t)
+	if p.UserID != uuid.Nil {
+		t.Fatal("key principal carries a UserID")
+	}
+	if p.Source != session.SourceAPIKey {
+		t.Fatalf("Source = %v, want SourceAPIKey", p.Source)
+	}
+}
+
+func TestPrincipalCarriesTheKeyID(t *testing.T) {
+	store := fakes.NewAPIKey()
+	k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
+
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	p, err := auth.Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+	assert.Equal(t, k.ID, p.KeyID, "principalFor must carry the minted key's id so downstream writers can attribute rows to it")
+}
+
+func TestService_MintListRevoke(t *testing.T) {
+	store := fakes.NewAPIKey()
+	svc, unex := newAPIKeyService(t, store)
+	ctx, tc := tenantCtx(t)
+
+	k, plaintext, err := svc.Mint(ctx, "ci key", []string{authn.ScopeSheetsRead}, nil, in(time.Hour))
+	require.NoError(t, err)
+	assert.NotEmpty(t, plaintext)
+	assert.Equal(t, tc.OrgID, k.OrgID)
+	assert.Equal(t, tc.ProjectID, k.ProjectID)
+	assert.Zero(t, *unex)
+
+	list, err := svc.List(ctx, tc.ProjectID)
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+
+	require.NoError(t, svc.Revoke(ctx, k.ID))
+	got, err := store.ByID(ctx, k.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, got.RevokedAt)
+}
+
+func TestService_MintRejectsUnknownScope(t *testing.T) {
+	store := fakes.NewAPIKey()
+	svc, unex := newAPIKeyService(t, store)
+	ctx, _ := tenantCtx(t)
+
+	_, _, err := svc.Mint(ctx, "bad", []string{"not-a-scope"}, nil, in(time.Hour))
+	assert.True(t, apikey.IsUnknownScopeError(err), "got %T: %v", err, err)
+	assert.Zero(t, *unex)
+}
+
+func TestService_RevokeMissingKeyIsTypedNotFound(t *testing.T) {
+	store := fakes.NewAPIKey()
+	svc, unex := newAPIKeyService(t, store)
+	ctx, _ := tenantCtx(t)
+
+	err := svc.Revoke(ctx, uuid.New())
+	assert.True(t, apikey.IsNotFoundError(err), "got %T: %v", err, err)
+	assert.Zero(t, *unex)
+}
+
+// TestService_RevokeRefusesKeyFromAnotherProjectInSameOrg proves Revoke enforces tenant scope with the same *NotFoundError a missing id produces.
+func TestService_RevokeRefusesKeyFromAnotherProjectInSameOrg(t *testing.T) {
+	store := fakes.NewAPIKey()
+	svc, unex := newAPIKeyService(t, store)
+	orgID, projA, projB := uuid.New(), uuid.New(), uuid.New()
+
+	k, _ := mintSeeded(t, store, orgID, projB, []string{authn.ScopeSheetsRead}, nil)
+
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: orgID, ProjectID: projA, UserID: uuid.New()})
+	err := svc.Revoke(ctx, k.ID)
+	assert.True(t, apikey.IsNotFoundError(err), "got %T: %v", err, err)
+	assert.Zero(t, *unex)
+
+	got, gErr := store.ByID(t.Context(), k.ID)
+	require.NoError(t, gErr)
+	assert.Nil(t, got.RevokedAt, "a refused cross-project revoke must not mutate the key")
+}
+
+// TestService_RevokeRefusesKeyFromAnotherOrg proves the same guard when only OrgID differs.
+func TestService_RevokeRefusesKeyFromAnotherOrg(t *testing.T) {
+	store := fakes.NewAPIKey()
+	svc, unex := newAPIKeyService(t, store)
+	projectID := uuid.New()
+
+	k, _ := mintSeeded(t, store, uuid.New(), projectID, []string{authn.ScopeSheetsRead}, nil)
+
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: projectID, UserID: uuid.New()})
+	err := svc.Revoke(ctx, k.ID)
+	assert.True(t, apikey.IsNotFoundError(err), "got %T: %v", err, err)
+	assert.Zero(t, *unex)
+}
+
+func TestUsageWorker_FlushesOnTicker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := fakes.NewAPIKey()
+		orgID, projectID := uuid.New(), uuid.New()
+		k, _ := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
+
+		w := apikey.NewUsageWorker(store, 100*time.Millisecond, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- w.Run(ctx) }()
+
+		w.Record(k.ID, tenant.Context{OrgID: orgID, ProjectID: projectID}, time.Now())
+		time.Sleep(150 * time.Millisecond)
+		synctest.Wait()
+
+		got, err := store.ByID(ctx, k.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, got.LastUsedAt)
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("Run did not exit after context cancellation")
 		}
 	})
-	t.Run("a store failure is reported, not disguised as unauthorized", func(t *testing.T) {
-		h := newHarness(t)
-		_, plaintext := h.mint(t)
-		h.store.ByPrefixErr = errors.New("boom")
-		_, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err == nil {
-			t.Fatal("want an error")
-		}
-		if apikey.IsUnauthorizedError(err) {
-			t.Error("an infrastructure failure must not present as an authentication failure")
-		}
-		if *h.unex != 1 {
-			t.Errorf("unexpected() called %d times, want 1", *h.unex)
+}
+
+func TestUsageWorker_ExitsOnContextCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := fakes.NewAPIKey()
+		w := apikey.NewUsageWorker(store, time.Hour, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- w.Run(ctx) }()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			assert.ErrorIs(t, err, context.Canceled)
+		default:
+			t.Fatal("Run did not exit after context cancellation")
 		}
 	})
-	t.Run("LastUsedAt is left to the worker", func(t *testing.T) {
-		h := newHarness(t)
-		k, plaintext := h.mint(t)
-		got, err := h.svc.Authenticate(context.Background(), plaintext)
-		if err != nil {
-			t.Fatalf("Authenticate: %v", err)
-		}
-		if got.LastUsedAt != nil {
-			t.Error("Authenticate wrote LastUsedAt on the read path")
-		}
-		stored, err := h.store.ByPrefix(context.Background(), k.KeyPrefix)
-		if err != nil {
-			t.Fatalf("ByPrefix: %v", err)
-		}
-		if stored.LastUsedAt != nil {
-			t.Error("Authenticate persisted LastUsedAt on the read path")
-		}
+}
+
+func TestUsageWorker_FlushesPendingOnShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := fakes.NewAPIKey()
+		orgID, projectID := uuid.New(), uuid.New()
+		k, _ := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
+
+		w := apikey.NewUsageWorker(store, time.Hour, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- w.Run(ctx) }()
+
+		w.Record(k.ID, tenant.Context{OrgID: orgID, ProjectID: projectID}, time.Now())
+
+		// Cancel long before the hour-long tick: only a shutdown drain can persist this.
+		cancel()
+		synctest.Wait()
+		<-done
+
+		got, err := store.ByID(tenant.Into(t.Context(), tenant.Context{OrgID: orgID, ProjectID: projectID}), k.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, got.LastUsedAt, "a timestamp recorded before shutdown was dropped")
 	})
 }

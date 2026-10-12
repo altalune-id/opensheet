@@ -15,7 +15,7 @@ import (
 func (s *postgresStore) userSelectCols() []postgres.Projection {
 	return []postgres.Projection{
 		s.table.ID, s.table.Email, s.table.Name, s.table.IsAdmin,
-		s.table.IDPIssuer, s.table.PasswordHash, s.table.Locale,
+		s.table.IDPIssuer, s.table.IDPSubject, s.table.PasswordHash, s.table.Locale,
 		s.table.TermsAcceptedAt, s.table.CreatedAt,
 	}
 }
@@ -26,6 +26,12 @@ func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*User, error) {
 
 func (s *postgresStore) ByEmail(ctx context.Context, email string) (*User, error) {
 	return s.queryOne(ctx, s.table.Email.EQ(postgres.String(strings.ToLower(email))), &NotFoundError{Email: email})
+}
+
+func (s *postgresStore) ByIDP(ctx context.Context, issuer, subject string) (*User, error) {
+	cond := s.table.IDPIssuer.EQ(postgres.String(issuer)).
+		AND(s.table.IDPSubject.EQ(postgres.String(subject)))
+	return s.queryOne(ctx, cond, &NotFoundError{Subject: subject})
 }
 
 func (s *postgresStore) queryOne(ctx context.Context, cond postgres.BoolExpression, notFound error) (*User, error) {

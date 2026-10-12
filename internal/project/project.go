@@ -58,6 +58,11 @@ func (p *Project) Rename(name string) error {
 	return nil
 }
 
+// ValidateSlug reports whether s is usable as a project slug, as an InvalidSlugError when it is not.
+func ValidateSlug(s string) error {
+	return validateSlug(s)
+}
+
 func validateSlug(s string) error {
 	if len(s) < slugMinLen || len(s) > slugMaxLen {
 		return &InvalidSlugError{Slug: s, Reason: "length out of range"}
@@ -71,10 +76,15 @@ func validateSlug(s string) error {
 	return nil
 }
 
-// NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a
-// literal segment under /orgs/{org}/projects/ would be unreachable.
+// NOTE: ServeMux prefers a literal pattern over the wildcard beside it, so a row slugged like a literal segment under /orgs/{org}/projects/ would be unreachable.
 func reservedSlug(s string) bool {
 	return s == "new"
+}
+
+// ValidateName reports whether s is usable as a project name, as an InvalidNameError when it is not.
+func ValidateName(s string) error {
+	_, err := validateName(s)
+	return err
 }
 
 func validateName(s string) (string, error) {

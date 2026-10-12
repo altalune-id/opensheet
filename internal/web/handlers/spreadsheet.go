@@ -29,7 +29,7 @@ func NewSpreadsheetHandler(d Deps, projects *project.Service, spreadsheets *spre
 
 // GetList renders the spreadsheet registry.
 func (h *SpreadsheetHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -50,7 +50,7 @@ func (h *SpreadsheetHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // PostCreate registers a Google document and returns the refreshed section.
 func (h *SpreadsheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -150,14 +150,14 @@ func (h *SpreadsheetHandler) GetTabs(w http.ResponseWriter, r *http.Request) {
 	tabs, err := h.Spreadsheets.ListTabs(sc.req.Context(), sp.ID)
 	if err != nil {
 		h.LogErr("web spreadsheet: list tabs", err)
-		Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), nil, tabsMessage(err), ErrorRef(err)))
+		Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), nil, tabsMessage(err), ErrorRef(err)))
 		return
 	}
-	Render(w, sc.req, templates.SpreadsheetTabs(h.fragment(sc), tabs, "", ""))
+	Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), tabs, "", ""))
 }
 
 // Register wires the spreadsheet routes onto mux.
-func (h *SpreadsheetHandler) Register(mux *http.ServeMux) {
+func (h *SpreadsheetHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets", h.GetList)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets", h.PostCreate)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}", h.GetShow)
@@ -166,41 +166,41 @@ func (h *SpreadsheetHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/delete", h.PostDelete)
 }
 
-func (h *SpreadsheetHandler) requireSpreadsheet(w http.ResponseWriter, r *http.Request) (projectScope, *spreadsheet.Spreadsheet, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *SpreadsheetHandler) requireSpreadsheet(w http.ResponseWriter, r *http.Request) (ProjectScope, *spreadsheet.Spreadsheet, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, ok := h.pathID(w, sc.req, "spreadsheet")
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	sp, err := h.Spreadsheets.ByID(sc.req.Context(), id)
 	if err != nil {
 		if spreadsheet.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That spreadsheet is not registered in this project.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web spreadsheet: byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that spreadsheet.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, sp, true
 }
 
-func (h *SpreadsheetHandler) redirect(w http.ResponseWriter, sc projectScope, suffix string) {
+func (h *SpreadsheetHandler) redirect(w http.ResponseWriter, sc ProjectScope, suffix string) {
 	http.Redirect(w, sc.req, web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, suffix)), http.StatusSeeOther) //nolint:gosec // G710: both slugs are validated by their own slug patterns
 }
 
-func (h *SpreadsheetHandler) writeSection(w http.ResponseWriter, sc projectScope, view templates.SpreadsheetsView) {
+func (h *SpreadsheetHandler) writeSection(w http.ResponseWriter, sc ProjectScope, view templates.SpreadsheetsView) {
 	filled, ok := h.fill(w, sc, view)
 	if !ok {
 		return
 	}
-	Render(w, sc.req, templates.SpreadsheetSection(h.fragment(sc), filled))
+	Render(w, sc.req, templates.SpreadsheetSection(h.ProjectFragmentBase(sc), filled))
 }
 
-func (h *SpreadsheetHandler) fill(w http.ResponseWriter, sc projectScope, view templates.SpreadsheetsView) (templates.SpreadsheetsView, bool) {
+func (h *SpreadsheetHandler) fill(w http.ResponseWriter, sc ProjectScope, view templates.SpreadsheetsView) (templates.SpreadsheetsView, bool) {
 	creds, ok := h.credentialOptions(w, sc)
 	if !ok {
 		return templates.SpreadsheetsView{}, false
@@ -228,7 +228,7 @@ func (h *SpreadsheetHandler) fill(w http.ResponseWriter, sc projectScope, view t
 	return view, true
 }
 
-func (h *SpreadsheetHandler) detail(w http.ResponseWriter, sc projectScope, sp *spreadsheet.Spreadsheet, view templates.SpreadsheetView) (templates.SpreadsheetView, bool) {
+func (h *SpreadsheetHandler) detail(w http.ResponseWriter, sc ProjectScope, sp *spreadsheet.Spreadsheet, view templates.SpreadsheetView) (templates.SpreadsheetView, bool) {
 	creds, ok := h.credentialOptions(w, sc)
 	if !ok {
 		return templates.SpreadsheetView{}, false
@@ -243,7 +243,7 @@ func (h *SpreadsheetHandler) detail(w http.ResponseWriter, sc projectScope, sp *
 	return view, true
 }
 
-func (h *SpreadsheetHandler) renderDetailError(w http.ResponseWriter, sc projectScope, sp *spreadsheet.Spreadsheet, cause error) {
+func (h *SpreadsheetHandler) renderDetailError(w http.ResponseWriter, sc ProjectScope, sp *spreadsheet.Spreadsheet, cause error) {
 	view, ok := h.detail(w, sc, sp, templates.SpreadsheetView{Error: registerMessage(cause), ErrorCode: ErrorRef(cause)})
 	if !ok {
 		return
@@ -254,7 +254,7 @@ func (h *SpreadsheetHandler) renderDetailError(w http.ResponseWriter, sc project
 	))
 }
 
-func (h *SpreadsheetHandler) credentialOptions(w http.ResponseWriter, sc projectScope) ([]*credential.Credential, bool) {
+func (h *SpreadsheetHandler) credentialOptions(w http.ResponseWriter, sc ProjectScope) ([]*credential.Credential, bool) {
 	creds, err := h.Credentials.List(sc.req.Context())
 	if err != nil {
 		h.LogErr("web spreadsheet: list credentials", err)
@@ -264,8 +264,7 @@ func (h *SpreadsheetHandler) credentialOptions(w http.ResponseWriter, sc project
 	return creds, true
 }
 
-// pickerURL returns the Picker page for the first connected Google account, or "" when there is none.
-func (h *SpreadsheetHandler) pickerURL(sc projectScope, creds []*credential.Credential) string {
+func (h *SpreadsheetHandler) pickerURL(sc ProjectScope, creds []*credential.Credential) string {
 	if !h.Caps.GooglePicker {
 		return ""
 	}
@@ -302,7 +301,6 @@ func spreadsheetTitle(sp *spreadsheet.Spreadsheet) string {
 	return sp.GoogleFileID
 }
 
-// normalizeFileID accepts a pasted Google Sheets URL as well as a bare file id.
 func normalizeFileID(raw string) string {
 	raw = strings.TrimSpace(raw)
 	const marker = "/d/"

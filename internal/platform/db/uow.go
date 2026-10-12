@@ -16,15 +16,19 @@ type unitOfWork struct {
 	tx *sql.Tx
 }
 
-// RunInTx begins a transaction on pool.W, exposes it via ctx so store methods enroll, and commits when fn returns nil.
+// RunInTx begins a transaction on the pool's unit-of-work writer (pool.W unless OpenPool gave SQLite its own), exposes it via ctx so store methods enroll, and commits when fn returns nil.
 func RunInTx(ctx context.Context, pool Pool, fn func(ctx context.Context) error) error {
 	if _, ok := unitOfWorkFromContext(ctx); ok {
 		return ErrNestedUnitOfWork
 	}
-	if pool.W == nil {
+	w := pool.W
+	if pool.uow != nil {
+		w = pool.uow
+	}
+	if w == nil {
 		return errors.New("db: RunInTx: pool.W is nil")
 	}
-	tx, err := pool.W.BeginTx(ctx, nil)
+	tx, err := w.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("db: begin tx: %w", err)
 	}

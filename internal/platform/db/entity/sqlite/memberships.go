@@ -13,8 +13,7 @@ type Memberships struct {
 	CreatedAt sqlite.ColumnString
 	System    sqlite.ColumnInteger
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewMemberships builds the memberships binding.
@@ -27,17 +26,15 @@ func NewMemberships(tablePrefix string) *Memberships {
 		createdAt = sqlite.StringColumn("created_at")
 		system    = sqlite.IntegerColumn("system")
 		all       = sqlite.ColumnList{id, orgID, userID, role, createdAt, system}
-		mutable   = sqlite.ColumnList{orgID, userID, role, system}
 	)
 	return &Memberships{
-		Table:          sqlite.NewTable("", tablePrefix+"memberships", "memberships", all...),
-		ID:             id,
-		OrgID:          orgID,
-		UserID:         userID,
-		Role:           role,
-		CreatedAt:      createdAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      sqlite.NewTable("", tablePrefix+"memberships", "memberships", all...),
+		ID:         id,
+		OrgID:      orgID,
+		UserID:     userID,
+		Role:       role,
+		CreatedAt:  createdAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

@@ -10,7 +10,7 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "altalune.id/opensheet/internal/web"
 
-// ErrorBanner renders an inline form error with its code and the request id, so a user report maps to a log line. Codes: docs/ERROR_CODES.md.
+// ErrorBanner renders an inline form error with its code and the request id, so a user report maps to a log line. Codes: ../../../docs/errors/README.md.
 func ErrorBanner(d web.LayoutData, msg, code string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context

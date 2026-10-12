@@ -3,8 +3,8 @@ name: opensheet-api
 description: Read and write a published Google Sheet tab over opensheet's HTTP data plane — auth with an API key, filtered and sorted reads, row CRUD, batch writes, caching and concurrency headers, and the JSON error envelope. Use this whenever calling an opensheet endpoint under /api/v1, minting or scoping an API key for one, debugging a 404, 403, 409 or 412 from a sheet URL, or when the task mentions opensheet, a published sheet, a sheet slug, or "read/write my Google Sheet over HTTP".
 license: Proprietary
 metadata:
-  data-plane: internal/data
-  error-codes: docs/ERROR_CODES.md
+  data-plane: internal/dataplane
+  error-codes: docs/errors/opensheet.md
 ---
 
 # Using the opensheet HTTP API
@@ -42,31 +42,42 @@ curl "$S/capabilities" -H "Authorization: Bearer $OPENSHEET_API_KEY"
 It reports `columns`, `idColumn`, `writable`, `softDelete` and `satisfiesContract`
 without touching Google.
 
+`columns` is the tab's header row, sorted by name, so it is the same for a tab with no
+data rows and for rows with blank trailing cells. `deleted_at` is listed when `softDelete`
+is true. The header row is saved when the sheet is published and on every refresh from
+Google. A sheet published before opensheet saved header rows, and not refreshed since,
+reports the keys of its first live row instead, and `[]` if it has none. The next refresh
+fixes this: a read after the cache TTL, or a read after `DELETE /sheets/<slug>/cache`.
+After the tab is changed, `columns` uses the new tab's first row until the next refresh.
+A header renamed in Google shows in `columns` only after the next refresh; to force one,
+call `DELETE /sheets/<slug>/cache` and then read the sheet.
+
 ## Routes
 
-| Method | Path | Scope |
-|---|---|---|
-| GET | `/sheets/<slug>` | `sheets:read` |
-| GET | `/sheets/<slug>/rows/<id>` | `sheets:read` |
-| GET | `/sheets/<slug>/capabilities` | `sheets:read` |
-| POST | `/sheets/<slug>` | `sheets:write` |
-| POST | `/sheets/<slug>/rows` | `sheets:write` |
-| POST | `/sheets/<slug>/rows/batch` | `sheets:write` |
-| PUT | `/sheets/<slug>/rows/<id>` | `sheets:write` |
-| PATCH | `/sheets/<slug>/rows/<id>` | `sheets:write` |
-| DELETE | `/sheets/<slug>/rows/<id>` | `sheets:write` |
-| DELETE | `/sheets/<slug>/cache` | `cache:purge` |
-| GET/POST | `/spreadsheets/<id>/tabs` | `spreadsheets:read` / `:write` |
+| Method   | Path                          | Scope                          |
+| -------- | ----------------------------- | ------------------------------ |
+| GET      | `/sheets/<slug>`              | `sheets:read`                  |
+| GET      | `/sheets/<slug>/rows/<id>`    | `sheets:read`                  |
+| GET      | `/sheets/<slug>/capabilities` | `sheets:read`                  |
+| POST     | `/sheets/<slug>`              | `sheets:write`                 |
+| POST     | `/sheets/<slug>/rows`         | `sheets:write`                 |
+| POST     | `/sheets/<slug>/rows/batch`   | `sheets:write`                 |
+| PUT      | `/sheets/<slug>/rows/<id>`    | `sheets:write`                 |
+| PATCH    | `/sheets/<slug>/rows/<id>`    | `sheets:write`                 |
+| DELETE   | `/sheets/<slug>/rows/<id>`    | `sheets:write`                 |
+| DELETE   | `/sheets/<slug>/cache`        | `cache:purge`                  |
+| GET/POST | `/spreadsheets/<id>/tabs`     | `spreadsheets:read` / `:write` |
 
 Details: reads and query syntax → `references/reading.md`. Writes, idempotency and
 concurrency → `references/writing.md`. Failures → `references/errors.md`.
 
 ## Rules that are expensive to get wrong
 
-**A key is shown once.** `POST /apikeys` returns the plaintext at mint time and stores only
-an argon2id hash. There is no endpoint that reads it back — lose it and mint a new one.
+**A key is shown once.** Minting it (the console's API keys page, or the control plane's
+`APIKeyService.Create`) returns the plaintext once and stores only its SHA-256 hash. Nothing
+reads it back — lose it and mint a new one. Keys expire (at most a year) and can be revoked.
 
-**Writes need two separate grants.** The key needs `sheets:write` *and* the sheet itself must
+**Writes need two separate grants.** The key needs `sheets:write` _and_ the sheet itself must
 be marked writable in the UI. A key with the scope still gets `403` on a read-only sheet;
 `capabilities.writable` tells you which one is missing.
 

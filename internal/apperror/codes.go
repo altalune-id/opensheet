@@ -1,8 +1,6 @@
 package apperror
 
-// Error code registry: <DOM><NNN>, a three-letter domain mnemonic plus a per-domain sequence.
-// Codes are quoted by users off an error page, so they are append-only: never renumber, never reuse a retired code.
-// NNN 900-999 is reserved per domain for unexpected or internal failures.
+// Error code registry: <DOM><NNN>, a domain mnemonic plus a per-domain sequence. NOTE: append-only — never renumber, never reuse a retired code; 900-999 is reserved per domain for internal failures.
 const (
 	CodeTenantMissing   = "GEN001"
 	CodeUnauthenticated = "GEN002"
@@ -32,11 +30,13 @@ const (
 	CodeOrgSystemProtected   = "ORG008"
 	CodeOrgSelfRemoval       = "ORG009"
 	CodeOrgOwnerRemoval      = "ORG010"
+	CodeOrgManagerRequired   = "ORG011"
 
 	CodeProjectNotFound        = "PRJ001"
 	CodeProjectAlreadyExists   = "PRJ002"
 	CodeProjectInvalidSlug     = "PRJ003"
 	CodeProjectSystemProtected = "PRJ004"
+	CodeProjectUnresolved      = "PRJ005"
 
 	CodeInviteNotFound    = "INV001"
 	CodeInviteExpired     = "INV002"
@@ -55,15 +55,59 @@ const (
 	CodeOnboardingRequired    = "ONB001"
 	CodeOnboardingAlreadyDone = "ONB002"
 
+	CodeEncryptionUnavailable = "ENC001"
+	CodeEncryptionOpenFailed  = "ENC002"
+
+	CodePostNotFound         = "BLG001"
+	CodePostAlreadyExists    = "BLG002"
+	CodePostInvalidTitle     = "BLG003"
+	CodePostInvalidSlug      = "BLG004"
+	CodePostInvalidBody      = "BLG005"
+	CodePostCategoryRequired = "BLG006"
+	CodePostStaleVersion     = "BLG007"
+
+	CodeCategoryNotFound      = "CAT001"
+	CodeCategoryAlreadyExists = "CAT002"
+	CodeCategoryInvalidName   = "CAT003"
+	CodeCategoryInUse         = "CAT004"
+
+	CodeTagNotFound      = "TAG001"
+	CodeTagAlreadyExists = "TAG002"
+	CodeTagInvalidName   = "TAG003"
+	CodeTagInUse         = "TAG004"
+
+	CodeMCPUnauthenticated = "MCP001"
+
+	CodeAPIKeyUnknownScope       = "APK001"
+	CodeAPIKeyRetiredScope       = "APK002"
+	CodeAPIKeyScopeLevel         = "APK003"
+	CodeAPIKeyEmptyGrant         = "APK004"
+	CodeAPIKeyGrantConflict      = "APK005"
+	CodeAPIKeyBoundToProject     = "APK006"
+	CodeAPIKeyAlreadyAllProjects = "APK007"
+	CodeAPIKeyRevoked            = "APK008"
+	CodeAPIKeyProjectNotInOrg    = "APK009"
+	CodeAPIKeyExpiryRequired     = "APK010"
+	CodeAPIKeyExpiryInPast       = "APK011"
+	CodeAPIKeyExpiryTooLong      = "APK012"
+
+	CodeWebhookEndpointNotFound     = "WHK001"
+	CodeWebhookInvalidURL           = "WHK002"
+	CodeWebhookInvalidEventTypes    = "WHK003"
+	CodeWebhookEndpointLimit        = "WHK004"
+	CodeWebhookDeliveryNotRetryable = "WHK005"
+	CodeWebhookDeliveryNotFound     = "WHK006"
+	CodeWebhookEndpointInactive     = "WHK007"
+	CodeWebhookSecretConflict       = "WHK008"
+
+	// NOTE: CRD007 and CRD009 are retired; credential sealing reports ENC001 and ENC002.
 	CodeCredentialNotFound            = "CRD001"
 	CodeCredentialAlreadyExists       = "CRD002"
 	CodeCredentialInvalidName         = "CRD003"
 	CodeCredentialInvalidKind         = "CRD004"
 	CodeCredentialInUse               = "CRD005"
 	CodeCredentialReauthNeeded        = "CRD006"
-	CodeEncryptionUnavailable         = "CRD007"
 	CodeCredentialStateInvalid        = "CRD008"
-	CodeEncryptionOpenFailed          = "CRD009"
 	CodeCredentialNotSealed           = "CRD010"
 	CodeCredentialGoogleNotConfigured = "CRD011"
 
@@ -115,11 +159,7 @@ const (
 	CodeSheetSortDepth             = "SHT040"
 	CodeSheetUnknownSortColumn     = "SHT041"
 
-	CodeAPIKeyNotFound          = "KEY001"
-	CodeAPIKeyInvalidName       = "KEY002"
-	CodeAPIKeyInvalidScope      = "KEY003"
-	CodeAPIKeyUnauthorized      = "KEY004"
-	CodeAPIKeyInsufficientScope = "KEY005"
+	// NOTE: KEY001-KEY005 are retired; API keys report the APK group and the generic GEN codes.
 
 	CodeGoogleNotFound         = "GSH001"
 	CodeGooglePermissionDenied = "GSH002"

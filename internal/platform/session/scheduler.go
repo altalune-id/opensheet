@@ -14,7 +14,6 @@ const (
 	sweepTimeout = 2 * time.Minute
 )
 
-// sweepJobName keys this job in logs, metrics, the leader lock, the CLI, and scheduler.jobs config overrides.
 const sweepJobName = "session-sweep"
 
 // Scheduler adapts a Store to scheduler.Provider.

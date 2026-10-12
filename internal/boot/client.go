@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"altalune.id/opensheet/internal/api"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/logger"
 )
@@ -15,14 +15,14 @@ type Client struct {
 	Cfg      *config.Config
 	Log      *slog.Logger
 	Reporter *apperror.Reporter
-	Conn     *api.Client
+	Conn     *controlplane.Client
 }
 
 // BootClient builds the minimal wired graph for CLI subcommands that talk to a remote opensheet server.
 func BootClient(_ context.Context, cfg *config.Config, token string) (*Client, error) {
 	log := logger.New(cfg.Log)
 	reporter := apperror.NewReporter(log, cfg.Mode.IsProduction())
-	conn := api.NewClient(cfg.HTTP.BaseURL, token)
+	conn := controlplane.NewClient(cfg.HTTP.BaseURL, token)
 	return &Client{
 		Cfg:      cfg,
 		Log:      log,

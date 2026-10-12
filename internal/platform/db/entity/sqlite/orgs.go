@@ -14,8 +14,7 @@ type Orgs struct {
 	UpdatedAt sqlite.ColumnString
 	System    sqlite.ColumnInteger
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewOrgs builds the orgs binding.
@@ -29,18 +28,16 @@ func NewOrgs(tablePrefix string) *Orgs {
 		updatedAt = sqlite.StringColumn("updated_at")
 		system    = sqlite.IntegerColumn("system")
 		all       = sqlite.ColumnList{id, slug, name, createdBy, createdAt, updatedAt, system}
-		mutable   = sqlite.ColumnList{slug, name, createdBy, updatedAt, system}
 	)
 	return &Orgs{
-		Table:          sqlite.NewTable("", tablePrefix+"orgs", "orgs", all...),
-		ID:             id,
-		Slug:           slug,
-		Name:           name,
-		CreatedBy:      createdBy,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      sqlite.NewTable("", tablePrefix+"orgs", "orgs", all...),
+		ID:         id,
+		Slug:       slug,
+		Name:       name,
+		CreatedBy:  createdBy,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

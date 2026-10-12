@@ -49,7 +49,6 @@ func newFixHarness(t *testing.T) *fixHarness {
 	return h
 }
 
-// writtenColumn decodes the one PUT the fix is allowed to make into its A1 span and its column of values.
 func (h *fixHarness) writtenColumn(t *testing.T) (span string, values []string) {
 	t.Helper()
 	puts := 0

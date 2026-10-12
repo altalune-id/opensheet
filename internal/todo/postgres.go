@@ -24,25 +24,34 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 }
 
 type pgTodoRow struct {
-	ID        uuid.UUID `alias:"todos.id"`
-	OrgID     uuid.UUID `alias:"todos.org_id"`
-	ProjectID uuid.UUID `alias:"todos.project_id"`
-	Title     string    `alias:"todos.title"`
-	Done      bool      `alias:"todos.done"`
-	CreatedAt time.Time `alias:"todos.created_at"`
-	UpdatedAt time.Time `alias:"todos.updated_at"`
+	ID             uuid.UUID  `alias:"todos.id"`
+	OrgID          uuid.UUID  `alias:"todos.org_id"`
+	ProjectID      uuid.UUID  `alias:"todos.project_id"`
+	UserID         *uuid.UUID `alias:"todos.user_id"`
+	CreatedByKeyID *uuid.UUID `alias:"todos.created_by_key_id"`
+	Title          string     `alias:"todos.title"`
+	Done           bool       `alias:"todos.done"`
+	CreatedAt      time.Time  `alias:"todos.created_at"`
+	UpdatedAt      time.Time  `alias:"todos.updated_at"`
 }
 
 func (r *pgTodoRow) toTodo() *Todo {
-	return &Todo{
+	t := &Todo{
 		ID:        r.ID,
 		OrgID:     r.OrgID,
 		ProjectID: r.ProjectID,
 		Title:     r.Title,
 		Done:      r.Done,
-		CreatedAt: r.CreatedAt,
-		UpdatedAt: r.UpdatedAt,
+		CreatedAt: r.CreatedAt.UTC(),
+		UpdatedAt: r.UpdatedAt.UTC(),
 	}
+	if r.UserID != nil {
+		t.Author.UserID = *r.UserID
+	}
+	if r.CreatedByKeyID != nil {
+		t.Author.KeyID = *r.CreatedByKeyID
+	}
+	return t
 }
 
 func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, tenant.Context, error) {

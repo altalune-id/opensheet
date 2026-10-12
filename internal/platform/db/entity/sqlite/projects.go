@@ -15,8 +15,7 @@ type Projects struct {
 	UpdatedAt sqlite.ColumnString
 	System    sqlite.ColumnInteger
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewProjects builds the projects binding.
@@ -31,19 +30,17 @@ func NewProjects(tablePrefix string) *Projects {
 		updatedAt = sqlite.StringColumn("updated_at")
 		system    = sqlite.IntegerColumn("system")
 		all       = sqlite.ColumnList{id, orgID, slug, name, createdBy, createdAt, updatedAt, system}
-		mutable   = sqlite.ColumnList{orgID, slug, name, createdBy, updatedAt, system}
 	)
 	return &Projects{
-		Table:          sqlite.NewTable("", tablePrefix+"projects", "projects", all...),
-		ID:             id,
-		OrgID:          orgID,
-		Slug:           slug,
-		Name:           name,
-		CreatedBy:      createdBy,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      sqlite.NewTable("", tablePrefix+"projects", "projects", all...),
+		ID:         id,
+		OrgID:      orgID,
+		Slug:       slug,
+		Name:       name,
+		CreatedBy:  createdBy,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

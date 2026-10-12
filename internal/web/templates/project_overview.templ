@@ -1,0 +1,159 @@
+package templates
+
+import (
+	"strconv"
+
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+type ProjectOverviewView struct {
+	OrgSlug      string
+	ProjectID    string
+	ProjectSlug  string
+	ProjectName  string
+	Credentials  int
+	Spreadsheets int
+	Sheets       int
+}
+
+type setupStep struct {
+	Key   string
+	Path  string
+	Icon  string
+	Title string
+	Body  string
+	Done  bool
+}
+
+func (v ProjectOverviewView) setupComplete() bool {
+	return v.Credentials > 0 && v.Spreadsheets > 0 && v.Sheets > 0
+}
+
+func (v ProjectOverviewView) setupSteps(d web.LayoutData) []setupStep {
+	return []setupStep{
+		{Key: "credential", Path: "/credentials", Icon: "shield", Title: d.Tr("project_overview.step_credential_title"), Body: d.Tr("project_overview.step_credential_body"), Done: v.Credentials > 0},
+		{Key: "spreadsheet", Path: "/spreadsheets", Icon: "file-spreadsheet", Title: d.Tr("project_overview.step_spreadsheet_title"), Body: d.Tr("project_overview.step_spreadsheet_body"), Done: v.Spreadsheets > 0},
+		{Key: "sheet", Path: "/sheets", Icon: "table-2", Title: d.Tr("project_overview.step_sheet_title"), Body: d.Tr("project_overview.step_sheet_body"), Done: v.Sheets > 0},
+		{Key: "apikey", Path: "/apikeys", Icon: "key", Title: d.Tr("project_overview.step_apikey_title"), Body: d.Tr("project_overview.step_apikey_body")},
+	}
+}
+
+func nextStep(steps []setupStep) int {
+	for i, s := range steps {
+		if !s.Done {
+			return i
+		}
+	}
+	return len(steps)
+}
+
+templ ProjectOverviewPage(d web.LayoutData, v ProjectOverviewView) {
+	<section class="flex flex-col gap-6">
+		<header class="border-b border-border pb-4">
+			<p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("nav.overview") }</p>
+			<h1 class="mt-1 text-2xl font-semibold text-foreground">{ v.ProjectName }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("project_overview.subtitle") }</p>
+			<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+				@copyValue(d, v.OrgSlug)
+				<span aria-hidden="true" class="text-muted-foreground/70">/</span>
+				@copyValue(d, v.ProjectSlug)
+				<span aria-hidden="true" class="text-muted-foreground/70">·</span>
+				@copyValue(d, v.ProjectID)
+			</div>
+			@copyScript(d.Nonce)
+		</header>
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+			@overviewStat(d.ProjectPath(v.ProjectSlug, "/credentials"), "credentials", "shield", d.Tr("nav.credentials"), v.Credentials)
+			@overviewStat(d.ProjectPath(v.ProjectSlug, "/spreadsheets"), "spreadsheets", "file-spreadsheet", d.Tr("nav.spreadsheets"), v.Spreadsheets)
+			@overviewStat(d.ProjectPath(v.ProjectSlug, "/sheets"), "sheets", "table-2", d.Tr("project_overview.stat_published"), v.Sheets)
+		</div>
+		if v.setupComplete() {
+			<div data-ready="overview" class="rounded-lg border border-border bg-card p-6 shadow-sm">
+				<h2 class="text-sm font-semibold text-foreground">{ d.Tr("project_overview.ready_heading") }</h2>
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("project_overview.ready_body") }</p>
+				<div class="mt-4 flex flex-wrap gap-2">
+					<a
+						href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets")) }
+						class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+					>
+						@icons.Icon("table-2", "h-4 w-4")
+						<span>{ d.Tr("project_overview.open_sheets") }</span>
+					</a>
+					<a
+						href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/apikeys")) }
+						class="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground/90 shadow-sm hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+					>
+						@icons.Icon("key", "h-4 w-4")
+						<span>{ d.Tr("project_overview.open_apikeys") }</span>
+					</a>
+				</div>
+			</div>
+		} else {
+			@setupChecklist(d, v)
+		}
+	</section>
+}
+
+templ setupChecklist(d web.LayoutData, v ProjectOverviewView) {
+	{{ steps := v.setupSteps(d) }}
+	{{ next := nextStep(steps) }}
+	<div data-empty="overview" class="rounded-lg border border-dashed border-border bg-card p-6">
+		<h2 class="text-sm font-semibold text-foreground">{ d.Tr("project_overview.setup_heading") }</h2>
+		<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("project_overview.setup_subtitle") }</p>
+		<ol class="mt-4 flex flex-col gap-3">
+			for i, s := range steps {
+				<li data-step={ s.Key } data-step-done?={ s.Done } data-step-next?={ i == next } class={ "flex items-start gap-3 rounded-md border p-3", "border-border", templ.KV("bg-primary/10", i == next) }>
+					<span class={ "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold", templ.KV("border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300", s.Done), templ.KV("border-border bg-background text-muted-foreground", !s.Done) }>
+						if s.Done {
+							@icons.Icon("check", "h-4 w-4")
+						} else {
+							{ strconv.Itoa(i + 1) }
+						}
+					</span>
+					<span class="min-w-0 flex-1">
+						<span class="block text-sm font-medium text-foreground">{ s.Title }</span>
+						<span class="mt-0.5 block text-xs text-muted-foreground">{ s.Body }</span>
+					</span>
+					if i == next {
+						<a
+							href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, s.Path)) }
+							data-step-action={ s.Key }
+							class="inline-flex shrink-0 items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+						>
+							@icons.Icon(s.Icon, "h-4 w-4")
+							<span>{ d.Tr("project_overview.step_start") }</span>
+						</a>
+					} else {
+						<a
+							href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, s.Path)) }
+							data-step-action={ s.Key }
+							class="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+						>
+							@icons.Icon(s.Icon, "h-4 w-4")
+							<span>{ d.Tr("common.open") }</span>
+						</a>
+					}
+				</li>
+			}
+		</ol>
+	</div>
+}
+
+templ overviewStat(href, key, icon, label string, count int) {
+	<a
+		href={ templ.SafeURL(href) }
+		data-stat={ key }
+		class="block rounded-lg border border-border bg-card p-4 shadow-sm transition hover:border-muted-foreground/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+	>
+		<span class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+			@icons.Icon(icon, "h-4 w-4")
+			<span>{ label }</span>
+		</span>
+		<span data-count={ key } class="mt-2 block text-2xl font-semibold text-foreground">{ strconv.Itoa(count) }</span>
+	</a>
+}
+
+templ ProjectOverviewLayout(d web.LayoutData, v ProjectOverviewView) {
+	@Layout(web.WithContent(d, ProjectOverviewPage(d, v)))
+}

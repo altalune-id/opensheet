@@ -116,3 +116,25 @@ func TestPostgres_Project_SaveIsUpsert(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Web v2", got.Name)
 }
+
+func TestPostgres_Project_SecondSystemProjectIsRefused(t *testing.T) {
+	store, orgID, userID := newProjectStoreForTest(t)
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: orgID, UserID: userID})
+
+	first, err := project.New(orgID, "web", "Web")
+	require.NoError(t, err)
+	first.System = true
+	require.NoError(t, store.Save(ctx, first))
+	require.NoError(t, store.Save(ctx, first), "re-saving the system project must stay allowed")
+
+	second, err := project.New(orgID, "api", "API")
+	require.NoError(t, err)
+	second.System = true
+	err = store.Save(ctx, second)
+	require.True(t, project.IsSystemProjectExistsError(err), "want SystemProjectExistsError, got %T: %v", err, err)
+
+	dup, err := project.New(orgID, "web", "Dup")
+	require.NoError(t, err)
+	err = store.Save(ctx, dup)
+	require.True(t, project.IsAlreadyExistsError(err), "a slug clash must stay AlreadyExistsError, got %T: %v", err, err)
+}

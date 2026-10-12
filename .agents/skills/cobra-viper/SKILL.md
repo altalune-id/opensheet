@@ -184,7 +184,7 @@ cmd := &cobra.Command{
 
 Use `PersistentPreRunE` on the root command to run setup (config loading, logging) after flags are parsed but before any subcommand runs. Cobra runs it for every subcommand automatically.
 
-**Gotcha:** if a subcommand also defines `PersistentPreRunE`, it *replaces* the parent's — Cobra does not chain them by default. Either call the parent's explicitly, or opt into chaining globally with `cobra.EnableTraverseRunHooks = true` (Cobra 1.8+).
+**Gotcha:** if a subcommand also defines `PersistentPreRunE`, it _replaces_ the parent's — Cobra does not chain them by default. Either call the parent's explicitly, or opt into chaining globally with `cobra.EnableTraverseRunHooks = true` (Cobra 1.8+).
 
 ### 6. Flag Design
 
@@ -223,7 +223,7 @@ migrateCmd.GroupID = "admin"
 
 ### 8. Shell Completion
 
-Cobra generates shell completion for free. Add dynamic completion for both flags *and* positional arguments:
+Cobra generates shell completion for free. Add dynamic completion for both flags _and_ positional arguments:
 
 ```go
 // Flag value completion
@@ -297,11 +297,11 @@ Binding in `PersistentPreRunE` (rather than `init()`) also avoids the classic co
 
 With `v.SetEnvPrefix("MYAPP")` and `v.AutomaticEnv()`:
 
-| Viper key | Environment variable |
-|-----------|---------------------|
-| `log-level` | `MYAPP_LOG_LEVEL` |
-| `serve.addr` | `MYAPP_SERVE_ADDR` |
-| `db.password` | `MYAPP_DB_PASSWORD` |
+| Viper key     | Environment variable |
+| ------------- | -------------------- |
+| `log-level`   | `MYAPP_LOG_LEVEL`    |
+| `serve.addr`  | `MYAPP_SERVE_ADDR`   |
+| `db.password` | `MYAPP_DB_PASSWORD`  |
 
 Nested keys with dots or dashes require a replacer to map correctly to env var names:
 
@@ -309,7 +309,7 @@ Nested keys with dots or dashes require a replacer to map correctly to env var n
 v.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
 ```
 
-**Critical gotcha — `AutomaticEnv` + `Unmarshal`:** `Unmarshal` only walks keys Viper already knows about (from defaults, config file, or explicit binds). A value set *only* via environment variable is invisible to `Unmarshal` unless the key was registered. The fix: call `v.SetDefault` for every key in your config struct, or `v.BindEnv` each key explicitly. This is the most common "my env var is ignored" bug in Viper applications.
+**Critical gotcha — `AutomaticEnv` + `Unmarshal`:** `Unmarshal` only walks keys Viper already knows about (from defaults, config file, or explicit binds). A value set _only_ via environment variable is invisible to `Unmarshal` unless the key was registered. The fix: call `v.SetDefault` for every key in your config struct, or `v.BindEnv` each key explicitly. This is the most common "my env var is ignored" bug in Viper applications.
 
 ### 5. Config File Setup
 
@@ -386,13 +386,13 @@ go build -ldflags="-X 'github.com/spf13/myapp/cmd.version=1.2.3' \
                    -X 'github.com/spf13/myapp/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
 ```
 
-Add a `version` *subcommand* only if you need structured output (`version --json`) — and print via `cmd.OutOrStdout()`, never `fmt.Printf`.
+Add a `version` _subcommand_ only if you need structured output (`version --json`) — and print via `cmd.OutOrStdout()`, never `fmt.Printf`.
 
 ## Testing CLI Commands
 
 **Anti-Pattern:** Testing CLI commands by compiling the binary and using `os/exec`. This is extremely slow, brittle, and makes it difficult to measure test coverage.
 
-**Second anti-pattern:** executing a package-level subcommand directly. `cmd.Execute()` always executes from the *root* of the command tree, and mutating a global command leaks flag state between tests. This is exactly why commands are built by factories.
+**Second anti-pattern:** executing a package-level subcommand directly. `cmd.Execute()` always executes from the _root_ of the command tree, and mutating a global command leaks flag state between tests. This is exactly why commands are built by factories.
 
 ```go
 // Idiomatic: In-memory CLI testing via the factory

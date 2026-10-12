@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+service BadRequiredService {
+  rpc RequireGhost(BadRequiredRequest) returns (BadRequiredResponse) {
+    option (mcp.v1.tool) = {
+      name: "require_ghost"
+      required: ["ghostField"]
+    };
+  }
+}
+
+message BadRequiredRequest {
+  string project_id = 1;
+}
+
+message BadRequiredResponse {}

@@ -39,7 +39,6 @@ func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *or
 	return &AuthHandler{Deps: d, Auth: authSvc, Users: users, Orgs: orgs, Projects: projects, AltAuth: ac, Required: required}
 }
 
-// resolveActiveTenant populates ActiveOrgID / ActiveProjectID on the principal from the user's first membership + project.
 func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Principal) session.Principal {
 	if p.ActiveOrgID != [16]byte{} && p.ActiveProjectID != [16]byte{} {
 		return p
@@ -95,7 +94,6 @@ func (h *AuthHandler) reconcileGenesis(ctx context.Context, p session.Principal)
 	return p
 }
 
-// localAuthEnabled reports whether the login page should render the local email+password form.
 func (h *AuthHandler) localAuthEnabled(ctx context.Context) bool {
 	if h.Caps.LocalIdentity {
 		return true
@@ -178,7 +176,6 @@ func (h *AuthHandler) PostLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, r.PostForm.Get("return_to")), http.StatusSeeOther) //nolint:gosec // G710: return_to sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
-// pendingInviteDest verifies the invite cookie set by GetAccept before the login round-trip and returns the /invites/accept URL to resume the flow; returns "" when no valid invite is pending.
 func (h *AuthHandler) pendingInviteDest(r *http.Request) string {
 	c, err := r.Cookie(web.InviteCookieName)
 	if err != nil || c.Value == "" {
@@ -283,7 +280,7 @@ func (h *AuthHandler) postLogoutRedirectURL() string {
 }
 
 // Register wires all routes onto mux; OIDC routes mount only when authl.Client is non-nil.
-func (h *AuthHandler) Register(mux *http.ServeMux) {
+func (h *AuthHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /login", h.GetLogin)
 	mux.HandleFunc("POST /login", h.PostLogin)
 	mux.HandleFunc("GET /admin-login", h.GetAdminLogin)

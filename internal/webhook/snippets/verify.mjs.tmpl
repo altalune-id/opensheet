@@ -1,0 +1,34 @@
+import crypto from "node:crypto";
+import express from "express";
+
+const TOLERANCE_SECONDS = 300;
+
+export function verifyWebhook(secret, headers, rawBody, nowMs = Date.now()) {
+  if (!Buffer.isBuffer(rawBody)) {
+    return false;
+  }
+  const ts = headers["{{lower .Timestamp}}"] ?? "";
+  if (!/^\d+$/.test(ts) || Math.abs(nowMs / 1000 - Number(ts)) > TOLERANCE_SECONDS) {
+    return false;
+  }
+  const mac = crypto.createHmac("sha256", secret).update(`${ts}.`).update(rawBody);
+  const want = Buffer.from(`{{.Scheme}}${mac.digest("hex")}`);
+  return (headers["{{lower .Signature}}"] ?? "").split(" ").some((sig) => {
+    const got = Buffer.from(sig);
+    return got.length === want.length && crypto.timingSafeEqual(got, want);
+  });
+}
+
+const app = express();
+
+app.post("/webhooks", express.raw({ type: "application/json" }), (req, res) => {
+  if (!verifyWebhook(process.env.OPENSHEET_WEBHOOK_SECRET, req.headers, req.body)) {
+    return res.sendStatus(401);
+  }
+  const deliveryId = req.headers["{{lower .DeliveryID}}"];
+  console.log("webhook", req.headers["{{lower .EventType}}"], deliveryId);
+  // TODO: skip deliveryId if already processed, then queue req.body for your worker.
+  return res.sendStatus(204);
+});
+
+app.listen(8080);

@@ -3,12 +3,23 @@ syntax = "proto3";
 package todo.v1;
 
 import "google/protobuf/timestamp.proto";
+import "mcp/v1/annotations.proto";
 
 option go_package = "altalune.id/opensheet/gen/go/todo/v1;todov1";
 
 service TodoService {
   rpc List(ListRequest) returns (ListResponse);
-  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Create(CreateRequest) returns (CreateResponse) {
+    option (mcp.v1.tool) = {
+      name: "todo_create"
+      description: "Create a todo in a project. Requires the project's UUID."
+      mutation: true
+      required: [
+        "projectId",
+        "title"
+      ]
+    };
+  }
   rpc Toggle(ToggleRequest) returns (ToggleResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
 }
@@ -35,7 +46,9 @@ message ListResponse {
 }
 
 message CreateRequest {
+  // UUID of the project the todo belongs to
   string project_id = 1;
+  // Title of the todo
   string title = 2;
 }
 

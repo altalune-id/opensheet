@@ -47,6 +47,7 @@ type WriteWorkflow struct {
 	maxPayloadBytes int64
 	log             *slog.Logger
 	unexpected      apperror.UnexpectedFunc
+	invalidate      invalidator
 }
 
 // NewWriteWorkflow binds the write path to its dependencies.
@@ -63,7 +64,9 @@ func NewWriteWorkflow(
 	maxPayloadBytes int64,
 	log *slog.Logger,
 	unexpected apperror.UnexpectedFunc,
+	opts ...Option,
 ) *WriteWorkflow {
+	o := optionsOf(opts)
 	return &WriteWorkflow{
 		snaps:           snaps,
 		rows:            rows,
@@ -77,6 +80,7 @@ func NewWriteWorkflow(
 		maxPayloadBytes: maxPayloadBytes,
 		log:             log.With("module", "sheet"),
 		unexpected:      unexpected,
+		invalidate:      invalidator{queue: o.queue, unexpected: unexpected},
 	}
 }
 
@@ -317,7 +321,9 @@ func (w *WriteWorkflow) rebuild(ctx context.Context, sh *Sheet, key SnapshotKey,
 	if pErr := w.snaps.Put(ctx, key, snap, ttlOf(sh, w.defaultTTL)); pErr != nil {
 		_ = w.unexpected(ctx, "sheet.PatchRow: snapshot put", pErr, "sheet_id", sh.ID, "tab", key.Tab)
 		w.purgeSnapshot(ctx, sh)
+		return
 	}
+	w.invalidate.announce(ctx, "sheet.write", sh.ID, snap.ETag)
 }
 
 func (w *WriteWorkflow) target(ctx context.Context, sh *Sheet) (writeTarget, error) {
@@ -429,6 +435,7 @@ func (w *WriteWorkflow) purgeSnapshot(ctx context.Context, sh *Sheet) {
 	if err := w.snaps.PurgeSheet(ctx, sh.ID); err != nil {
 		_ = w.unexpected(ctx, "sheet.write: purge snapshot", err, "sheet_id", sh.ID)
 	}
+	w.invalidate.announce(ctx, "sheet.write", sh.ID, "")
 }
 
 func (w *WriteWorkflow) fail(ctx context.Context, situation string, err error, sh *Sheet, src Source) error {

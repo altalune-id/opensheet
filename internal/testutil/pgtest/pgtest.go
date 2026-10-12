@@ -51,10 +51,7 @@ func (h *Handle) Close() error {
 	return h.container.Terminate(ctx)
 }
 
-// New returns a fresh Postgres for the test, reusing TEST_PG_DSN when that is set.
-// NOTE: Ryuk cannot boot on macOS+podman without a rootful privileged machine
-// (https://golang.testcontainers.org/system_requirements/using_podman/), and t.Cleanup does not run
-// on timeout or SIGINT — so containers are labelled and stale ones are swept here instead.
+// New returns a fresh Postgres for the test, reusing TEST_PG_DSN when that is set. NOTE: Ryuk cannot boot on macOS+podman (https://golang.testcontainers.org/system_requirements/using_podman/), so containers are labelled and stale ones swept here.
 func New(t *testing.T) *Handle {
 	t.Helper()
 	if dsn := os.Getenv(envDSN); dsn != "" {
@@ -144,8 +141,7 @@ func DSNWithUser(t *testing.T, baseDSN, user, pass string) string {
 	return u.String()
 }
 
-// OpenDB returns a *sql.DB whose search_path is pinned to the handle's own schema, dropped when the test ends.
-// NOTE: isolating per handle instead of resetting the public schema is what lets packages run in parallel against one shared TEST_PG_DSN.
+// OpenDB returns a *sql.DB whose search_path is pinned to the handle's own schema, dropped when the test ends. NOTE: isolating per handle instead of resetting the public schema is what lets packages run in parallel against one shared TEST_PG_DSN.
 func (h *Handle) OpenDB(t *testing.T) *sql.DB {
 	t.Helper()
 	if h.Schema == "" {

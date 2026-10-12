@@ -1,0 +1,60 @@
+package main
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const signatureTolerance = 5 * time.Minute
+
+func verifyWebhook(secret string, h http.Header, body []byte, now time.Time) bool {
+	ts := h.Get("{{.Timestamp}}")
+	sec, err := strconv.ParseUint(ts, 10, 63)
+	if err != nil {
+		return false
+	}
+	if d := now.Sub(time.Unix(int64(sec), 0)); d > signatureTolerance || d < -signatureTolerance {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(ts + "."))
+	mac.Write(body)
+	want := []byte("{{.Scheme}}" + hex.EncodeToString(mac.Sum(nil)))
+	for _, got := range strings.Fields(h.Get("{{.Signature}}")) {
+		if hmac.Equal([]byte(got), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "unreadable body", http.StatusBadRequest)
+		return
+	}
+	if !verifyWebhook(os.Getenv("OPENSHEET_WEBHOOK_SECRET"), r.Header, body, time.Now()) {
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		return
+	}
+	deliveryID := r.Header.Get("{{.DeliveryID}}")
+	log.Printf("webhook %s %s", r.Header.Get("{{.EventType}}"), deliveryID)
+	// TODO: skip deliveryID if already processed, then queue body for your worker.
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /webhooks", handleWebhook)
+	srv := &http.Server{Addr: ":8080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	log.Fatal(srv.ListenAndServe())
+}

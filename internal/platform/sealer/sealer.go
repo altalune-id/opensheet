@@ -67,6 +67,15 @@ func Disabled() Sealer { return disabled{} }
 func (disabled) Seal(_, _ []byte) ([]byte, error) { return nil, &UnavailableError{} }
 func (disabled) Open(_, _ []byte) ([]byte, error) { return nil, &UnavailableError{} }
 
+// GenerateKey mints a random KeyLen-byte key.
+func GenerateKey() ([]byte, error) {
+	key := make([]byte, KeyLen)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("sealer: generate key: %w", err)
+	}
+	return key, nil
+}
+
 // ParseKey decodes a hex or standard-base64 key and verifies its length.
 func ParseKey(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)

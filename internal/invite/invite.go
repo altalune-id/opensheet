@@ -4,6 +4,7 @@ package invite
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -108,9 +109,10 @@ func normalizeEmail(s string) (string, error) {
 	if e == "" {
 		return "", &InvalidEmailError{Reason: "empty"}
 	}
-	at := strings.IndexByte(e, '@')
-	if at <= 0 || at == len(e)-1 {
+	// SECURITY: a bare address only — ParseAddress rejects CR/LF, display names and comma-separated lists.
+	addr, err := mail.ParseAddress(e)
+	if err != nil || addr.Name != "" || addr.Address != e {
 		return "", &InvalidEmailError{Reason: "malformed", Value: s}
 	}
-	return e, nil
+	return addr.Address, nil
 }

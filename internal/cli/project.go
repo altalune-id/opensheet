@@ -57,7 +57,7 @@ func newProjectListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.
 			default:
 				rows := make([][]string, 0, len(items))
 				for _, it := range items {
-					rows = append(rows, []string{it.Slug, it.Name, it.CreatedAt.Format("2006-01-02")})
+					rows = append(rows, []string{it.Slug, it.Name, tableDay(it.CreatedAt)})
 				}
 				return render.Table(cmd.OutOrStdout(), []string{"SLUG", "NAME", "CREATED"}, rows)
 			}
@@ -92,9 +92,8 @@ func newProjectCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobr
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe project slug (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe project slug (generated when omitted)")
 	cmd.Flags().StringVar(&name, "name", "", "Human-readable project name (required)")
-	_ = cmd.MarkFlagRequired("slug")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -105,6 +104,6 @@ func projectToMap(p *project.Project) map[string]any {
 		"org_id":     p.OrgID.String(),
 		"slug":       p.Slug,
 		"name":       p.Name,
-		"created_at": p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"created_at": rfc3339UTC(p.CreatedAt),
 	}
 }

@@ -121,6 +121,44 @@ func TestInvalidTitleError_ToAppError(t *testing.T) {
 	}
 }
 
+func TestAuthorUser_IsNotAKey(t *testing.T) {
+	id := uuid.New()
+	a := AuthorUser(id)
+	if a.UserID != id {
+		t.Errorf("UserID=%v want %v", a.UserID, id)
+	}
+	if a.KeyID != uuid.Nil {
+		t.Errorf("KeyID=%v want nil", a.KeyID)
+	}
+	if a.IsKey() {
+		t.Error("AuthorUser must not report IsKey")
+	}
+}
+
+func TestAuthorKey_IsAKey(t *testing.T) {
+	id := uuid.New()
+	a := AuthorKey(id)
+	if a.KeyID != id {
+		t.Errorf("KeyID=%v want %v", a.KeyID, id)
+	}
+	if a.UserID != uuid.Nil {
+		t.Errorf("UserID=%v want nil", a.UserID)
+	}
+	if !a.IsKey() {
+		t.Error("AuthorKey must report IsKey")
+	}
+}
+
+func TestAuthor_ZeroValueIsNeitherUserNorKey(t *testing.T) {
+	var a Author
+	if a.IsKey() {
+		t.Error("zero Author must not report IsKey")
+	}
+	if a.UserID != uuid.Nil || a.KeyID != uuid.Nil {
+		t.Errorf("zero Author should carry no ids, got %+v", a)
+	}
+}
+
 func TestNotFoundError_ToAppError(t *testing.T) {
 	e := &NotFoundError{ID: "abc"}
 	if !strings.Contains(e.Error(), "abc") {

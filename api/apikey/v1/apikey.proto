@@ -12,18 +12,16 @@ service APIKeyService {
   rpc Revoke(RevokeRequest) returns (RevokeResponse);
 }
 
-// SECURITY: no field of this message may ever carry the plaintext key or its hash; key_prefix is the public half.
 message APIKey {
   string id = 1;
   string project_id = 2;
   string name = 3;
-  string key_prefix = 4;
-  repeated string scopes = 5;
-  repeated string sheet_ids = 6;
+  repeated string scopes = 4;
+  repeated string resource_ids = 5;
+  google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp expires_at = 7;
-  google.protobuf.Timestamp last_used_at = 8;
-  google.protobuf.Timestamp revoked_at = 9;
-  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp revoked_at = 8;
+  google.protobuf.Timestamp last_used_at = 9;
 }
 
 message ListRequest {
@@ -31,28 +29,27 @@ message ListRequest {
 }
 
 message ListResponse {
-  repeated APIKey api_keys = 1;
+  repeated APIKey keys = 1;
 }
 
 message CreateRequest {
   string project_id = 1;
   string name = 2;
   repeated string scopes = 3;
-  repeated string sheet_ids = 4;
+  repeated string resource_ids = 4;
+  // Required: when the key stops working, in the future and at most one year away
   google.protobuf.Timestamp expires_at = 5;
 }
 
 message CreateResponse {
-  APIKey api_key = 1;
-  // SECURITY: the only place the plaintext key is ever returned; no other RPC can retrieve it.
-  string plaintext_key = 2;
+  APIKey key = 1;
+  // plaintext is the one-time secret. It is never present on any other response.
+  string plaintext = 2;
 }
 
 message RevokeRequest {
   string project_id = 1;
-  string api_key_id = 2;
+  string id = 2;
 }
 
-message RevokeResponse {
-  APIKey api_key = 1;
-}
+message RevokeResponse {}

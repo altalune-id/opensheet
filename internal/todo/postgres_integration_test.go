@@ -3,18 +3,28 @@
 package todo_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
+	"altalune.id/opensheet/internal/apikey"
+	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/testutil/pgtest"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/schema"
@@ -171,4 +181,88 @@ func TestPostgresStore_MarkDoneOlderThan_BatchesAndRespectsTenant(t *testing.T) 
 	n, err = store.MarkDoneOlderThan(ctx, uuid.New(), cutoff, 100)
 	require.NoError(t, err)
 	assert.Zero(t, n, "another org's scope must sweep nothing")
+}
+
+type todoServiceFixture struct {
+	svc      *todo.Service
+	keyStore apikey.Store
+	orgID    uuid.UUID
+	projID   uuid.UUID
+	userID   uuid.UUID
+}
+
+func newTodoServiceFixture(t *testing.T) todoServiceFixture {
+	t.Helper()
+	h := pgtest.New(t)
+	sqlDB := h.OpenDB(t)
+
+	cfg := config.Defaults()
+	cfg.DB.Driver = "postgres"
+	cfg.DB.DSN = h.DSN
+	cfg.DB.Schema = h.Schema
+	cfg.DB.AllowBypassRLS = true
+
+	require.NoError(t, schema.MigrateUp(t.Context(), sqlDB, cfg))
+
+	prefix := cfg.DB.TablePrefix
+	userID, orgID, projID := seedProjectTree(t, sqlDB, prefix)
+
+	pc := tenant.NewPgConn(sqlDB)
+	dbCfg := db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}
+	pool := db.Pool{W: sqlDB, R: sqlDB}
+	todoStore := todo.NewStore(dbCfg, pool, pc)
+	keyStore := apikey.NewStore(dbCfg, pool, pc)
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	unexpected := func(_ context.Context, _ string, err error, _ ...any) *apperror.AppError {
+		return apperror.New("opensheet.unexpected", err.Error(), codes.Internal,
+			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
+	}
+	return todoServiceFixture{
+		svc:      todo.NewService(todoStore, log, unexpected, &fakes.Queue{}),
+		keyStore: keyStore,
+		orgID:    orgID,
+		projID:   projID,
+		userID:   userID,
+	}
+}
+
+// TestPostgres_Service_Create_KeyPrincipalPersistsNullUserID proves a key principal's row names the key and leaves user_id NULL.
+func TestPostgres_Service_Create_KeyPrincipalPersistsNullUserID(t *testing.T) {
+	f := newTodoServiceFixture(t)
+	k, _, err := apikey.Scheme{}.Mint(f.orgID, f.projID, "ci key", []string{authn.ScopeSheetsRead}, nil, nil, time.Now().UTC())
+	require.NoError(t, err)
+	seedCtx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.projID})
+	require.NoError(t, f.keyStore.Save(seedCtx, k))
+
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.projID})
+	ctx = session.PrincipalInto(ctx, session.Principal{KeyID: k.ID, Source: session.SourceAPIKey})
+
+	created, err := f.svc.Create(ctx, "minted by a key")
+	require.NoError(t, err)
+	assert.Equal(t, k.ID, created.Author.KeyID)
+	assert.Equal(t, uuid.Nil, created.Author.UserID)
+
+	got, err := f.svc.ByID(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, k.ID, got.Author.KeyID, "the row read back from Postgres must still name the key")
+	assert.Equal(t, uuid.Nil, got.Author.UserID, "a key-authored row must persist a NULL user_id")
+}
+
+// TestPostgres_Service_Create_UserPrincipalPersistsNullKeyID is the control case for a human principal's row.
+func TestPostgres_Service_Create_UserPrincipalPersistsNullKeyID(t *testing.T) {
+	f := newTodoServiceFixture(t)
+
+	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.projID, UserID: f.userID})
+	ctx = session.PrincipalInto(ctx, session.Principal{UserID: f.userID, Source: session.SourceOIDC})
+
+	created, err := f.svc.Create(ctx, "written by a person")
+	require.NoError(t, err)
+	assert.Equal(t, f.userID, created.Author.UserID)
+	assert.Equal(t, uuid.Nil, created.Author.KeyID)
+
+	got, err := f.svc.ByID(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, f.userID, got.Author.UserID, "the row read back from Postgres must still name the user")
+	assert.Equal(t, uuid.Nil, got.Author.KeyID, "a user-authored row must persist a NULL created_by_key_id")
 }

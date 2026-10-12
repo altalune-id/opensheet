@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package mcp.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "altalune.id/opensheet/gen/go/mcp/v1;mcpv1";
+
+extend google.protobuf.MethodOptions {
+  Tool tool = 51001;
+}
+
+// SECURITY: Tool carries no scope. A tool's scope is declared once, in internal/mcp's catalog, and
+// registration resolves it from there; never add an authorization field to this message.
+message Tool {
+  string name = 1;
+  string description = 2;
+  repeated string required = 3;
+  bool mutation = 4;
+  string ui = 5;
+  // NOTE: destructiveHint defaults to true when absent, so the server always sends it; an inaccurate value desensitizes the host's confirmation prompt.
+  bool destructive = 6;
+  // Title overrides the title derived from the tool name, which mangles acronyms.
+  string title = 7;
+}

@@ -24,7 +24,7 @@ func NewWelcomeHandler(d Deps, users *user.Service) *WelcomeHandler {
 }
 
 // Register wires the /welcome routes onto mux.
-func (h *WelcomeHandler) Register(mux *http.ServeMux) {
+func (h *WelcomeHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /welcome", h.GetWelcome)
 	mux.HandleFunc("POST /welcome", h.PostWelcome)
 }

@@ -187,3 +187,37 @@ func TestSQLite_MissingTenant(t *testing.T) {
 		t.Errorf("List: want *tenant.MissingError, got %T", err)
 	}
 }
+
+func TestSQLite_SecondSystemProjectInAnOrgIsRefused(t *testing.T) {
+	db, prefix := newSQLiteDBForTest(t)
+	store := newSQLiteStore(db, prefix)
+	userID, orgID := seedUserAndOrg(t, db)
+	_, otherOrgID := seedUserAndOrg(t, db)
+	ctx := tenantCtx(orgID, userID)
+
+	first, _ := New(orgID, "web", "Web")
+	first.System = true
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("Save first: %v", err)
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("re-saving the system project must stay allowed: %v", err)
+	}
+
+	second, _ := New(orgID, "api", "API")
+	second.System = true
+	if err := store.Save(ctx, second); !IsSystemProjectExistsError(err) {
+		t.Fatalf("want SystemProjectExistsError, got %T: %v", err, err)
+	}
+
+	other, _ := New(otherOrgID, "web", "Other Web")
+	other.System = true
+	if err := store.Save(tenantCtx(otherOrgID, userID), other); err != nil {
+		t.Fatalf("another org keeps its own system project: %v", err)
+	}
+
+	dup, _ := New(orgID, "web", "Dup")
+	if err := store.Save(ctx, dup); !IsAlreadyExistsError(err) {
+		t.Fatalf("a slug clash must stay AlreadyExistsError, got %T: %v", err, err)
+	}
+}

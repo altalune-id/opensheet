@@ -10,6 +10,7 @@ import (
 type Store interface {
 	Save(ctx context.Context, o *Org) error
 	BySlug(ctx context.Context, slug string) (*Org, error)
+	SystemOrg(ctx context.Context) (*Org, error)
 	ByID(ctx context.Context, id uuid.UUID) (*Org, error)
 	List(ctx context.Context, userID uuid.UUID) ([]*Org, error)
 

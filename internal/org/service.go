@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -11,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/tenant"
+	slugs "altalune.id/opensheet/slug"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
@@ -22,15 +24,21 @@ type Service struct {
 	caps       capabilities.Capabilities
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
+	onRemoved  []MemberRemovedFunc
 }
+
+// MemberRemovedFunc reacts to a member leaving an org, such as revoking what the member held there.
+type MemberRemovedFunc func(ctx context.Context, orgID, userID uuid.UUID) error
+
+// OnMemberRemoved registers fn to run on every RemoveMember, before the membership is deleted. NOTE: register at boot, before serving; the list is not guarded for concurrent registration.
+func (s *Service) OnMemberRemoved(fn MemberRemovedFunc) { s.onRemoved = append(s.onRemoved, fn) }
 
 // NewService wires the Service.
 func NewService(store Store, caps capabilities.Capabilities, log *slog.Logger, unexpected apperror.UnexpectedFunc) *Service {
 	return &Service{store: store, caps: caps, log: log, unexpected: unexpected}
 }
 
-// BootstrapSingleton idempotently ensures the fixed selfhosted org exists and carries an owner membership for ownerID.
-// The org and owner membership are stamped System=true so they cannot be renamed or removed.
+// BootstrapSingleton idempotently ensures the one system org exists with an owner membership for ownerID; an existing system org is reused whatever slug is passed, and a blank slug is generated.
 func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, ownerID uuid.UUID) (*Org, error) {
 	ctx, span := tracer.Start(ctx, "org.BootstrapSingleton")
 	defer span.End()
@@ -40,39 +48,95 @@ func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, own
 	// call will create, and reuse that id when inserting so the row satisfies its own policy.
 	ctx, orgID := scopeForBootstrap(ctx, ownerID)
 
-	existing, err := s.store.BySlug(ctx, slug)
+	o, err := s.ensureSingleton(ctx, orgID, strings.TrimSpace(slug), name, ownerID)
+	if !IsSystemOrgExistsError(err) && !IsUnreadableExistingOrgError(err) {
+		return o, err
+	}
+	winner, wErr := s.store.SystemOrg(ctx)
+	if IsNotFoundError(wErr) && IsUnreadableExistingOrgError(err) {
+		return nil, err
+	}
+	if wErr != nil {
+		return nil, s.unexpected(ctx, "org.BootstrapSingleton: SystemOrg after conflict", wErr)
+	}
+	return s.adoptSingleton(ctx, winner, ownerID)
+}
+
+func (s *Service) ensureSingleton(ctx context.Context, orgID uuid.UUID, slug, name string, ownerID uuid.UUID) (*Org, error) {
+	existing, err := s.store.SystemOrg(ctx)
 	if err == nil {
-		if !existing.System {
-			existing.System = true
-			if sErr := s.store.Save(ctx, existing); sErr != nil {
-				return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", sErr, "org_id", existing.ID.String())
+		return s.adoptSingleton(ctx, existing, ownerID)
+	}
+	if !IsNotFoundError(err) {
+		return nil, s.unexpected(ctx, "org.BootstrapSingleton: SystemOrg", err)
+	}
+
+	if slug == "" {
+		return slugs.Retry(slugs.MaxAttempts, IsAlreadyExistsError, func(candidate string) (*Org, error) {
+			_, err := s.store.BySlug(ctx, candidate)
+			if err == nil {
+				return nil, &AlreadyExistsError{Slug: candidate}
 			}
-		}
-		if m, mErr := s.store.MembershipOf(ctx, existing.ID, ownerID); mErr == nil {
-			if !m.System {
-				m.System = true
-				if sErr := s.store.SaveMembership(ctx, m); sErr != nil {
-					return nil, s.unexpected(ctx, "org.BootstrapSingleton: SaveMembership", sErr, "org_id", existing.ID.String())
-				}
+			if !IsNotFoundError(err) {
+				return nil, s.unexpected(ctx, "org.BootstrapSingleton: BySlug", err, "slug", candidate)
 			}
-			return existing, nil
-		} else if !IsMembershipMissingError(mErr) && !IsNotFoundError(mErr) {
-			return nil, s.unexpected(ctx, "org.BootstrapSingleton: MembershipOf", mErr, "org_id", existing.ID.String())
-		}
-		m, mErr := NewMembership(existing.ID, ownerID, RoleOwner)
-		if mErr != nil {
-			return nil, mErr
-		}
-		m.System = true
-		if mErr := s.store.SaveMembership(ctx, m); mErr != nil {
-			return nil, s.unexpected(ctx, "org.BootstrapSingleton: SaveMembership", mErr, "org_id", existing.ID.String())
-		}
-		return existing, nil
+			return s.insertSingleton(ctx, orgID, candidate, name, ownerID)
+		})
+	}
+
+	existing, err = s.store.BySlug(ctx, slug)
+	if err == nil {
+		return s.adoptSingleton(ctx, existing, ownerID)
 	}
 	if !IsNotFoundError(err) {
 		return nil, s.unexpected(ctx, "org.BootstrapSingleton: BySlug", err, "slug", slug)
 	}
+	o, err := s.insertSingleton(ctx, orgID, slug, name, ownerID)
+	if IsAlreadyExistsError(err) {
+		// NOTE: the slug exists but the lookup above could not see it — under RLS that means the row
+		// belongs to a different org id, so report it plainly instead of a misleading not-found.
+		return nil, &UnreadableExistingOrgError{Slug: slug}
+	}
+	return o, err
+}
 
+// SECURITY: adopting binds the scope to the adopted org's own id; the caller holds the setup token, which is what authorizes joining it as owner.
+func (s *Service) adoptSingleton(ctx context.Context, existing *Org, ownerID uuid.UUID) (*Org, error) {
+	ctx = tenant.Into(ctx, tenant.Context{OrgID: existing.ID, UserID: ownerID})
+	if !existing.System {
+		existing.System = true
+		if sErr := s.store.Save(ctx, existing); sErr != nil {
+			if IsSystemOrgExistsError(sErr) {
+				return nil, sErr
+			}
+			return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", sErr, "org_id", existing.ID.String())
+		}
+	}
+	m, mErr := s.store.MembershipOf(ctx, existing.ID, ownerID)
+	if mErr == nil {
+		if !m.System {
+			m.System = true
+			if sErr := s.store.SaveMembership(ctx, m); sErr != nil {
+				return nil, s.unexpected(ctx, "org.BootstrapSingleton: SaveMembership", sErr, "org_id", existing.ID.String())
+			}
+		}
+		return existing, nil
+	}
+	if !IsMembershipMissingError(mErr) && !IsNotFoundError(mErr) {
+		return nil, s.unexpected(ctx, "org.BootstrapSingleton: MembershipOf", mErr, "org_id", existing.ID.String())
+	}
+	m, mErr = NewMembership(existing.ID, ownerID, RoleOwner)
+	if mErr != nil {
+		return nil, mErr
+	}
+	m.System = true
+	if mErr := s.store.SaveMembership(ctx, m); mErr != nil {
+		return nil, s.unexpected(ctx, "org.BootstrapSingleton: SaveMembership", mErr, "org_id", existing.ID.String())
+	}
+	return existing, nil
+}
+
+func (s *Service) insertSingleton(ctx context.Context, orgID uuid.UUID, slug, name string, ownerID uuid.UUID) (*Org, error) {
 	o, err := NewOrg(slug, name, ownerID)
 	if err != nil {
 		return nil, err
@@ -80,10 +144,8 @@ func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, own
 	o.ID = orgID
 	o.System = true
 	if err := s.store.Save(ctx, o); err != nil {
-		if IsAlreadyExistsError(err) {
-			// NOTE: the slug exists but the lookup above could not see it — under RLS that means the row
-			// belongs to a different org id, so report it plainly instead of a misleading not-found.
-			return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", &UnreadableExistingOrgError{Slug: slug}, "slug", slug)
+		if IsAlreadyExistsError(err) || IsSystemOrgExistsError(err) {
+			return nil, err
 		}
 		return nil, s.unexpected(ctx, "org.BootstrapSingleton: Save", err, "slug", slug)
 	}
@@ -98,7 +160,7 @@ func (s *Service) BootstrapSingleton(ctx context.Context, slug, name string, own
 	return o, nil
 }
 
-// Create constructs a new org and enrols the owner as an owner-role member.
+// Create constructs a new org and enrols the owner as an owner-role member; an empty slug is generated.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 	ctx, span := tracer.Start(ctx, "org.Create")
 	defer span.End()
@@ -107,15 +169,24 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 		return nil, &CreationDisabledError{}
 	}
 
-	existing, err := s.store.BySlug(ctx, req.Slug)
+	if chosen := strings.TrimSpace(req.Slug); chosen != "" {
+		return s.createWithSlug(ctx, req, chosen)
+	}
+	return slugs.Retry(slugs.MaxAttempts, IsAlreadyExistsError, func(candidate string) (*Org, error) {
+		return s.createWithSlug(ctx, req, candidate)
+	})
+}
+
+func (s *Service) createWithSlug(ctx context.Context, req CreateRequest, chosen string) (*Org, error) {
+	existing, err := s.store.BySlug(ctx, chosen)
 	switch {
 	case err == nil && existing != nil:
-		return nil, &AlreadyExistsError{Slug: req.Slug}
+		return nil, &AlreadyExistsError{Slug: chosen}
 	case err != nil && !IsNotFoundError(err):
-		return nil, s.unexpected(ctx, "org.Create: BySlug", fmt.Errorf("org.Create: BySlug: %w", err), "slug", req.Slug)
+		return nil, s.unexpected(ctx, "org.Create: BySlug", fmt.Errorf("org.Create: BySlug: %w", err), "slug", chosen)
 	}
 
-	o, err := NewOrg(req.Slug, req.Name, req.OwnerID)
+	o, err := NewOrg(chosen, req.Name, req.OwnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +196,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Org, error) {
 		if IsAlreadyExistsError(err) {
 			return nil, err
 		}
-		return nil, s.unexpected(ctx, "org.Create: Save", fmt.Errorf("org.Create: Save: %w", err), "slug", req.Slug)
+		return nil, s.unexpected(ctx, "org.Create: Save", fmt.Errorf("org.Create: Save: %w", err), "slug", chosen)
 	}
 
 	m, err := NewMembership(o.ID, req.OwnerID, RoleOwner)
@@ -229,6 +300,12 @@ func (s *Service) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) err
 	if refusal := RemovalRefusal(orgID, tc.UserID, userID, actor.Role, m.Role, m.System); refusal != nil {
 		return refusal
 	}
+	// SECURITY: hooks run before the delete, so a failed revoke leaves the member in place and a retry can finish it.
+	for _, fn := range s.onRemoved {
+		if err := fn(ctx, orgID, userID); err != nil {
+			return s.unexpected(ctx, "org.RemoveMember: hook", fmt.Errorf("org.RemoveMember: hook: %w", err), "org_id", orgID.String(), "user_id", userID.String())
+		}
+	}
 	if err := s.store.RemoveMember(ctx, orgID, userID); err != nil {
 		if IsMembershipMissingError(err) {
 			return err
@@ -236,6 +313,20 @@ func (s *Service) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) err
 		return s.unexpected(ctx, "org.RemoveMember", fmt.Errorf("org.RemoveMember: %w", err), "org_id", orgID.String(), "user_id", userID.String())
 	}
 	return nil
+}
+
+// SystemOrg returns the singleton org by its system flag, or a NotFoundError when none exists.
+func (s *Service) SystemOrg(ctx context.Context) (*Org, error) {
+	ctx, span := tracer.Start(ctx, "org.SystemOrg")
+	defer span.End()
+	o, err := s.store.SystemOrg(ctx)
+	if err != nil {
+		if IsNotFoundError(err) {
+			return nil, err
+		}
+		return nil, s.unexpected(ctx, "org.SystemOrg", fmt.Errorf("org.SystemOrg: %w", err))
+	}
+	return o, nil
 }
 
 // BySlug looks up an org by its immutable slug.
@@ -280,6 +371,53 @@ func (s *Service) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*M
 	return m, nil
 }
 
+// IsManager reports whether userID holds an owner or admin membership in orgID. SECURITY: ctx must already carry the tenant scope.
+func (s *Service) IsManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
+	ctx, span := tracer.Start(ctx, "org.IsManager")
+	defer span.End()
+	if userID == uuid.Nil {
+		return false, nil
+	}
+	m, err := s.MembershipOf(ctx, orgID, userID)
+	if IsMembershipMissingError(err) || IsNotFoundError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return m.Role.CanManage(), nil
+}
+
+// RequireManager refuses with *NotManagerError unless userID is an owner or admin of orgID; a machine principal is always refused. SECURITY: ctx must already carry the tenant scope.
+func (s *Service) RequireManager(ctx context.Context, orgID, userID uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "org.RequireManager")
+	defer span.End()
+	ok, err := s.IsManager(ctx, orgID, userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &NotManagerError{OrgID: orgID.String(), UserID: userID.String()}
+	}
+	return nil
+}
+
+// RequireMember refuses with *MembershipMissingError unless userID holds any membership in orgID. SECURITY: ctx must already carry the tenant scope.
+func (s *Service) RequireMember(ctx context.Context, orgID, userID uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "org.RequireMember")
+	defer span.End()
+	if userID == uuid.Nil {
+		return &MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
+	}
+	if _, err := s.MembershipOf(ctx, orgID, userID); err != nil {
+		if IsNotFoundError(err) {
+			return &MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
+		}
+		return err
+	}
+	return nil
+}
+
 // ListMembers returns every membership in the given org.
 func (s *Service) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
 	ctx, span := tracer.Start(ctx, "org.ListMembers")
@@ -304,7 +442,6 @@ func (s *Service) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*M
 	return ps, nil
 }
 
-// scopeForBootstrap returns ctx carrying a tenant scope and the org id that scope names, minting both when absent.
 func scopeForBootstrap(ctx context.Context, ownerID uuid.UUID) (context.Context, uuid.UUID) {
 	if tc, err := tenant.From(ctx); err == nil && tc.OrgID != uuid.Nil {
 		return ctx, tc.OrgID

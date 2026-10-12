@@ -1,0 +1,11 @@
+:root {
+  color-scheme: light dark;
+  --color-badge-published: light-dark(#16a34a, #4ade80);
+  --color-badge-draft: light-dark(#a1a1aa, #71717a);
+}
+body {
+  margin: 0;
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  color: var(--color-text-primary, light-dark(#18181b, #f4f4f5));
+  background: transparent;
+}

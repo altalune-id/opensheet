@@ -1,41 +1,77 @@
-package authn
+package authn_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
+
+	"altalune.id/opensheet/internal/platform/authn"
 )
 
-func TestValid_AndAllScopes(t *testing.T) {
-	if !Valid(ScopeSheetsRead) {
-		t.Errorf("Valid(%q) = false", ScopeSheetsRead)
+func TestValidRejectsUnknownScope(t *testing.T) {
+	if authn.Valid("posts:destroy") {
+		t.Fatal("Valid accepted a scope outside the catalog")
 	}
-	if Valid("sheets:destroy") {
-		t.Error("Valid accepted an unknown scope")
-	}
-	all := AllScopes()
-	if len(all) != 10 {
-		t.Fatalf("AllScopes() = %d scopes, want 10", len(all))
-	}
-	seen := map[string]bool{}
-	for _, s := range all {
-		if seen[s] {
-			t.Errorf("AllScopes() contains %q twice", s)
-		}
-		seen[s] = true
-		if !Valid(s) {
-			t.Errorf("AllScopes() contains %q but Valid says no", s)
-		}
+	if !authn.Valid(authn.ScopeSheetsRead) {
+		t.Fatalf("Valid rejected %q", authn.ScopeSheetsRead)
 	}
 }
 
-func TestAllScopes_ReturnsCopy(t *testing.T) {
-	first := AllScopes()
+func TestAllScopesReturnsACopy(t *testing.T) {
+	first := authn.AllScopes()
 	first[0] = "mutated"
-	second := AllScopes()
-	if slices.Contains(second, "mutated") {
-		t.Fatal("AllScopes() returned the backing slice; a caller mutated the catalog")
+	if slices.Contains(authn.AllScopes(), "mutated") {
+		t.Fatal("AllScopes leaked its backing array")
 	}
-	if second[0] != ScopeSheetsRead {
-		t.Fatalf("AllScopes()[0] = %q, want %q", second[0], ScopeSheetsRead)
+}
+
+func TestErrorHelpers(t *testing.T) {
+	var unauthorized error = &authn.UnauthorizedError{}
+	if !authn.IsUnauthorizedError(unauthorized) {
+		t.Fatal("IsUnauthorizedError missed its own type")
+	}
+	scoped := &authn.InsufficientScopeError{Scope: authn.ScopeSheetsWrite}
+	if !authn.IsInsufficientScopeError(scoped) {
+		t.Fatal("IsInsufficientScopeError missed its own type")
+	}
+	if authn.IsUnauthorizedError(scoped) {
+		t.Fatal("an authz failure must not read as an authn failure")
+	}
+	if !errors.Is(errors.Join(nil, scoped), scoped) {
+		t.Fatal("InsufficientScopeError does not survive errors.Join")
+	}
+}
+
+// SECURITY: a retired scope keeps validating on existing keys but is never offered to a new one.
+func TestRetiredScopeValidatesButIsNotMintable(t *testing.T) {
+	if !authn.Valid(authn.ScopeAPIKeysWrite) {
+		t.Fatal("a retired scope must keep validating, or keys in the field stop parsing")
+	}
+	if authn.Mintable(authn.ScopeAPIKeysWrite) {
+		t.Fatal("apikeys:write is retired and must not be mintable")
+	}
+	if slices.Contains(authn.MintableScopes(), authn.ScopeAPIKeysWrite) {
+		t.Fatal("MintableScopes offered a retired scope")
+	}
+	if !authn.Mintable(authn.ScopeSheetsRead) {
+		t.Fatalf("Mintable rejected %q", authn.ScopeSheetsRead)
+	}
+}
+
+func TestEveryScopeHasALevel(t *testing.T) {
+	for _, s := range authn.AllScopes() {
+		level, ok := authn.LevelOf(s)
+		if !ok || (level != authn.LevelProject && level != authn.LevelOrg) {
+			t.Errorf("%q has no valid level: %q", s, level)
+		}
+	}
+	if _, ok := authn.LevelOf("posts:destroy"); ok {
+		t.Fatal("LevelOf resolved a scope outside the catalog")
+	}
+	if level, _ := authn.LevelOf(authn.ScopeMembersRead); level != authn.LevelOrg {
+		t.Fatalf("members:read is %q, want org: it acts on the org itself", level)
+	}
+	if level, _ := authn.LevelOf(authn.ScopeSheetsRead); level != authn.LevelProject {
+		t.Fatalf("posts:read is %q, want project", level)
 	}
 }

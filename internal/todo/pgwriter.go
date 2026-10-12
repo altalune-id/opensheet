@@ -18,29 +18,40 @@ func (s *postgresStore) Save(ctx context.Context, t *Todo) error {
 	}
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
-			t.ID, t.OrgID, t.ProjectID, tc.UserID, t.Title, t.Done,
-			t.CreatedAt.UTC(), t.UpdatedAt.UTC(),
+			t.ID, t.OrgID, t.ProjectID, pgNullableUUID(t.Author.UserID), pgNullableUUID(t.Author.KeyID),
+			t.Title, t.Done, t.CreatedAt.UTC(), t.UpdatedAt.UTC(),
 		).
 		ON_CONFLICT(s.table.ID).
+		// SECURITY: the conflict clause carries the tenant predicate; without it an attacker-supplied row id updates another org's row.
 		DO_UPDATE(
 			postgres.SET(
 				s.table.Title.SET(postgres.String(t.Title)),
 				s.table.Done.SET(postgres.Bool(t.Done)),
 				s.table.UpdatedAt.SET(postgres.TimestampzT(t.UpdatedAt.UTC())),
-			),
+			).WHERE(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
-	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+	res, execErr := stmt.ExecContext(ctx, tx)
+	if execErr != nil {
 		return s.endTx(tx, owned, fmt.Errorf("todo.postgres.Save: %w", execErr))
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return s.endTx(tx, owned, fmt.Errorf("todo.postgres.Save: rows affected: %w", raErr))
+	}
+	if n == 0 {
+		return s.endTx(tx, owned, &NotFoundError{ID: t.ID.String()})
 	}
 	return s.endTx(tx, owned, nil)
 }
 
 func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {
-	tx, owned, _, err := s.txAcquire(ctx)
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
 	}
-	stmt := s.table.DELETE().WHERE(s.table.ID.EQ(postgres.UUID(id)))
+	// SECURITY: org predicate, not RLS alone — a BYPASSRLS role would otherwise delete another org's row.
+	stmt := s.table.DELETE().WHERE(s.table.ID.EQ(postgres.UUID(id)).
+		AND(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	res, execErr := stmt.ExecContext(ctx, tx)
 	if execErr != nil {
 		return s.endTx(tx, owned, fmt.Errorf("todo.postgres.Delete: %w", execErr))
@@ -129,4 +140,12 @@ func (s *postgresStore) markDoneBatch(ctx context.Context, orgID uuid.UUID, cuto
 		return 0, fmt.Errorf("todo.postgres.MarkDoneOlderThan: commit: %w", err)
 	}
 	return int(n), nil
+}
+
+// NOTE: safe only in a VALUES tuple; a dynamic SET() expression needs the CAST-typed Null* helpers in entity/postgres.
+func pgNullableUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
 }

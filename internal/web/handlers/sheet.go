@@ -24,7 +24,6 @@ import (
 	"altalune.id/opensheet/internal/web/templates"
 )
 
-// maxPreviewRows bounds how much of a tab the preview table renders.
 const maxPreviewRows = 50
 
 const noIDColumnCopy = "This tab has no id column. Add a column headed id in row 1, with a unique value in every row. " +
@@ -50,7 +49,7 @@ func NewSheetHandler(d Deps, projects *project.Service, sheets *sheet.Service, s
 
 // GetList renders the published sheets.
 func (h *SheetHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -67,7 +66,7 @@ func (h *SheetHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // PostCreate publishes a tab under a slug and returns the refreshed section.
 func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -119,8 +118,7 @@ func (h *SheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	h.writeSection(w, sc, templates.SheetsView{})
 }
 
-// PostFixIDColumn adds an id column to one tab of one registered spreadsheet and returns to the publish form.
-// NOTE: this writes to the user's spreadsheet, so it runs only from this button and never as part of publishing — and it deliberately does not then publish, so the operator sees the change first.
+// PostFixIDColumn adds an id column to one tab of one registered spreadsheet. NOTE: it writes to the user's spreadsheet, so it runs only from this button and never publishes afterwards.
 func (h *SheetHandler) PostFixIDColumn(w http.ResponseWriter, r *http.Request) {
 	sc, sp, ok := h.requireRegisteredSpreadsheet(w, r)
 	if !ok {
@@ -138,6 +136,7 @@ func (h *SheetHandler) PostFixIDColumn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Tab = out.Tab
+	//i18n:use sheets.fix_id_column_done
 	in.Notice = trOr(tr, "sheets.fix_id_column_done",
 		fmt.Sprintf("opensheet wrote an id column into %s of this spreadsheet and filled %d rows. Check it, then publish again.",
 			tabLabel(out.Tab), out.RowsFilled),
@@ -203,9 +202,7 @@ func (h *SheetHandler) PostDelete(w http.ResponseWriter, r *http.Request) {
 	h.redirect(w, sc, "/sheets")
 }
 
-// PostPurge drops every cached tab of the sheet.
-// NOTE: the web UI purges through the service, not the data plane's DELETE — a cookie-accepting
-// DELETE outside this middleware chain would have no CSRF protection.
+// PostPurge drops every cached tab of the sheet. NOTE: it purges through the service, not the data plane's DELETE, which would have no CSRF protection here.
 func (h *SheetHandler) PostPurge(w http.ResponseWriter, r *http.Request) {
 	sc, sh, ok := h.requireSheet(w, r)
 	if !ok {
@@ -213,10 +210,10 @@ func (h *SheetHandler) PostPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Sheets.PurgeCache(sc.req.Context(), sh.ID); err != nil {
 		h.LogErr("web sheet: purge", err)
-		Render(w, sc.req, templates.SheetPurged(h.fragment(sc), "Could not purge the cache.", ErrorRef(err)))
+		Render(w, sc.req, templates.SheetPurged(h.ProjectFragmentBase(sc), "Could not purge the cache.", ErrorRef(err)))
 		return
 	}
-	Render(w, sc.req, templates.SheetPurged(h.fragment(sc), "", ""))
+	Render(w, sc.req, templates.SheetPurged(h.ProjectFragmentBase(sc), "", ""))
 }
 
 // GetPreview renders one read of the sheet, which may cost a Google round-trip.
@@ -228,14 +225,14 @@ func (h *SheetHandler) GetPreview(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Read.Rows(sc.req.Context(), sh)
 	if err != nil {
 		h.LogErr("web sheet: preview", err)
-		Render(w, sc.req, templates.SheetPreviewFragment(h.fragment(sc), templates.SheetPreview{Failure: previewMessage(err), FailureCode: ErrorRef(err)}))
+		Render(w, sc.req, templates.SheetPreviewFragment(h.ProjectFragmentBase(sc), templates.SheetPreview{Failure: previewMessage(err), FailureCode: ErrorRef(err)}))
 		return
 	}
-	Render(w, sc.req, templates.SheetPreviewFragment(h.fragment(sc), previewOf(rows)))
+	Render(w, sc.req, templates.SheetPreviewFragment(h.ProjectFragmentBase(sc), previewOf(rows)))
 }
 
 // Register wires the sheet routes onto mux.
-func (h *SheetHandler) Register(mux *http.ServeMux) {
+func (h *SheetHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/sheets", h.GetList)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/sheets", h.PostCreate)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/sheets/{id}", h.GetShow)
@@ -254,7 +251,7 @@ func (h *SheetHandler) GetBulkPanel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.fragment(sc), h.bulkPanel(sc, sp)))
+	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.ProjectFragmentBase(sc), h.bulkPanel(sc, sp)))
 }
 
 // PostBulkPublish publishes every ticked tab of one document and re-renders the panel with per-row outcomes.
@@ -269,32 +266,32 @@ func (h *SheetHandler) PostBulkPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	view := h.bulkPanel(sc, sp)
 	h.publishTicked(sc, sp, &view)
-	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.fragment(sc), view))
+	Render(w, sc.req, templates.SpreadsheetBulkPublish(h.ProjectFragmentBase(sc), view))
 }
 
-func (h *SheetHandler) requireRegisteredSpreadsheet(w http.ResponseWriter, r *http.Request) (projectScope, *spreadsheet.Spreadsheet, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *SheetHandler) requireRegisteredSpreadsheet(w http.ResponseWriter, r *http.Request) (ProjectScope, *spreadsheet.Spreadsheet, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, ok := h.pathID(w, sc.req, "spreadsheet")
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	sp, err := h.Spreadsheets.ByID(sc.req.Context(), id)
 	if err != nil {
 		if spreadsheet.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That spreadsheet is not registered in this project.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web sheet: bulk byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that spreadsheet.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, sp, true
 }
 
-func (h *SheetHandler) bulkPanel(sc projectScope, sp *spreadsheet.Spreadsheet) templates.BulkPublishView {
+func (h *SheetHandler) bulkPanel(sc ProjectScope, sp *spreadsheet.Spreadsheet) templates.BulkPublishView {
 	view := templates.BulkPublishView{
 		ProjectSlug:   sc.project.Slug,
 		SpreadsheetID: sp.ID.String(),
@@ -324,7 +321,7 @@ func (h *SheetHandler) bulkPanel(sc projectScope, sp *spreadsheet.Spreadsheet) t
 }
 
 // NOTE: every ticked row is published on its own — a row that fails leaves the earlier successes in place, deliberately.
-func (h *SheetHandler) publishTicked(sc projectScope, sp *spreadsheet.Spreadsheet, view *templates.BulkPublishView) {
+func (h *SheetHandler) publishTicked(sc ProjectScope, sp *spreadsheet.Spreadsheet, view *templates.BulkPublishView) {
 	form := sc.req.PostForm
 	view.Public = form.Get("visibility") == string(sheet.VisibilityPublic)
 	if msg := h.publicRefusal(view.Public, form.Get("public_ack")); msg != "" {
@@ -358,7 +355,7 @@ func (h *SheetHandler) publishTicked(sc projectScope, sp *spreadsheet.Spreadshee
 }
 
 // NOTE: the bulk panel carries no writable control, so every bulk-published sheet starts unwritable.
-func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, row *templates.BulkTabRow, vis sheet.Visibility, ttl time.Duration) {
+func (h *SheetHandler) publishRow(sc ProjectScope, sp *spreadsheet.Spreadsheet, row *templates.BulkTabRow, vis sheet.Visibility, ttl time.Duration) {
 	if row.Slug == "" {
 		row.SlugEmpty = true
 		return
@@ -379,7 +376,7 @@ func (h *SheetHandler) publishRow(sc projectScope, sp *spreadsheet.Spreadsheet, 
 	row.Published, row.Created, row.SheetID = true, true, sh.ID.String()
 }
 
-func (h *SheetHandler) publishedTabs(sc projectScope, sprdID uuid.UUID) map[string]string {
+func (h *SheetHandler) publishedTabs(sc ProjectScope, sprdID uuid.UUID) map[string]string {
 	items, err := h.Sheets.List(sc.req.Context())
 	if err != nil {
 		h.LogErr("web sheet: bulk list sheets", err)
@@ -397,29 +394,28 @@ func (h *SheetHandler) publishedTabs(sc projectScope, sprdID uuid.UUID) map[stri
 // NOTE: the index pairs a checkbox with its slug input; repeated unindexed keys would shift a neighbour's slug onto a row an operator never ticked.
 func bulkSlugField(i int) string { return "slug." + strconv.Itoa(i) }
 
-func (h *SheetHandler) requireSheet(w http.ResponseWriter, r *http.Request) (projectScope, *sheet.Sheet, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *SheetHandler) requireSheet(w http.ResponseWriter, r *http.Request) (ProjectScope, *sheet.Sheet, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	id, ok := h.pathID(w, sc.req, "sheet")
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	sh, err := h.Sheets.ByID(sc.req.Context(), id)
 	if err != nil {
 		if sheet.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That sheet is not published in this project.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web sheet: byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that sheet.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, sh, true
 }
 
-// publicRefusal gates a public sheet on the capability and on the operator's explicit acknowledgement.
 // SECURITY: enforced on the server, so hiding the radio in the template is a courtesy rather than the control.
 func (h *SheetHandler) publicRefusal(public bool, ack string) string {
 	if !public {
@@ -434,19 +430,19 @@ func (h *SheetHandler) publicRefusal(public bool, ack string) string {
 	return ""
 }
 
-func (h *SheetHandler) redirect(w http.ResponseWriter, sc projectScope, suffix string) {
+func (h *SheetHandler) redirect(w http.ResponseWriter, sc ProjectScope, suffix string) {
 	http.Redirect(w, sc.req, web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, suffix)), http.StatusSeeOther) //nolint:gosec // G710: both slugs are validated by their own slug patterns
 }
 
-func (h *SheetHandler) writeSection(w http.ResponseWriter, sc projectScope, view templates.SheetsView) {
+func (h *SheetHandler) writeSection(w http.ResponseWriter, sc ProjectScope, view templates.SheetsView) {
 	filled, ok := h.fill(w, sc, view)
 	if !ok {
 		return
 	}
-	Render(w, sc.req, templates.SheetSection(h.fragment(sc), filled))
+	Render(w, sc.req, templates.SheetSection(h.ProjectFragmentBase(sc), filled))
 }
 
-func (h *SheetHandler) fill(w http.ResponseWriter, sc projectScope, view templates.SheetsView) (templates.SheetsView, bool) {
+func (h *SheetHandler) fill(w http.ResponseWriter, sc ProjectScope, view templates.SheetsView) (templates.SheetsView, bool) {
 	sprds, err := h.Spreadsheets.List(sc.req.Context())
 	if err != nil {
 		h.LogErr("web sheet: list spreadsheets", err)
@@ -482,7 +478,7 @@ func (h *SheetHandler) fill(w http.ResponseWriter, sc projectScope, view templat
 	return view, true
 }
 
-func (h *SheetHandler) detail(sc projectScope, sh *sheet.Sheet, failure string) templates.SheetView {
+func (h *SheetHandler) detail(sc ProjectScope, sh *sheet.Sheet, failure string) templates.SheetView {
 	title := ""
 	if sp, err := h.Spreadsheets.ByID(sc.req.Context(), sh.SpreadsheetID); err == nil {
 		title = spreadsheetTitle(sp)
@@ -501,13 +497,12 @@ func (h *SheetHandler) detail(sc projectScope, sh *sheet.Sheet, failure string) 
 	}
 }
 
-// dataURL is the absolute URL a consumer fetches the sheet from, for copying off the page.
-func (h *SheetHandler) dataURL(sc projectScope, sh *sheet.Sheet) string {
+func (h *SheetHandler) dataURL(sc ProjectScope, sh *sheet.Sheet) string {
 	path := web.DataPath(h.Cfg.HTTP.BasePath, sc.org.Slug, sc.project.Slug, sh.Slug)
 	return strings.TrimRight(h.Cfg.HTTP.BaseURL, "/") + path
 }
 
-func (h *SheetHandler) renderDetail(w http.ResponseWriter, sc projectScope, sh *sheet.Sheet, failure string, cause error) {
+func (h *SheetHandler) renderDetail(w http.ResponseWriter, sc ProjectScope, sh *sheet.Sheet, failure string, cause error) {
 	view := h.detail(sc, sh, failure)
 	view.ErrorCode = ErrorRef(cause)
 	Render(w, sc.req, templates.SheetLayout(
@@ -516,9 +511,7 @@ func (h *SheetHandler) renderDetail(w http.ResponseWriter, sc projectScope, sh *
 	))
 }
 
-// previewOf flattens the row maps into a table.
-// NOTE: a row is a JSON object, which has no key order, so the columns are sorted by name rather
-// than by their position in the tab.
+// NOTE: a row is a JSON object with no key order, so columns are sorted by name rather than tab position.
 func previewOf(rows sheet.Rows) templates.SheetPreview {
 	columns := map[string]struct{}{}
 	for _, row := range rows.Values {
@@ -601,6 +594,8 @@ func publishMessage(tr *i18n.Translator, err error) string {
 }
 
 // NOTE: the table-contract errors' Error() text is written for logs, so the form states the remedy instead of passing it through.
+//
+//i18n:use sheets.publish_error.*
 func contractMessage(tr *i18n.Translator, err error) (string, bool) {
 	if _, ok := errors.AsType[*sheet.NoIDColumnError](err); ok {
 		return trOr(tr, "sheets.publish_error.no_id_column", noIDColumnCopy), true
@@ -629,7 +624,6 @@ func contractMessage(tr *i18n.Translator, err error) (string, bool) {
 	return "", false
 }
 
-// fixIDColumnPath is the project-relative path the "add it for me" button posts to, empty unless err is the one failure that offer can fix.
 func (h *SheetHandler) fixIDColumnPath(err error, sprdID uuid.UUID, tab string) string {
 	if _, ok := errors.AsType[*sheet.NoIDColumnError](err); !ok {
 		return ""
@@ -638,6 +632,8 @@ func (h *SheetHandler) fixIDColumnPath(err error, sprdID uuid.UUID, tab string) 
 }
 
 // NOTE: a read-only credential is discovered from Google's refusal, never pre-checked, so the 403 is where the manual remedy is named.
+//
+//i18n:use sheets.fix_error.*
 func fixMessage(tr *i18n.Translator, err error) string {
 	if gworkspace.IsPermissionDeniedError(err) || credential.IsReauthNeededError(err) {
 		return trOr(tr, "sheets.fix_error.denied", manualIDColumnCopy)
@@ -661,10 +657,8 @@ func fixMessage(tr *i18n.Translator, err error) string {
 	return trOr(tr, "sheets.fix_error.failed", "Could not add an id column to this tab.")
 }
 
-// spreadsheetRow turns a zero-based data-row index into the row number the operator sees in Google.
 func spreadsheetRow(rowIndex int) int { return rowIndex + 2 }
 
-// trOr localizes key, falling back to fallback when the request carries no translator or the key is untranslated.
 func trOr(tr *i18n.Translator, key, fallback string, args ...any) string {
 	if tr == nil {
 		return fallback

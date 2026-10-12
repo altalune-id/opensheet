@@ -13,8 +13,9 @@ import (
 
 // NotFoundError signals a missing org row.
 type NotFoundError struct {
-	ID   string
-	Slug string
+	ID     string
+	Slug   string
+	System bool
 }
 
 func (e *NotFoundError) Error() string {
@@ -25,6 +26,8 @@ func (e *NotFoundError) Error() string {
 		return fmt.Sprintf("org: not found: slug=%q", e.Slug)
 	case e.ID != "":
 		return fmt.Sprintf("org: not found: id=%s", e.ID)
+	case e.System:
+		return "org: not found: system org"
 	default:
 		return "org: not found"
 	}
@@ -237,9 +240,7 @@ func (e *SystemProtectedError) ToAppError() *apperror.AppError {
 	)
 }
 
-// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed.
-// SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
-// Refusing self-removal is also what keeps an org from losing its last owner: only an owner can remove an owner.
+// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed. SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
 func RemovalRefusal(orgID, actor, target uuid.UUID, actorRole, targetRole Role, system bool) error {
 	switch {
 	case system:
@@ -350,4 +351,48 @@ func (e *UnreadableExistingOrgError) Error() string {
 func IsUnreadableExistingOrgError(err error) bool {
 	var target *UnreadableExistingOrgError
 	return errors.As(err, &target)
+}
+
+// SystemOrgExistsError signals a write that would leave more than one system org.
+type SystemOrgExistsError struct {
+	Slug string
+}
+
+func (e *SystemOrgExistsError) Error() string {
+	return fmt.Sprintf("org: a system org already exists; %q cannot be a second one", e.Slug)
+}
+
+// IsSystemOrgExistsError reports whether err's tree contains a *SystemOrgExistsError.
+func IsSystemOrgExistsError(err error) bool {
+	_, ok := errors.AsType[*SystemOrgExistsError](err)
+	return ok
+}
+
+// NotManagerError signals that the caller is not an owner or admin of the org.
+type NotManagerError struct {
+	OrgID  string
+	UserID string
+}
+
+func (e *NotManagerError) Error() string {
+	if e == nil {
+		return "org: owner or admin required"
+	}
+	return fmt.Sprintf("org: owner or admin required: org=%s user=%s", e.OrgID, e.UserID)
+}
+
+// ToAppError maps NotManagerError to a PermissionDenied envelope.
+func (e *NotManagerError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeOrgManagerRequired,
+		"Only an owner or admin can do this",
+		codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgManagerRequired},
+	)
+}
+
+// IsNotManagerError reports whether err's tree contains a *NotManagerError.
+func IsNotManagerError(err error) bool {
+	_, ok := errors.AsType[*NotManagerError](err)
+	return ok
 }

@@ -11,15 +11,10 @@ import (
 )
 
 // SingletonOrgMissingError signals the selfhosted singleton org has not been provisioned yet — the caller (typically OnboardWorkflow) should treat it as "onboarding still needs to run".
-type SingletonOrgMissingError struct {
-	Slug string
-}
+type SingletonOrgMissingError struct{}
 
 func (e *SingletonOrgMissingError) Error() string {
-	if e == nil || e.Slug == "" {
-		return "user: singleton org not provisioned"
-	}
-	return fmt.Sprintf("user: singleton org not provisioned: slug=%q", e.Slug)
+	return "user: singleton org not provisioned"
 }
 
 // IsSingletonOrgMissingError reports whether err's tree contains a *SingletonOrgMissingError.
@@ -30,8 +25,9 @@ func IsSingletonOrgMissingError(err error) bool {
 
 // NotFoundError signals no user matched the lookup.
 type NotFoundError struct {
-	ID    string
-	Email string
+	ID      string
+	Email   string
+	Subject string
 }
 
 func (e *NotFoundError) Error() string {
@@ -40,6 +36,8 @@ func (e *NotFoundError) Error() string {
 		return "user: not found: id=" + e.ID
 	case e.Email != "":
 		return "user: not found: email=" + e.Email
+	case e.Subject != "":
+		return "user: not found: idp_subject=" + e.Subject
 	default:
 		return "user: not found"
 	}

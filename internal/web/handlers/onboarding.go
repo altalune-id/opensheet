@@ -118,7 +118,7 @@ func RequireOnboarded(deps Deps, users UserLookup) func(http.Handler) http.Handl
 }
 
 // Register wires the onboarding routes onto mux.
-func (h *OnboardingHandler) Register(mux *http.ServeMux) {
+func (h *OnboardingHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /onboarding", h.GetOnboarding)
 	mux.HandleFunc("POST /onboarding", h.PostOnboarding)
 }

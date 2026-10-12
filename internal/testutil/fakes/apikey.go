@@ -10,216 +10,167 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/apikey"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // APIKey is an in-memory apikey.Store for tests.
 type APIKey struct {
-	mu       sync.Mutex
-	byID     map[uuid.UUID]*apikey.APIKey
-	byPrefix map[string]uuid.UUID
-	// SaveErr, ByIDErr, ByPrefixErr, ListErr, DeleteErr, TouchLastUsedErr — inject failures.
-	SaveErr          error
-	ByIDErr          error
-	ByPrefixErr      error
-	ListErr          error
-	DeleteErr        error
-	TouchLastUsedErr error
-	StickyError      bool
+	mu   sync.Mutex
+	byID map[uuid.UUID]*apikey.APIKey
+
+	// BySecretHashCalled records whether BySecretHash was invoked.
+	BySecretHashCalled bool
+	// BySecretHashErr, when set, is returned by the next BySecretHash call instead of a lookup.
+	BySecretHashErr error
 }
 
-// NewAPIKey builds an empty fake apikey.Store.
+// NewAPIKey returns an empty in-memory apikey.Store.
 func NewAPIKey() *APIKey {
-	return &APIKey{
-		byID:     map[uuid.UUID]*apikey.APIKey{},
-		byPrefix: map[string]uuid.UUID{},
-	}
+	return &APIKey{byID: map[uuid.UUID]*apikey.APIKey{}}
 }
 
 var _ apikey.Store = (*APIKey)(nil)
 
-func clonePublic(k *apikey.APIKey) *apikey.APIKey {
-	cp := cloneFull(k)
-	// SECURITY: mirrors the adapters' PublicColumns read — only ByPrefix returns secret material.
-	cp.SecretHash = nil
-	return cp
+// Seed inserts k directly, bypassing Save.
+func (f *APIKey) Seed(k *apikey.APIKey) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byID[k.ID] = cloneAPIKey(k)
 }
 
-func cloneFull(k *apikey.APIKey) *apikey.APIKey {
-	cp := *k
-	cp.SecretHash = slices.Clone(k.SecretHash)
-	cp.Scopes = slices.Clone(k.Scopes)
-	cp.SheetIDs = slices.Clone(k.SheetIDs)
-	return &cp
+// All returns every stored key, in no particular order.
+func (f *APIKey) All() []*apikey.APIKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*apikey.APIKey, 0, len(f.byID))
+	for _, k := range f.byID {
+		out = append(out, cloneAPIKey(k))
+	}
+	return out
 }
 
 func (f *APIKey) Save(_ context.Context, k *apikey.APIKey) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.SaveErr != nil {
-		err := f.SaveErr
-		if !f.StickyError {
-			f.SaveErr = nil
-		}
-		return err
-	}
-	cp := cloneFull(k)
-	// SECURITY: mirrors the adapters — a key read without secret material must not blank the stored hash.
-	if len(cp.SecretHash) == 0 {
-		prev, ok := f.byID[k.ID]
-		if !ok {
-			return &apikey.NotFoundError{ID: k.ID.String()}
-		}
-		cp.SecretHash = slices.Clone(prev.SecretHash)
-		cp.KeyPrefix = prev.KeyPrefix
-	}
-	if id, ok := f.byPrefix[cp.KeyPrefix]; ok && id != cp.ID {
-		return &apikey.AlreadyExistsError{Field: "key_prefix", Value: cp.KeyPrefix}
-	}
-	f.byID[cp.ID] = cp
-	f.byPrefix[cp.KeyPrefix] = cp.ID
+	f.byID[k.ID] = cloneAPIKey(k)
 	return nil
 }
 
 func (f *APIKey) ByID(_ context.Context, id uuid.UUID) (*apikey.APIKey, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.ByIDErr != nil {
-		err := f.ByIDErr
-		if !f.StickyError {
-			f.ByIDErr = nil
-		}
-		return nil, err
-	}
 	k, ok := f.byID[id]
-	if !ok {
-		return nil, &apikey.NotFoundError{ID: id.String()}
-	}
-	return clonePublic(k), nil
-}
-
-func (f *APIKey) ByPrefix(_ context.Context, prefix string) (*apikey.APIKey, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.ByPrefixErr != nil {
-		err := f.ByPrefixErr
-		if !f.StickyError {
-			f.ByPrefixErr = nil
-		}
-		return nil, err
-	}
-	id, ok := f.byPrefix[prefix]
 	if !ok {
 		return nil, &apikey.NotFoundError{}
 	}
-	return cloneFull(f.byID[id]), nil
+	return cloneAPIKey(k), nil
 }
 
-func (f *APIKey) List(_ context.Context, orgID, projectID uuid.UUID) ([]*apikey.APIKey, error) {
+func (f *APIKey) BySecretHash(_ context.Context, hash [32]byte) (*apikey.APIKey, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.ListErr != nil {
-		err := f.ListErr
-		if !f.StickyError {
-			f.ListErr = nil
-		}
-		return nil, err
+	f.BySecretHashCalled = true
+	if f.BySecretHashErr != nil {
+		return nil, f.BySecretHashErr
 	}
+	for _, k := range f.byID {
+		if k.SecretHash == hash {
+			return cloneAPIKey(k), nil
+		}
+	}
+	return nil, &apikey.NotFoundError{}
+}
+
+func (f *APIKey) List(_ context.Context, projectID uuid.UUID) ([]*apikey.APIKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := make([]*apikey.APIKey, 0, len(f.byID))
 	for _, k := range f.byID {
-		if k.OrgID != orgID || k.ProjectID != projectID {
+		if k.Kind != apikey.KindProject || k.ProjectID != projectID {
 			continue
 		}
-		out = append(out, clonePublic(k))
+		out = append(out, cloneAPIKey(k))
 	}
-	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt.After(out[b].CreatedAt) })
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
 
-func (f *APIKey) Delete(_ context.Context, id uuid.UUID) error {
+// ListOrg returns the org keys of the ctx's org. NOTE: the real store scopes by org, so the fake must too.
+func (f *APIKey) ListOrg(ctx context.Context) ([]*apikey.APIKey, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.DeleteErr != nil {
-		err := f.DeleteErr
-		if !f.StickyError {
-			f.DeleteErr = nil
+	out := make([]*apikey.APIKey, 0, len(f.byID))
+	for _, k := range f.byID {
+		if k.Kind != apikey.KindOrg || k.OrgID != tc.OrgID {
+			continue
 		}
+		out = append(out, cloneAPIKey(k))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+// ListPersonal returns ownerID's personal tokens in the ctx's org. NOTE: the real store scopes by org, so the fake must too.
+func (f *APIKey) ListPersonal(ctx context.Context, ownerID uuid.UUID) ([]*apikey.APIKey, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*apikey.APIKey, 0, len(f.byID))
+	for _, k := range f.byID {
+		if k.Kind != apikey.KindPersonal || k.OrgID != tc.OrgID || k.CreatedBy != ownerID {
+			continue
+		}
+		out = append(out, cloneAPIKey(k))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+// RevokePersonal revokes ownerID's unrevoked personal tokens in the ctx's org.
+func (f *APIKey) RevokePersonal(ctx context.Context, ownerID uuid.UUID, at time.Time) error {
+	tc, err := tenant.From(ctx)
+	if err != nil {
 		return err
 	}
-	k, ok := f.byID[id]
-	if !ok {
-		return &apikey.NotFoundError{ID: id.String()}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range f.byID {
+		if k.Kind == apikey.KindPersonal && k.OrgID == tc.OrgID && k.CreatedBy == ownerID && k.RevokedAt == nil {
+			t := at
+			k.RevokedAt = &t
+		}
 	}
-	delete(f.byPrefix, k.KeyPrefix)
-	delete(f.byID, id)
 	return nil
 }
 
-// TouchLastUsed stamps the key's LastUsedAt; an unknown or out-of-tenant row is a no-op, not an error.
-func (f *APIKey) TouchLastUsed(_ context.Context, orgID, projectID, id uuid.UUID, at time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.TouchLastUsedErr != nil {
-		err := f.TouchLastUsedErr
-		if !f.StickyError {
-			f.TouchLastUsedErr = nil
-		}
+func (f *APIKey) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {
+	// NOTE: the real store scopes this write by org; the fake must too, or it hides defects.
+	tc, err := tenant.From(ctx)
+	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	k, ok := f.byID[id]
-	if !ok || k.OrgID != orgID || k.ProjectID != projectID {
-		return nil
+	if !ok || k.OrgID != tc.OrgID {
+		return &apikey.NotFoundError{}
 	}
-	t := at.UTC()
+	t := at
 	k.LastUsedAt = &t
 	return nil
 }
 
-// Len returns the number of stored keys (test helper).
-func (f *APIKey) Len() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.byID)
-}
-
-// APIKeySheets is an in-memory apikey.Sheets.
-type APIKeySheets struct {
-	mu    sync.Mutex
-	known map[sheetKey]bool
-	// Err — inject a lookup failure.
-	Err error
-}
-
-type sheetKey struct {
-	orgID     uuid.UUID
-	projectID uuid.UUID
-	sheetID   uuid.UUID
-}
-
-// NewAPIKeySheets builds an empty fake apikey.Sheets.
-func NewAPIKeySheets() *APIKeySheets {
-	return &APIKeySheets{known: map[sheetKey]bool{}}
-}
-
-var _ apikey.Sheets = (*APIKeySheets)(nil)
-
-// Add registers sheetID as belonging to the given project.
-func (f *APIKeySheets) Add(orgID, projectID, sheetID uuid.UUID) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.known[sheetKey{orgID: orgID, projectID: projectID, sheetID: sheetID}] = true
-}
-
-func (f *APIKeySheets) IDsInProject(_ context.Context, orgID, projectID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.Err != nil {
-		return nil, f.Err
-	}
-	out := make([]uuid.UUID, 0, len(ids))
-	for _, id := range ids {
-		if f.known[sheetKey{orgID: orgID, projectID: projectID, sheetID: id}] {
-			out = append(out, id)
-		}
-	}
-	return out, nil
+func cloneAPIKey(k *apikey.APIKey) *apikey.APIKey {
+	cp := *k
+	cp.Scopes = slices.Clone(k.Scopes)
+	cp.ResourceIDs = slices.Clone(k.ResourceIDs)
+	cp.ProjectIDs = slices.Clone(k.ProjectIDs)
+	return &cp
 }

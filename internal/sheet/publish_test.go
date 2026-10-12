@@ -63,8 +63,6 @@ func valuesBody(t *testing.T, headers []string, rows [][]string) string {
 	return string(raw)
 }
 
-// The tab has the column and no deletions — the case an inferred flag reported as false, so a client
-// concluded delete was unsupported and never tried.
 func TestPublishWorkflow_Validate_ReadsTheSoftDeleteOptInFromTheHeaderRow(t *testing.T) {
 	t.Parallel()
 	for name, tt := range map[string]struct {
@@ -193,5 +191,32 @@ func TestPublishWorkflow_Validate_MarksReauthWhenGoogleRejectsTheCredential(t *t
 	}
 	if marked := h.reauth.MarkedIDs(); len(marked) != 1 || marked[0] != spreadsheetID {
 		t.Errorf("marked credentials = %v, want the tab's credential flagged once", marked)
+	}
+}
+
+func TestPublishWorkflow_Validate_ReportsTheHeaderRowAsColumns(t *testing.T) {
+	t.Parallel()
+	for name, tt := range map[string]struct {
+		body string
+		want []string
+	}{
+		"a header-only tab":          {`{"values":[["id","name","email"]]}`, []string{"id", "name", "email"}},
+		"trailing blank cells":       {`{"values":[["id","name","email"],["a"]]}`, []string{"id", "name", "email"}},
+		"the soft-delete column":     {`{"values":[["id","Deleted At","name"]]}`, []string{"id", "name"}},
+		"blank and repeated headers": {`{"values":[["id"," name ","","name"]]}`, []string{"id", "name", "col_3", "name_2"}},
+		"a failed contract":          {`{"values":[["name","email"]]}`, []string{"name", "email"}},
+		"an empty tab":               {`{"values":[]}`, []string{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newPublishHarness(t)
+			h.google.setRows(http.StatusOK, tt.body)
+
+			state, _, _ := h.wf.Validate(t.Context(), uuid.Must(uuid.NewV7()), "Q1")
+
+			if state.HeaderColumns == nil || !slices.Equal(state.HeaderColumns, tt.want) {
+				t.Errorf("HeaderColumns = %#v, want %#v", state.HeaderColumns, tt.want)
+			}
+		})
 	}
 }

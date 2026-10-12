@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,13 +90,13 @@ log:
 func TestValidate_ModeInvariants(t *testing.T) {
 	base := func() *Config {
 		c := &Config{
-			Mode:    ModeSelfhosted,
-			DB:      validDB(),
-			Genesis: GenesisConfig{Email: "root@example.com", Password: "x"},
+			Mode:     ModeSelfhosted,
+			DB:       validDB(),
+			Genesis:  GenesisConfig{Email: "root@example.com", Password: "x"},
+			Security: validSecurity(),
 		}
 		c.Tenant.SingletonOrg.Slug = "default"
 		c.Tenant.SingletonOrg.Name = "Default Organization"
-		c.Security.EncryptionKey = "0123456789abcdef"
 		c.HTTP.StateSecret = testStateSecret
 		return c
 	}
@@ -154,6 +153,32 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "cloud requires db.driver=postgres",
 		},
 		{
+			name: "postgres without an encryption key fails",
+			mutate: func(c *Config) {
+				c.DB.Driver = db.DriverPostgres
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "db.driver=postgres requires security.encryptionKey",
+		},
+		{
+			name: "sqlite without an encryption key is allowed",
+			mutate: func(c *Config) {
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "",
+		},
+		{
+			name: "cloud without an encryption key fails",
+			mutate: func(c *Config) {
+				c.Mode = ModeCloud
+				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
+				c.DB.Driver = "postgres"
+				c.Genesis = GenesisConfig{Email: "root@example.com"}
+				c.Security.EncryptionKey = ""
+			},
+			wantSub: "mode=cloud requires security.encryptionKey",
+		},
+		{
 			name: "cloud with full oidc + postgres + genesis + singleton org (no break-glass) is allowed",
 			mutate: func(c *Config) {
 				c.Mode = ModeCloud
@@ -204,7 +229,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 			wantSub: "requires genesis.email",
 		},
 		{
-			name: "cloud without singleton org slug fails",
+			name: "cloud without singleton org slug is allowed: the slug is prefill only",
 			mutate: func(c *Config) {
 				c.Mode = ModeCloud
 				c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "c", ClientSecret: "s"}
@@ -212,7 +237,7 @@ func TestValidate_ModeInvariants(t *testing.T) {
 				c.Genesis = GenesisConfig{Email: "root@example.com", Password: "s3cret", BreakGlass: true}
 				c.Tenant.SingletonOrg.Slug = ""
 			},
-			wantSub: "singletonOrg.slug",
+			wantSub: "",
 		},
 		{
 			name: "cloud without singleton org name fails",
@@ -238,6 +263,50 @@ func TestValidate_ModeInvariants(t *testing.T) {
 				c.Genesis = GenesisConfig{Password: "x"}
 			},
 			wantSub: "genesis.password without genesis.email",
+		},
+		{
+			name: "queue enabled without url fails",
+			mutate: func(c *Config) {
+				c.Queue.Enabled = true
+				c.Queue.URL = ""
+			},
+			wantSub: "queue.url",
+		},
+		{
+			name: "queue enabled with url is allowed",
+			mutate: func(c *Config) {
+				c.Queue.Enabled = true
+				c.Queue.URL = "nats://127.0.0.1:4222"
+			},
+			wantSub: "",
+		},
+		{
+			name: "queue user with password is allowed",
+			mutate: func(c *Config) {
+				c.Queue = QueueConfig{Enabled: true, URL: "nats://127.0.0.1:4222", User: "opensheet", Password: "pw"}
+			},
+			wantSub: "",
+		},
+		{
+			name: "queue user without password fails",
+			mutate: func(c *Config) {
+				c.Queue = QueueConfig{Enabled: true, URL: "nats://127.0.0.1:4222", User: "opensheet"}
+			},
+			wantSub: "OPENSHEET_QUEUE_PASSWORD",
+		},
+		{
+			name: "queue password without user fails",
+			mutate: func(c *Config) {
+				c.Queue = QueueConfig{Enabled: true, URL: "nats://127.0.0.1:4222", Password: "pw"}
+			},
+			wantSub: "OPENSHEET_QUEUE_USER",
+		},
+		{
+			name: "queue token with user fails",
+			mutate: func(c *Config) {
+				c.Queue = QueueConfig{Enabled: true, URL: "nats://127.0.0.1:4222", Token: "t", User: "opensheet", Password: "pw"}
+			},
+			wantSub: "mutually exclusive",
 		},
 		{
 			name: "cloud with genesis password alone fails",
@@ -319,6 +388,12 @@ func TestDefaults_SchedulerAndDBKeys(t *testing.T) {
 	if cfg.DB.Health.Timeout != 2*time.Second {
 		t.Errorf("db.health.timeout = %s, want 2s", cfg.DB.Health.Timeout)
 	}
+	if cfg.Queue.Enabled {
+		t.Error("queue.enabled must default false")
+	}
+	if cfg.Queue.ConnectTimeout != 10*time.Second {
+		t.Errorf("queue.connectTimeout = %s, want 10s", cfg.Queue.ConnectTimeout)
+	}
 }
 
 func TestMode_IsProduction(t *testing.T) {
@@ -352,10 +427,12 @@ func writeTempYAML(t *testing.T, name, content string) string {
 	return p
 }
 
-const testStateSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
-
 func validDB() db.DBConfig {
 	return db.DBConfig{Driver: db.DriverSQLite, DSN: ":memory:"}
+}
+
+func validSecurity() SecurityConfig {
+	return SecurityConfig{EncryptionKey: strings.Repeat("ab", 32)}
 }
 
 func withCwdOverride(t *testing.T, dir string) Option {
@@ -457,244 +534,41 @@ func TestSchedulerConfig_Locations_NilReceiverIsUTC(t *testing.T) {
 	require.Equal(t, "UTC", loc("any").String())
 }
 
-func TestValidate_CloudRequiresEncryptionKey(t *testing.T) {
-	c := validCloudConfig(t)
-	c.Security.EncryptionKey = ""
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "security.encryptionKey") {
-		t.Fatalf("Validate() = %v, want an error naming security.encryptionKey", err)
-	}
-}
-
-func TestValidate_PostgresSessionStoreRequiresAnEncryptionKey(t *testing.T) {
-	c := validSelfhostedConfig(t)
-	c.DB.Driver = db.DriverPostgres
-	c.DB.DSN = "postgres://localhost/opensheet"
-	c.Security.EncryptionKey = ""
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "OPENSHEET_SECURITY_ENCRYPTION_KEY") {
-		t.Fatalf("Validate() = %v, want an error naming OPENSHEET_SECURITY_ENCRYPTION_KEY", err)
-	}
-}
-
-func TestValidate_PostgresSessionStoreRequiresAStateSecret(t *testing.T) {
-	c := validSelfhostedConfig(t)
-	c.DB.Driver = db.DriverPostgres
-	c.DB.DSN = "postgres://localhost/opensheet"
-	c.Security.EncryptionKey = "0123456789abcdef"
-	c.HTTP.StateSecret = ""
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "OPENSHEET_HTTP_STATE_SECRET") {
-		t.Fatalf("Validate() = %v, want an error naming OPENSHEET_HTTP_STATE_SECRET", err)
-	}
-}
-
-// TestValidate_StateSecretMustDecodeToThirtyTwoBytes proves config-time validation raises the failure its own message describes, instead of deferring the length check to boot.
-func TestValidate_StateSecretMustDecodeToThirtyTwoBytes(t *testing.T) {
-	tests := []struct {
-		name    string
-		secret  string
-		wantSub string
-	}{
-		{"hex too short", "0f1e2d3c4b5a6978", "decodes to 8 bytes"},
-		{"base64 too short", "c2hvcnQ", "decodes to 5 bytes"},
-		{"not hex nor base64", "not-hex-or-base64!!$", "neither hex nor base64"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := validSelfhostedConfig(t)
-			c.HTTP.StateSecret = tt.secret
-			err := c.Validate()
-			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
-				t.Fatalf("Validate() = %v, want an error mentioning %q", err, tt.wantSub)
-			}
-			if !strings.Contains(err.Error(), "OPENSHEET_HTTP_STATE_SECRET") {
-				t.Errorf("Validate() = %v, want an error naming OPENSHEET_HTTP_STATE_SECRET", err)
-			}
-		})
-	}
-}
-
-func TestValidate_StateSecretAcceptsHexAndBase64(t *testing.T) {
-	tests := []struct {
-		name   string
-		secret string
-	}{
-		{"hex", testStateSecret},
-		{"base64url", "D_HtPEtaaXiHlqW0w9Lh8A_x7TxLWml4h5altMPS4fA"},
-		{"base64std", "D/HtPEtaaXiHlqW0w9Lh8A/x7TxLWml4h5altMPS4fA="},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := validSelfhostedConfig(t)
-			c.HTTP.StateSecret = tt.secret
-			if err := c.Validate(); err != nil {
-				t.Fatalf("Validate() with a %s state secret = %v, want nil", tt.name, err)
-			}
-		})
-	}
-}
-
-func TestValidate_GoogleClientSecretWithoutClientID(t *testing.T) {
-	c := validSelfhostedConfig(t)
-	c.Google.OAuth.ClientSecret = "shhh"
-	c.Google.OAuth.ClientID = ""
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "google.oauth.clientID") {
-		t.Fatalf("Validate() = %v, want an error naming google.oauth.clientID", err)
-	}
-}
-
-func TestValidate_PostgresCacheRejectsSQLite(t *testing.T) {
-	c := validSelfhostedConfig(t)
-	c.DB.Driver = db.DriverSQLite
-	c.Cache.Driver = CacheDriverPostgres
-	if err := c.Validate(); err == nil {
-		t.Fatal("Validate() = nil, want an error for cache.driver=postgres with db.driver=sqlite")
-	}
-}
-
-func TestValidate_ValidConfigsPass(t *testing.T) {
-	if err := validSelfhostedConfig(t).Validate(); err != nil {
-		t.Fatalf("validSelfhostedConfig: %v", err)
-	}
-	if err := validCloudConfig(t).Validate(); err != nil {
-		t.Fatalf("validCloudConfig: %v", err)
-	}
-}
-
-func TestCacheConfig_Resolve(t *testing.T) {
-	tests := []struct {
-		driver   CacheDriver
-		dbDriver db.Driver
-		want     CacheDriver
-	}{
-		{CacheDriverAuto, db.DriverPostgres, CacheDriverPostgres},
-		{CacheDriverAuto, db.DriverSQLite, CacheDriverMemory},
-		{CacheDriverMemory, db.DriverPostgres, CacheDriverMemory},
-		{CacheDriverPostgres, db.DriverPostgres, CacheDriverPostgres},
-	}
-	for _, tc := range tests {
-		got := CacheConfig{Driver: tc.driver}.Resolve(tc.dbDriver)
-		if got != tc.want {
-			t.Errorf("Resolve(%q, %q) = %q, want %q", tc.driver, tc.dbDriver, got, tc.want)
-		}
-	}
-}
-
-func TestDefaults_OpensheetKeys(t *testing.T) {
+func TestDefaults_FirstRunSlugsAreGenerated(t *testing.T) {
 	cfg := Defaults()
-	if cfg.Cache.Driver != CacheDriverAuto {
-		t.Errorf("cache.driver = %q, want %q", cfg.Cache.Driver, CacheDriverAuto)
-	}
-	if cfg.Cache.DefaultTTL != 30*time.Second {
-		t.Errorf("cache.defaultTTL = %s, want 30s", cfg.Cache.DefaultTTL)
-	}
-	if cfg.Cache.MaxBytes != 67108864 {
-		t.Errorf("cache.maxBytes = %d, want 67108864", cfg.Cache.MaxBytes)
-	}
-	if cfg.Sheets.MaxPayloadBytes != 8388608 {
-		t.Errorf("sheets.maxPayloadBytes = %d, want 8388608", cfg.Sheets.MaxPayloadBytes)
-	}
-	if cfg.Sheets.MaxQueryRows != 1000 {
-		t.Errorf("sheets.maxQueryRows = %d, want 1000", cfg.Sheets.MaxQueryRows)
-	}
-	if cfg.Sheets.MaxSortPages != 20 {
-		t.Errorf("sheets.maxSortPages = %d, want 20", cfg.Sheets.MaxSortPages)
-	}
-	if cfg.Google.Timeout != 15*time.Second {
-		t.Errorf("google.timeout = %s, want 15s", cfg.Google.Timeout)
-	}
+	require.Empty(t, cfg.Tenant.SingletonOrg.Slug, "a blank tenant.singletonOrg.slug means generate one at first run")
+	require.Empty(t, cfg.Tenant.PersonalProjectSlug, "a blank tenant.personalProjectSlug means generate one at first run")
 }
 
-func TestDefaults_PublicSheetsOffInBothModes(t *testing.T) {
-	for _, mode := range []Mode{ModeSelfhosted, ModeCloud} {
-		t.Run(string(mode), func(t *testing.T) {
-			c := loadWithMode(t, mode)
-			if c.Sheets.PublicEnabled {
-				t.Fatal("sheets.publicEnabled defaulted true; public sheets must be opt-in")
+func TestLoad_FirstRunSlugsHonourEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENSHEET_TENANT_SINGLETON_ORG_SLUG", "acme")
+	t.Setenv("OPENSHEET_TENANT_PERSONAL_PROJECT_SLUG", "web")
+	cfg, err := Load("", withCwdOverride(t, t.TempDir()), withGenesisFallback(t))
+	require.NoError(t, err)
+	require.Equal(t, "acme", cfg.Tenant.SingletonOrg.Slug, "a configured slug still wins over generation")
+	require.Equal(t, "web", cfg.Tenant.PersonalProjectSlug)
+}
+
+func TestValidate_QueueCredentialErrorsAreTyped(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue QueueConfig
+		is    func(error) bool
+	}{
+		{"conflict", QueueConfig{Enabled: true, URL: "nats://x:4222", Token: "t", Password: "pw"}, IsQueueCredentialsConflictError},
+		{"incomplete", QueueConfig{Enabled: true, URL: "nats://x:4222", User: "u"}, IsQueueCredentialsIncompleteError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Config{Mode: ModeSelfhosted, Queue: tt.queue}
+			err := validateInvariants(c)
+			if !tt.is(err) {
+				t.Fatalf("want typed %s error, got %v", tt.name, err)
 			}
 		})
 	}
-}
-
-func TestEnvKeys_NewFieldsAreBound(t *testing.T) {
-	var keys []string
-	for _, k := range WalkEnvKeys("OPENSHEET") {
-		keys = append(keys, k.Key)
+	if IsQueueCredentialsConflictError(errors.New("other")) || IsQueueCredentialsIncompleteError(errors.New("other")) {
+		t.Fatal("helpers must reject unrelated errors")
 	}
-	for _, want := range []string{
-		"OPENSHEET_SECURITY_ENCRYPTION_KEY",
-		"OPENSHEET_GOOGLE_OAUTH_CLIENT_ID",
-		"OPENSHEET_GOOGLE_OAUTH_CLIENT_SECRET",
-		"OPENSHEET_GOOGLE_PICKER_API_KEY",
-		"OPENSHEET_CACHE_DRIVER",
-		"OPENSHEET_SHEETS_PUBLIC_ENABLED",
-	} {
-		if !slices.Contains(keys, want) {
-			t.Errorf("WalkEnvKeys missing %q", want)
-		}
-	}
-}
-
-func TestLoad_SecurityAndGoogleFromEnv(t *testing.T) {
-	t.Setenv("OPENSHEET_SECURITY_ENCRYPTION_KEY", "0123456789abcdef")
-	t.Setenv("OPENSHEET_GOOGLE_OAUTH_CLIENT_ID", "cid")
-	t.Setenv("OPENSHEET_GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
-	t.Setenv("OPENSHEET_GOOGLE_PICKER_API_KEY", "pkey")
-	t.Setenv("OPENSHEET_SHEETS_PUBLIC_ENABLED", "true")
-
-	cfg := loadWithMode(t, ModeSelfhosted)
-	require.Equal(t, "0123456789abcdef", cfg.Security.EncryptionKey)
-	require.Equal(t, "cid", cfg.Google.OAuth.ClientID)
-	require.Equal(t, "csecret", cfg.Google.OAuth.ClientSecret)
-	require.Equal(t, "pkey", cfg.Google.Picker.APIKey)
-	require.True(t, cfg.Sheets.PublicEnabled)
-}
-
-func validSelfhostedConfig(t *testing.T) *Config {
-	t.Helper()
-	c := &Config{
-		Mode:    ModeSelfhosted,
-		DB:      validDB(),
-		Genesis: GenesisConfig{Email: "root@example.com", Password: "x"},
-	}
-	c.Tenant.SingletonOrg.Slug = "default"
-	c.Tenant.SingletonOrg.Name = "Default Organization"
-	c.Cache.Driver = CacheDriverAuto
-	return c
-}
-
-func validCloudConfig(t *testing.T) *Config {
-	t.Helper()
-	c := validSelfhostedConfig(t)
-	c.Mode = ModeCloud
-	c.DB.Driver = db.DriverPostgres
-	c.DB.DSN = "postgres://localhost/opensheet"
-	c.OIDC = OIDCConfig{Issuer: "https://iss.example.com", ClientID: "cid", ClientSecret: "csecret"}
-	c.Genesis.BreakGlass = true
-	c.Security.EncryptionKey = "0123456789abcdef"
-	c.HTTP.StateSecret = testStateSecret
-	return c
-}
-
-func loadWithMode(t *testing.T, mode Mode) *Config {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Chdir(t.TempDir())
-	t.Setenv("OPENSHEET_MODE", string(mode))
-	t.Setenv("OPENSHEET_GENESIS_EMAIL", "root@example.com")
-	if mode == ModeCloud {
-		t.Setenv("OPENSHEET_DB_DRIVER", string(db.DriverPostgres))
-		t.Setenv("OPENSHEET_DB_DSN", "postgres://localhost/opensheet")
-		t.Setenv("OPENSHEET_DB_MIGRATOR_DSN", "postgres://migrator@localhost/opensheet")
-		t.Setenv("OPENSHEET_OIDC_ISSUER", "https://iss.example.com")
-		t.Setenv("OPENSHEET_OIDC_CLIENT_ID", "cid")
-		t.Setenv("OPENSHEET_OIDC_CLIENT_SECRET", "csecret")
-		t.Setenv("OPENSHEET_SECURITY_ENCRYPTION_KEY", "0123456789abcdef")
-		t.Setenv("OPENSHEET_HTTP_STATE_SECRET", testStateSecret)
-	}
-	cfg, err := Load("")
-	require.NoError(t, err)
-	return cfg
 }

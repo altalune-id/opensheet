@@ -40,7 +40,6 @@ func MatchesDateShape(v string) bool {
 	return dateShape.MatchString(v)
 }
 
-// numSignificantDigits counts v's significant digits: leading zeros do not count, trailing zeros do.
 func numSignificantDigits(v string) int {
 	n := 0
 	seen := false

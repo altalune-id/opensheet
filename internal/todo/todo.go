@@ -15,11 +15,27 @@ const StaleAfter = 14 * 24 * time.Hour
 // SweepBatchSize is how many rows one MarkDoneOlderThan statement updates.
 const SweepBatchSize = 1000
 
-// Todo is the aggregate root. Invariants live here.
+// Author identifies who created a Todo: a signed-in user or an API key, never both.
+type Author struct {
+	UserID uuid.UUID
+	KeyID  uuid.UUID
+}
+
+// AuthorUser returns an Author naming the given user as creator.
+func AuthorUser(id uuid.UUID) Author { return Author{UserID: id} }
+
+// AuthorKey returns an Author naming the given API key as creator.
+func AuthorKey(id uuid.UUID) Author { return Author{KeyID: id} }
+
+// IsKey reports whether the author is an API key rather than a user.
+func (a Author) IsKey() bool { return a.KeyID != uuid.Nil }
+
+// Todo is the aggregate root, where the invariants live.
 type Todo struct {
 	ID        uuid.UUID
 	OrgID     uuid.UUID
 	ProjectID uuid.UUID
+	Author    Author
 	Title     string
 	Done      bool
 	CreatedAt time.Time
@@ -52,7 +68,7 @@ func (t *Todo) Toggle() {
 	t.UpdatedAt = time.Now().UTC()
 }
 
-// ListOpts filters Store.List. Zero value returns every todo in scope.
+// ListOpts filters Store.List, with the zero value returning every todo in scope.
 type ListOpts struct {
 	Done *bool
 }

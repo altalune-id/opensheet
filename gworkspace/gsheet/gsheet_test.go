@@ -322,6 +322,32 @@ func TestNormalizeHeaders(t *testing.T) {
 	}
 }
 
+func TestNormalizeHeaders_NeverRepeatsAName(t *testing.T) {
+	for _, tt := range []struct {
+		raw  []string
+		want []string
+	}{
+		{[]string{"a", "a", "a_2"}, []string{"a", "a_2", "a_2_2"}},
+		{[]string{"a_2", "a", "a"}, []string{"a_2", "a", "a_3"}},
+		{[]string{"", "col_1"}, []string{"col_1", "col_1_2"}},
+		{[]string{"a", "a", "a"}, []string{"a", "a_2", "a_3"}},
+	} {
+		names, warnings := NormalizeHeaders(tt.raw)
+		if !slices.Equal(names, tt.want) {
+			t.Errorf("NormalizeHeaders(%q) = %q, want %q", tt.raw, names, tt.want)
+		}
+		renamed := 0
+		for i := range tt.raw {
+			if names[i] != strings.TrimSpace(tt.raw[i]) {
+				renamed++
+			}
+		}
+		if len(warnings) != renamed {
+			t.Errorf("NormalizeHeaders(%q) warnings = %q, want one per renamed column (%d)", tt.raw, warnings, renamed)
+		}
+	}
+}
+
 func TestMeta_TolerateMissingProperties(t *testing.T) {
 	srv := fakeSheets(t, map[string]string{
 		"/v4/spreadsheets/FILE": `{"sheets":[{},{"properties":{"title":"Q2"}}]}`,

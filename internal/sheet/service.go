@@ -31,6 +31,7 @@ type Service struct {
 	snaps      SnapshotStore
 	attempts   IdempotencyStore
 	publish    *PublishWorkflow
+	invalidate invalidator
 }
 
 // NewService binds the service to its dependencies.
@@ -42,7 +43,9 @@ func NewService(
 	snaps SnapshotStore,
 	attempts IdempotencyStore,
 	publish *PublishWorkflow,
+	opts ...Option,
 ) *Service {
+	o := optionsOf(opts)
 	return &Service{
 		store:      store,
 		log:        log.With("module", "sheet"),
@@ -51,6 +54,7 @@ func NewService(
 		snaps:      snaps,
 		attempts:   attempts,
 		publish:    publish,
+		invalidate: invalidator{queue: o.queue, unexpected: unexpected},
 	}
 }
 
@@ -113,6 +117,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 	sh.ContractOK = state.OK
 	sh.ContractReason = state.Reason
 	sh.SoftDelete = state.SoftDelete
+	sh.HeaderColumns = state.HeaderColumns
 
 	if err := s.store.Save(ctx, sh); err != nil {
 		if IsAlreadyExistsError(err) {
@@ -238,6 +243,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Sh
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "sheet.Update: save", err, "sheet_id", id)
 	}
+	s.dropSnapshots(ctx, "sheet.Update", id)
 	return sh, nil
 }
 
@@ -261,6 +267,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 		return s.unexpected(ctx, "sheet.Delete: delete", err, "sheet_id", id)
 	}
+	s.dropSnapshots(ctx, "sheet.Delete", id)
 	return nil
 }
 
@@ -282,7 +289,16 @@ func (s *Service) PurgeCache(ctx context.Context, id uuid.UUID) error {
 		span.RecordError(err)
 		return s.unexpected(ctx, "sheet.PurgeCache: purge", err, "sheet_id", id)
 	}
+	s.invalidate.announce(ctx, "sheet.PurgeCache", sh.ID, "")
 	return nil
+}
+
+// NOTE: the change already saved, so a purge failure is reported rather than returned, and every replica is still told.
+func (s *Service) dropSnapshots(ctx context.Context, op string, id uuid.UUID) {
+	if err := s.snaps.PurgeSheet(ctx, id); err != nil {
+		_ = s.unexpected(ctx, op+": purge snapshots", err, "sheet_id", id)
+	}
+	s.invalidate.announce(ctx, op, id, "")
 }
 
 // SweepWriteAttempts deletes the caller tenant's expired write attempts and reports how many went.

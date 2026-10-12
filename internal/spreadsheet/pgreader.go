@@ -30,7 +30,7 @@ func (s *postgresStore) ByGoogleFileID(ctx context.Context, orgID, projectID uui
 }
 
 func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*Spreadsheet, error) {
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, _, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([
 }
 
 func (s *postgresStore) queryOne(ctx context.Context, cond postgres.BoolExpression, notFound *NotFoundError, op string) (*Spreadsheet, error) {
-	tx, owned, err := s.txAcquire(ctx)
+	tx, owned, _, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}

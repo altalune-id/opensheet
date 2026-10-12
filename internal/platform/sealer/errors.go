@@ -28,13 +28,13 @@ func (*UnavailableError) ToAppError() *apperror.AppError {
 	)
 }
 
-// IsUnavailableError reports whether err's chain contains an *UnavailableError.
+// IsUnavailableError reports whether err's tree contains an *UnavailableError.
 func IsUnavailableError(err error) bool {
 	_, ok := errors.AsType[*UnavailableError](err)
 	return ok
 }
 
-// InvalidKeyError reports that the configured key is not 32 bytes.
+// InvalidKeyError reports that the configured key is not KeyLen bytes.
 type InvalidKeyError struct{ Len int }
 
 func (e *InvalidKeyError) Error() string {
@@ -57,7 +57,7 @@ func (e *InvalidKeyError) ToAppError() *apperror.AppError {
 	)
 }
 
-// IsInvalidKeyError reports whether err's chain contains an *InvalidKeyError.
+// IsInvalidKeyError reports whether err's tree contains an *InvalidKeyError.
 func IsInvalidKeyError(err error) bool {
 	_, ok := errors.AsType[*InvalidKeyError](err)
 	return ok
@@ -86,7 +86,7 @@ func (*OpenFailedError) ToAppError() *apperror.AppError {
 	)
 }
 
-// IsOpenFailedError reports whether err's chain contains an *OpenFailedError.
+// IsOpenFailedError reports whether err's tree contains an *OpenFailedError.
 func IsOpenFailedError(err error) bool {
 	_, ok := errors.AsType[*OpenFailedError](err)
 	return ok

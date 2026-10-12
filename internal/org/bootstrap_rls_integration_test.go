@@ -24,8 +24,7 @@ import (
 	"altalune.id/opensheet/schema"
 )
 
-// Boot, web onboarding and `opensheet init` all call BootstrapSingleton with no tenant in context,
-// which is the one shape no other postgres test covers.
+// TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS covers the one shape no other postgres test does: BootstrapSingleton called with no tenant in context.
 func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T) {
 	h := pgtest.New(t)
 	sqlDB := h.OpenDB(t)

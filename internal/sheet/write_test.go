@@ -162,7 +162,6 @@ func (f *fakeWriteSheets) readFactory() gsheet.Factory {
 	}
 }
 
-// directUnits is the UnitOfWork the unit tests run under: the fakes hold no transaction, so it only passes the context through and counts the runs.
 type directUnits struct {
 	runs atomic.Int64
 }
@@ -189,6 +188,7 @@ type writeHarness struct {
 type writeOpts struct {
 	defaultTTL      time.Duration
 	maxPayloadBytes int64
+	queue           sheet.Queue
 }
 
 func newWriteHarness(t *testing.T) *writeHarness {
@@ -221,9 +221,13 @@ func newWriteHarnessWith(t *testing.T, opts writeOpts) *writeHarness {
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var wfOpts []sheet.Option
+	if opts.queue != nil {
+		wfOpts = append(wfOpts, sheet.WithQueue(opts.queue))
+	}
 	h.wf = sheet.NewWriteWorkflow(
 		h.snaps, h.rows, h.units, h.attempts, h.srcs, h.toks, h.reauth, h.google.factory(),
-		opts.defaultTTL, opts.maxPayloadBytes, log, unexpected,
+		opts.defaultTTL, opts.maxPayloadBytes, log, unexpected, wfOpts...,
 	)
 	h.rf = sheet.NewReadWorkflow(
 		h.snaps, h.rows, h.srcs, h.toks, h.reauth, h.google.readFactory(),
@@ -263,8 +267,7 @@ func appErrorOf(t *testing.T, err error) *apperror.AppError {
 	return ae
 }
 
-// SECURITY: the flag is checked before any Google call, so a non-writable sheet
-// cannot be probed for existence through timing or error shape.
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet cannot be probed through timing or error shape.
 func TestWriteWorkflow_AppendRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -463,9 +466,6 @@ func TestWriteWorkflow_PatchRowLocatesTheRowByItsIDColumn(t *testing.T) {
 	assert.Contains(t, req.body, `"2"`, "unpatched cells are merged in header order, not blanked")
 }
 
-// The one test that pins the i+2 invariant. A loose "row 4" URL substring is easy to satisfy
-// by accident, so assert the full range on both sides of the blank row: collapsing it would
-// pull "3" onto row 3, which is where "1" already lives.
 func TestWriteWorkflow_PatchRowIndexArithmeticSurvivesAnInteriorBlankRow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -642,8 +642,6 @@ type stubError string
 
 func (e stubError) Error() string { return string(e) }
 
-// The GET path keys its rows with gsheet's header normalizer, so PATCH must key its response the same
-// way or a client diffing the two sees different keys for the same row.
 func TestWriteWorkflow_PatchRowKeysTheResponseLikeTheReadPath(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -658,8 +656,6 @@ func TestWriteWorkflow_PatchRowKeysTheResponseLikeTheReadPath(t *testing.T) {
 	assert.Equal(t, gsheet.Row{"id": "1", "col_2": "x", "name": "ada2", "name_2": "dup"}, row)
 }
 
-// The zero-refetch assertion is the whole point: a test that permits a refetch would pass on the
-// purge-only behaviour this replaces.
 func TestWriteWorkflow_PatchRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -707,9 +703,7 @@ func TestWriteWorkflow_PatchRow_RunsTheLockAndTheProjectionInOneUnitOfWork(t *te
 		"the Google read, the Google write and the projection write share one transaction")
 }
 
-// SECURITY: the projection filters tombstones out of the payload, so a patchable deleted_at would let a
-// client with sheets:write make a row vanish from the tab read by patching a field. The guard compares
-// column indexes, not folded names, so a "Deleted At" header cannot slip a delete through as a field.
+// SECURITY: a patchable deleted_at would let sheets:write hide a row; the guard compares column indexes, not folded names.
 func TestWriteWorkflow_PatchRow_RefusesToWriteTheDeletedAtColumn(t *testing.T) {
 	t.Parallel()
 	for _, header := range []string{"deleted_at", "Deleted At"} {
@@ -852,8 +846,7 @@ func (h *writeHarness) seedContract(sh *sheet.Sheet) {
 	h.rows.SeedContract(sh.ID, sheet.ContractState{OK: true})
 }
 
-// SECURITY: the flag is checked before any Google call, so a non-writable sheet
-// cannot be probed for existence through timing or error shape.
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet cannot be probed through timing or error shape.
 func TestWriteWorkflow_CreateRowRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -990,8 +983,6 @@ func TestWriteWorkflow_CreateRow_RefusesABlankSuppliedID(t *testing.T) {
 	}
 }
 
-// The zero-refetch assertion is the whole point: a test that permits a refetch would pass on the
-// purge-and-refetch behaviour keyed create replaces, and would prove nothing about the append position.
 func TestWriteWorkflow_CreateRow_ReadYourWriteWithNoRefetch(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1215,8 +1206,7 @@ func projectedJSON(t *testing.T, rows []sheet.ProjectedRow) string {
 	return string(raw)
 }
 
-// SECURITY: the flag is checked before any Google call, so a non-writable sheet
-// cannot be probed for existence through timing or error shape.
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet cannot be probed through timing or error shape.
 func TestWriteWorkflow_CreateRowsRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1274,8 +1264,6 @@ func TestWriteWorkflow_CreateRows_AppendsEveryRowInOneCallAndProjectsSequentialI
 	assert.Zero(t, h.unex.Load(), "a clean batch reports no incident")
 }
 
-// Asserting only that the response was an error would pass on a half-applied batch: the whole batch is
-// validated before the append, so a bad last row must leave Google and the projection untouched.
 func TestBatchCreate_InvalidLastRowWritesNothing(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1474,8 +1462,7 @@ func sentCells(t *testing.T, req recordedRequest) []any {
 	return sent.Values[0]
 }
 
-// SECURITY: the flag is checked before any Google call, so a non-writable sheet
-// cannot be probed for existence through timing or error shape.
+// SECURITY: the flag is checked before any Google call, so a non-writable sheet cannot be probed through timing or error shape.
 func TestWriteWorkflow_SoftDeleteRowRefusesANonWritableSheetWithoutCallingGoogle(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1536,8 +1523,6 @@ func TestWriteWorkflow_SoftDeleteRow_WritesAnRFC3339TombstoneAndDropsTheRowFromT
 	assert.Zero(t, h.unex.Load(), "a clean delete reports no incident")
 }
 
-// The write count is the assertion: a second delete answered from the projection proves the idempotent
-// case short-circuits, where a rewritten tombstone would pass a status-only check and lose the first instant.
 func TestWriteWorkflow_SoftDeleteRow_IsIdempotentAndWritesOnce(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1582,8 +1567,6 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesAnUnknownID(t *testing.T) {
 	assert.Zero(t, updateCount(h.google), "an unknown id is refused before the write")
 }
 
-// The persisted flag is what task 1 exists for: the refusal names the remedy and costs no Google call,
-// which is the case capabilities.softDelete warns a client about.
 func TestWriteWorkflow_SoftDeleteRow_RefusesATabWithNoDeletedAtColumnWithoutCallingGoogle(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1693,8 +1676,6 @@ func TestWriteWorkflow_PatchRow_ProceedsOnAMatchingIfMatch(t *testing.T) {
 	}
 }
 
-// The tag is compared against the tab read taken inside the lock, so a stale tag refuses the write
-// before Values.Update is called — Google has no conditional write of its own.
 func TestWriteWorkflow_PatchRow_RefusesAStaleIfMatchWithoutWriting(t *testing.T) {
 	t.Parallel()
 	h := newWriteHarness(t)
@@ -1737,8 +1718,6 @@ func TestWriteWorkflow_SoftDeleteRow_RefusesAStaleIfMatchOnALiveRow(t *testing.T
 	assert.Zero(t, updateCount(h.google))
 }
 
-// A tombstoned row's hash differs from any tag a client still holds, so evaluating the precondition
-// would 412 exactly the retry idempotency exists to answer 204. Idempotency wins, on both paths.
 func TestWriteWorkflow_SoftDeleteRow_AnswersATombstonedRowBeforeEvaluatingIfMatch(t *testing.T) {
 	t.Parallel()
 	deletedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)

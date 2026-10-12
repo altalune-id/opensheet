@@ -20,8 +20,14 @@ func TestPostgresStore_WrapperStatementsBindValuesNotInterpolate(t *testing.T) {
 	require.NotContains(t, slugSQL, "DROP TABLE", "the slug must be bound, never interpolated")
 	require.Equal(t, []any{injected}, slugArgs)
 
+	systemSQL, systemArgs := postgres.RawStatement(s.resolveSystemOrgStmt, nil).Sql()
+	require.Contains(t, systemSQL, "public.opensheet_resolve_system_org() AS o")
+	require.Empty(t, systemArgs)
+
 	listSQL, listArgs := postgres.RawStatement(s.listForUserStmt, postgres.RawArgs{"#userID": userID}).Sql()
-	require.Contains(t, listSQL, "public.opensheet_list_orgs_for_user($1)")
+	require.Contains(t, listSQL, "public.opensheet_list_orgs_for_user($1) AS o")
+	require.Contains(t, listSQL, "ORDER BY o.created_at ASC, o.id ASC",
+		"the outer statement must re-order: Postgres may inline the wrapper and drop its internal ORDER BY")
 	require.NotContains(t, listSQL, userID.String(), "the user id must be bound, never interpolated")
 	require.Equal(t, []any{userID}, listArgs)
 }
@@ -30,14 +36,17 @@ func TestPostgresStore_WrapperStatementsProjectEveryOrgColumn(t *testing.T) {
 	s := newPostgresStore(pdb.Pool{}, nil, "", "opensheet_")
 
 	for name, stmt := range map[string]string{
-		"resolveBySlug": s.resolveBySlugStmt,
-		"listForUser":   s.listForUserStmt,
+		"resolveBySlug":    s.resolveBySlugStmt,
+		"resolveSystemOrg": s.resolveSystemOrgStmt,
+		"listForUser":      s.listForUserStmt,
 	} {
 		for _, col := range []string{"orgs.id", "orgs.slug", "orgs.name", "orgs.created_by", "orgs.created_at", "orgs.system"} {
 			require.Contains(t, stmt, `AS "`+col+`"`, "%s must project %s or qrm drops it", name, col)
 		}
 		require.Contains(t, stmt, "public.opensheet_", "%s must qualify the wrapper with the configured schema", name)
 	}
+	require.NotContains(t, s.resolveBySlugStmt, "ORDER BY",
+		"resolve_org_by_slug is a LIMIT 1 lookup — ordering it would be noise")
 }
 
 func TestPostgresStore_ListForUserOrdersOnTheOuterStatement(t *testing.T) {

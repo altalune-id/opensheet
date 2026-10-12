@@ -14,6 +14,8 @@
 api:
   # env: OPENSHEET_API_ENABLED
   enabled: true
+  # env: OPENSHEET_API_KEY_PREFIX
+  keyPrefix: key_
   openapi:
     # [secret] env: OPENSHEET_API_OPENAPI_BASIC_AUTH_PASSWORD
     basicAuthPassword: ""
@@ -23,6 +25,10 @@ api:
     enabled: true
     # env: OPENSHEET_API_OPENAPI_REQUIRE_BASIC_AUTH
     requireBasicAuth: true
+
+blog:
+  # env: OPENSHEET_BLOG_PUBLIC_READS
+  publicReads: ""
 
 cache:
   # env: OPENSHEET_CACHE_DEFAULT_TTL
@@ -39,6 +45,10 @@ compliance:
   requireAcceptance: ""
   # env: OPENSHEET_COMPLIANCE_TERMS_URL
   termsURL: ""
+
+dataplane:
+  # env: OPENSHEET_DATAPLANE_ENABLED
+  enabled: true
 
 db:
   # [bootstrap] env: OPENSHEET_DB_ALLOW_BYPASS_RLS
@@ -120,6 +130,13 @@ http:
   baseURL: ""
   # env: OPENSHEET_HTTP_COOKIE_SECURE
   cookieSecure: false
+  csp:
+    # [required] env: OPENSHEET_HTTP_CSP_ENABLED
+    enabled: true
+    # env: OPENSHEET_HTTP_CSP_REPORT_ONLY
+    reportOnly: false
+    # env: OPENSHEET_HTTP_CSP_REPORT_URI
+    reportURI: ""
   # env: OPENSHEET_HTTP_ROBOTS_TXT
   robotsTxt: ""
   # [required, secret, bootstrap] env: OPENSHEET_HTTP_STATE_SECRET
@@ -163,6 +180,20 @@ mail:
     # env: OPENSHEET_MAIL_SMTP_USER
     user: ""
 
+mcp:
+  # env: OPENSHEET_MCP_APPS_UI
+  appsUI: ""
+  # env: OPENSHEET_MCP_AUDIENCE
+  audience: ""
+  # env: OPENSHEET_MCP_AUDIENCE_OVERRIDE
+  audienceOverride: ""
+  # env: OPENSHEET_MCP_CHALLENGE_PREFIX
+  challengePrefix: ""
+  # env: OPENSHEET_MCP_CHALLENGE_TOKEN
+  challengeToken: ""
+  # env: OPENSHEET_MCP_ENABLED
+  enabled: ""
+
 # [required, bootstrap] env: OPENSHEET_MODE
 mode: selfhosted
 
@@ -196,6 +227,20 @@ oidc:
 onboard:
   # [secret] env: OPENSHEET_ONBOARD_SETUP_TOKEN
   setupToken: ""
+
+queue:
+  # env: OPENSHEET_QUEUE_CONNECT_TIMEOUT
+  connectTimeout: 10s
+  # env: OPENSHEET_QUEUE_ENABLED
+  enabled: false
+  # [secret] env: OPENSHEET_QUEUE_PASSWORD
+  password: ""
+  # [secret] env: OPENSHEET_QUEUE_TOKEN
+  token: ""
+  # [secret] env: OPENSHEET_QUEUE_URL
+  url: ""
+  # env: OPENSHEET_QUEUE_USER
+  user: ""
 
 scheduler:
   # [bootstrap] env: OPENSHEET_SCHEDULER_ENABLED
@@ -255,14 +300,14 @@ tenant:
   # env: OPENSHEET_TENANT_PERSONAL_ORG_SLUG_FALLBACK
   personalOrgSlugFallback: personal
   # env: OPENSHEET_TENANT_PERSONAL_PROJECT_SLUG
-  personalProjectSlug: default
+  personalProjectSlug: ""
   # [bootstrap] env: OPENSHEET_TENANT_RLS_ENFORCE
   rlsEnforce: true
   singletonOrg:
     # [bootstrap] env: OPENSHEET_TENANT_SINGLETON_ORG_NAME
     name: Default Organization
     # [bootstrap] env: OPENSHEET_TENANT_SINGLETON_ORG_SLUG
-    slug: default
+    slug: ""
   # [bootstrap] env: OPENSHEET_TENANT_TENANT_SCOPED_TABLES
   tenantScopedTables: ""
 

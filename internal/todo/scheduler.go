@@ -8,10 +8,8 @@ import (
 	"altalune.id/opensheet/scheduler"
 )
 
-// sweepCron fires at 00:00, 06:00, 12:00 and 18:00 in the configured location.
 const sweepCron = "0 */6 * * *"
 
-// sweepJobName keys this job in logs, metrics, the leader lock, the CLI, and scheduler.jobs config overrides.
 const sweepJobName = "todo-autocomplete-stale"
 
 // Scheduler adapts *Service to scheduler.Provider.

@@ -1,0 +1,466 @@
+package templates
+
+import (
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+// API key form error kinds the apikeys screen renders as a banner.
+const (
+	APIKeyErrorScope         = "scope"
+	APIKeyErrorNotFound      = "not_found"
+	APIKeyErrorInvalidExpiry = "invalid_expiry"
+	APIKeyErrorFailed        = "failed"
+	APIKeyErrorNotManager    = "not_manager"
+	APIKeyErrorEmptyGrant    = "empty_grant"
+	APIKeyErrorGrant         = "grant"
+	APIKeyErrorResource      = "resource"
+)
+
+type APIKeyScopeOption struct {
+	Value    string
+	LabelKey string
+}
+
+// APIKeyProjectOption is one project an org key or personal token can be granted.
+type APIKeyProjectOption struct {
+	ID   string
+	Name string
+}
+
+// APIKeyResourceOption is one resource inside a project a project key can be pinned to.
+type APIKeyResourceOption struct {
+	ID   string
+	Name string
+}
+
+// APIKeyOrgOption is one org a personal token can be minted in.
+type APIKeyOrgOption struct {
+	Slug     string
+	Name     string
+	Selected bool
+}
+
+// APIKeyExpiryOption is one lifetime a new key can be minted with.
+type APIKeyExpiryOption struct {
+	Days     string
+	LabelKey string
+	Selected bool
+}
+
+type APIKeyRow struct {
+	ID             string
+	Base           string
+	OrgName        string
+	Name           string
+	SecretHint     string
+	ScopeLabelKeys []string
+	HasGrant       bool
+	AllProjects    bool
+	ProjectNames   []string
+	Grantable      []APIKeyProjectOption
+	HasResources   bool
+	ResourceNames  []string
+	CreatedAt      string
+	HasExpiry      bool
+	ExpiresAt      string
+	HasLastUsed    bool
+	LastUsedAt     string
+	Revoked        bool
+	RevokedAt      string
+}
+
+// APIKeyMinted carries a mint's plaintext secret. SECURITY: rendered once, into the response that follows the mint; never persisted.
+type APIKeyMinted struct {
+	Name      string
+	Plaintext string
+}
+
+// APIKeysView renders the project, org or personal key page; Base is the page's own URL and each row carries its own action base.
+type APIKeysView struct {
+	Base      string
+	OrgLevel  bool
+	Personal  bool
+	HasGrant  bool
+	CanManage bool
+	Items     []APIKeyRow
+	Scopes    []APIKeyScopeOption
+	Projects  []APIKeyProjectOption
+	Resources []APIKeyResourceOption
+	Orgs      []APIKeyOrgOption
+	Expiries  []APIKeyExpiryOption
+	Minted    *APIKeyMinted
+	ErrorKind string
+	ErrorCode string
+}
+
+templ apikeyBanner(d web.LayoutData, kind, code string) {
+	if kind == APIKeyErrorScope {
+		@ErrorBanner(d, d.Tr("apikey.error_scope"), code)
+	} else if kind == APIKeyErrorNotFound {
+		@ErrorBanner(d, d.Tr("apikey.error_not_found"), code)
+	} else if kind == APIKeyErrorInvalidExpiry {
+		@ErrorBanner(d, d.Tr("apikey.error_invalid_expiry"), code)
+	} else if kind == APIKeyErrorNotManager {
+		@ErrorBanner(d, d.Tr("apikey.error_not_manager"), code)
+	} else if kind == APIKeyErrorEmptyGrant {
+		@ErrorBanner(d, d.Tr("apikey.error_empty_grant"), code)
+	} else if kind == APIKeyErrorGrant {
+		@ErrorBanner(d, d.Tr("apikey.error_grant"), code)
+	} else if kind == APIKeyErrorResource {
+		@ErrorBanner(d, d.Tr("apikey.error_resource"), code)
+	} else if kind == APIKeyErrorFailed {
+		@ErrorBanner(d, d.Tr("apikey.error_failed"), code)
+	}
+}
+
+// apikeyMintedBanner shows the one-time plaintext. It is reachable only through APIKeysView.Minted,
+// which the handler sets solely on the response that immediately follows a successful mint.
+templ apikeyMintedBanner(d web.LayoutData, m *APIKeyMinted) {
+	<div class="mt-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+		<p class="font-semibold">{ d.Tr("apikey.minted_heading") }</p>
+		<p class="mt-1 text-xs">{ d.Tr("apikey.minted_warning") }</p>
+		<code class="mt-2 block select-all break-all rounded border border-amber-300/70 bg-amber-100/60 px-3 py-2 font-mono text-sm dark:border-amber-800 dark:bg-amber-900/40">{ m.Plaintext }</code>
+	</div>
+}
+
+templ apikeyChip(label string) {
+	<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">{ label }</span>
+}
+
+templ apikeyGrantSummary(d web.LayoutData, k APIKeyRow) {
+	<p class="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+		<span>{ d.Tr("apikey.access_label") }:</span>
+		if k.AllProjects {
+			<span class="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">{ d.Tr("apikey.all_projects") }</span>
+		} else {
+			for _, name := range k.ProjectNames {
+				@apikeyChip(name)
+			}
+		}
+	</p>
+}
+
+templ apikeyResourceSummary(d web.LayoutData, k APIKeyRow) {
+	<p class="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+		<span>{ d.Tr("apikey.resources_label") }:</span>
+		if len(k.ResourceNames) == 0 {
+			<span class="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">{ d.Tr("apikey.all_resources") }</span>
+		} else {
+			for _, name := range k.ResourceNames {
+				@apikeyChip(name)
+			}
+		}
+	</p>
+}
+
+templ apikeyAction(d web.LayoutData, action, confirm string) {
+	<form
+		method="post"
+		action={ templ.SafeURL(action) }
+		hx-post={ action }
+		hx-nonce={ d.Nonce }
+		if confirm != "" {
+			hx-confirm={ confirm }
+		}
+		hx-target="#apikey-list"
+		hx-swap="outerHTML"
+		hx-disable="find button, find input"
+		hx-status:4xx="target:#hx-error swap:innerHTML"
+		hx-status:5xx="target:#hx-error swap:innerHTML"
+		class="inline"
+	>
+		{ children... }
+	</form>
+}
+
+templ apikeyPromote(d web.LayoutData, v APIKeysView, k APIKeyRow) {
+	<details class="mt-2 text-xs">
+		<summary class="cursor-pointer select-none text-muted-foreground hover:text-foreground">{ d.Tr("apikey.widen_access") }</summary>
+		<div class="mt-2 space-y-2 rounded-md border border-border p-3">
+			if len(k.Grantable) > 0 {
+				@apikeyAction(d, k.Base+"/"+k.ID+"/projects", "") {
+					<div class="flex flex-wrap gap-2">
+						for _, p := range k.Grantable {
+							<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+								<input type="checkbox" name="project_ids" value={ p.ID } class="h-3.5 w-3.5 rounded border-border"/>
+								<span>{ p.Name }</span>
+							</label>
+						}
+					</div>
+					<button type="submit" class="mt-2 rounded-md border border-border px-3 py-1 font-medium text-foreground hover:bg-muted">{ d.Tr("apikey.add_projects") }</button>
+				}
+			}
+			@apikeyAction(d, k.Base+"/"+k.ID+"/all-projects", d.Tr("apikey.all_projects_confirm")) {
+				<button type="submit" class="rounded-md border border-border px-3 py-1 font-medium text-foreground hover:bg-muted">{ d.Tr("apikey.grant_all_projects") }</button>
+			}
+			<p class="text-muted-foreground">{ d.Tr("apikey.widen_note") }</p>
+		</div>
+	</details>
+}
+
+templ apikeyRowItem(d web.LayoutData, v APIKeysView, k APIKeyRow) {
+	<li class="flex flex-wrap items-start gap-3 px-4 py-3">
+		<div class="min-w-0 flex-1">
+			<p class="flex flex-wrap items-baseline gap-2">
+				<span class="truncate text-sm font-medium text-foreground">{ k.Name }</span>
+				if k.OrgName != "" {
+					@apikeyChip(k.OrgName)
+				}
+				if k.SecretHint != "" {
+					<code class="font-mono text-xs text-muted-foreground">…{ k.SecretHint }</code>
+				}
+			</p>
+			if len(k.ScopeLabelKeys) > 0 {
+				<p class="mt-1 flex flex-wrap gap-1">
+					for _, labelKey := range k.ScopeLabelKeys {
+						@apikeyChip(d.Tr(labelKey))
+					}
+				</p>
+			}
+			if k.HasGrant {
+				@apikeyGrantSummary(d, k)
+			}
+			if k.HasResources {
+				@apikeyResourceSummary(d, k)
+			}
+			<p class="mt-1.5 flex flex-wrap gap-x-1.5 text-xs text-muted-foreground">
+				<span>{ d.Tr("apikey.created_label") }: { k.CreatedAt }</span>
+				<span>·</span>
+				<span>
+					{ d.Tr("apikey.expires_col_label") }:
+					if k.HasExpiry {
+						{ k.ExpiresAt }
+					} else {
+						{ d.Tr("apikey.never") }
+					}
+				</span>
+				<span>·</span>
+				<span>
+					{ d.Tr("apikey.last_used_label") }:
+					if k.HasLastUsed {
+						{ k.LastUsedAt }
+					} else {
+						{ d.Tr("apikey.never") }
+					}
+				</span>
+			</p>
+			if k.HasGrant && v.CanManage && !k.Revoked && !k.AllProjects {
+				@apikeyPromote(d, v, k)
+			}
+		</div>
+		if k.Revoked {
+			<span class="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950/60 dark:text-red-200">
+				{ d.Tr("apikey.revoked_badge") }: { k.RevokedAt }
+			</span>
+		} else if v.CanManage {
+			@apikeyAction(d, k.Base+"/"+k.ID+"/revoke", "") {
+				<button
+					type="submit"
+					aria-label={ d.Tr("apikey.revoke") + ": " + k.Name }
+					class="shrink-0 rounded p-1.5 text-muted-foreground/70 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+				>
+					@icons.Icon("trash-2", "h-4 w-4")
+				</button>
+			}
+		}
+	</li>
+}
+
+// APIKeyList is the HTMX-swappable list section — every key form targets #apikey-list.
+templ APIKeyList(d web.LayoutData, v APIKeysView) {
+	<div id="apikey-list" class="mt-6">
+		if v.Minted != nil {
+			@apikeyMintedBanner(d, v.Minted)
+		}
+		@apikeyBanner(d, v.ErrorKind, v.ErrorCode)
+		<ul class="mt-4 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+			if len(v.Items) == 0 && v.Personal {
+				<li class="px-4 py-8 text-center text-sm text-muted-foreground">{ d.Tr("pat.empty") }</li>
+			} else if len(v.Items) == 0 {
+				<li class="px-4 py-8 text-center text-sm text-muted-foreground">{ d.Tr("apikey.empty") }</li>
+			}
+			for _, k := range v.Items {
+				@apikeyRowItem(d, v, k)
+			}
+		</ul>
+	</div>
+}
+
+templ apikeyGrantFields(d web.LayoutData, v APIKeysView) {
+	<fieldset class="group">
+		<legend class="block text-sm font-medium text-foreground/90">{ d.Tr("apikey.access_label") }</legend>
+		<div class="mt-1.5 flex flex-wrap gap-2">
+			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+				<input type="radio" name="grant" value="selected" checked class="h-3.5 w-3.5"/>
+				<span>{ d.Tr("apikey.selected_projects") }</span>
+			</label>
+			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+				<input type="radio" name="grant" value="all" class="h-3.5 w-3.5"/>
+				<span>{ d.Tr("apikey.all_projects") }</span>
+			</label>
+		</div>
+		@APIKeyGrantProjects(d, v.Projects)
+		<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("apikey.all_projects_note") }</p>
+	</fieldset>
+}
+
+// APIKeyGrantProjects is the project picker a personal token form swaps in when its org changes.
+templ APIKeyGrantProjects(d web.LayoutData, projects []APIKeyProjectOption) {
+	<div id="apikey-grant-projects" class="mt-2 flex flex-wrap gap-2 group-has-[input[value=all]:checked]:hidden">
+		for _, p := range projects {
+			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+				<input type="checkbox" name="project_ids" value={ p.ID } class="h-3.5 w-3.5 rounded border-border"/>
+				<span>{ p.Name }</span>
+			</label>
+		}
+	</div>
+}
+
+templ apikeyResourceFields(d web.LayoutData, v APIKeysView) {
+	<fieldset>
+		<legend class="block text-sm font-medium text-foreground/90">{ d.Tr("apikey.resources_label") }</legend>
+		<div class="mt-1.5 flex flex-wrap gap-2">
+			for _, res := range v.Resources {
+				<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+					<input type="checkbox" name="resource_ids" value={ res.ID } class="h-3.5 w-3.5 rounded border-border"/>
+					<span>{ res.Name }</span>
+				</label>
+			}
+		</div>
+		<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("apikey.resources_note") }</p>
+	</fieldset>
+}
+
+templ apikeyOrgField(d web.LayoutData, v APIKeysView) {
+	<div>
+		<label class="block text-sm font-medium text-foreground/90" for="apikey-org">{ d.Tr("pat.org_label") }</label>
+		<select
+			id="apikey-org"
+			name="org"
+			required
+			hx-get={ v.Base + "/projects" }
+			hx-nonce={ d.Nonce }
+			hx-trigger="change"
+			hx-include="this"
+			hx-target="#apikey-grant-projects"
+			hx-swap="outerHTML"
+			class="mt-1.5 block w-full max-w-sm rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+		>
+			for _, o := range v.Orgs {
+				<option value={ o.Slug } selected?={ o.Selected }>{ o.Name }</option>
+			}
+		</select>
+	</div>
+}
+
+templ apikeyMintForm(d web.LayoutData, v APIKeysView) {
+	<form
+		method="post"
+		action={ templ.SafeURL(v.Base) }
+		hx-post={ v.Base }
+		hx-nonce={ d.Nonce }
+		hx-target="#apikey-list"
+		hx-swap="outerHTML"
+		hx-disable="find button, find input"
+		hx-status:4xx="target:#hx-error swap:innerHTML"
+		hx-status:5xx="target:#hx-error swap:innerHTML"
+		if v.Personal {
+			data-clear-on-success="#apikey-name"
+		} else {
+			data-reset-on-success
+		}
+		class="mt-6 space-y-4 rounded-lg border border-border bg-card p-5 shadow-sm"
+	>
+		<div>
+			if v.Personal {
+				<h2 class="text-sm font-semibold text-foreground">{ d.Tr("pat.form_heading") }</h2>
+			} else {
+				<h2 class="text-sm font-semibold text-foreground">{ d.Tr("apikey.form_heading") }</h2>
+			}
+			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("apikey.form_subtitle") }</p>
+		</div>
+		<div>
+			<label class="block text-sm font-medium text-foreground/90" for="apikey-name">{ d.Tr("apikey.name_label") }</label>
+			<input
+				id="apikey-name"
+				name="name"
+				type="text"
+				required
+				class="mt-1.5 block w-full max-w-sm rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+			/>
+		</div>
+		<div>
+			<p class="block text-sm font-medium text-foreground/90">{ d.Tr("apikey.scopes_label") }</p>
+			<div class="mt-1.5 flex flex-wrap gap-2">
+				for _, opt := range v.Scopes {
+					<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+						<input type="checkbox" name="scopes" value={ opt.Value } class="h-3.5 w-3.5 rounded border-border"/>
+						<span>{ d.Tr(opt.LabelKey) }</span>
+					</label>
+				}
+			</div>
+		</div>
+		if v.Personal {
+			@apikeyOrgField(d, v)
+		}
+		if v.HasGrant {
+			@apikeyGrantFields(d, v)
+		}
+		if len(v.Resources) > 0 {
+			@apikeyResourceFields(d, v)
+		}
+		<div>
+			<label class="block text-sm font-medium text-foreground/90" for="apikey-expires">{ d.Tr("apikey.expires_label") }</label>
+			<select
+				id="apikey-expires"
+				name="expires_in"
+				required
+				class="mt-1.5 block w-full max-w-xs rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+			>
+				for _, e := range v.Expiries {
+					<option value={ e.Days } selected?={ e.Selected }>{ d.Tr(e.LabelKey) }</option>
+				}
+			</select>
+		</div>
+		<button type="submit" class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+			@icons.Icon("plus", "h-4 w-4")
+			if v.Personal {
+				<span>{ d.Tr("pat.create") }</span>
+			} else {
+				<span>{ d.Tr("apikey.mint") }</span>
+			}
+		</button>
+	</form>
+}
+
+templ APIKeysPage(d web.LayoutData, v APIKeysView) {
+	<section>
+		<header class="border-b border-border pb-4">
+			if v.Personal {
+				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("pat.title") }</h1>
+			} else {
+				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("apikey.title") }</h1>
+			}
+			if v.Personal {
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("pat.subtitle") }</p>
+			} else if v.OrgLevel {
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("apikey.org_subtitle") }</p>
+			} else {
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("apikey.subtitle") }</p>
+			}
+		</header>
+		if v.Personal && len(v.Orgs) == 0 {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("pat.no_orgs") }</p>
+		} else if v.CanManage {
+			@apikeyMintForm(d, v)
+		} else {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("apikey.read_only") }</p>
+		}
+		@APIKeyList(d, v)
+	</section>
+}
+
+templ APIKeysLayout(d web.LayoutData, v APIKeysView) {
+	@Layout(web.WithContent(d, APIKeysPage(d, v)))
+}

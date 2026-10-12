@@ -80,15 +80,23 @@ func (m *memorySnapshotStore) Put(_ context.Context, k SnapshotKey, s Snapshot, 
 }
 
 func (m *memorySnapshotStore) PurgeSheet(_ context.Context, sheetID uuid.UUID) error {
+	m.dropSheet(sheetID, "")
+	return nil
+}
+
+func (m *memorySnapshotStore) dropSheet(sheetID uuid.UUID, keepETag string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for k := range m.entries {
-		if k.SheetID == sheetID {
-			m.dropLocked(k)
+	for k, el := range m.entries {
+		if k.SheetID != sheetID {
+			continue
 		}
+		if keepETag != "" && memoryEntryOf(el).snap.ETag == keepETag {
+			continue
+		}
+		m.dropLocked(k)
 	}
-	return nil
 }
 
 // Close drops every cached entry.

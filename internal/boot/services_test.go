@@ -8,9 +8,22 @@ import (
 
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/platform/sealer"
+	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/user"
 )
 
 const testEncryptionKey = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+// SECURITY: a syntactically complete service-account key. The private key is a throwaway test fixture.
+const serviceAccountFixture = `{
+  "type": "service_account",
+  "project_id": "opensheet-test",
+  "private_key_id": "abc123",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nc2VjcmV0LXRlc3Qta2V5LW1hdGVyaWFs\n-----END PRIVATE KEY-----\n",
+  "client_email": "reader@opensheet-test.iam.gserviceaccount.com",
+  "client_id": "1234567890",
+  "token_uri": "https://oauth2.googleapis.com/token"
+}`
 
 func TestBuildServices_WiresAllFourModules(t *testing.T) {
 	cfg := newSmokeCfg(t)
@@ -70,14 +83,15 @@ func TestBuildServices_RegistersTheAPIKeyUsageWorker(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 
 	for _, w := range srv.Supervisor.Workers() {
-		if w.Name() == "apikey-lastused" {
+		if w.Name() == "apikey.usage" {
 			return
 		}
 	}
 	t.Error("the apikey usage worker must be registered on the supervisor")
 }
 
-func TestBootstrap_SealerDisabledWithoutAKey(t *testing.T) {
+// SECURITY: a stored Google credential outlives the process, so without security.encryptionKey the credential service fails closed while sessions keep the template's ephemeral key.
+func TestBootstrap_CredentialsFailClosedWithoutAKey(t *testing.T) {
 	cfg := newSmokeCfg(t)
 	cfg.Security.EncryptionKey = ""
 	srv, err := boot.BootServer(t.Context(), cfg)
@@ -89,8 +103,27 @@ func TestBootstrap_SealerDisabledWithoutAKey(t *testing.T) {
 	if srv.Platform.Sealer == nil {
 		t.Fatal("Sealer must never be nil")
 	}
-	if _, err := srv.Platform.Sealer.Seal([]byte("secret"), nil); !sealer.IsUnavailableError(err) {
-		t.Errorf("Seal error = %v, want *UnavailableError", err)
+	if _, err := srv.Platform.Sealer.Seal([]byte("secret"), nil); err != nil {
+		t.Errorf("the kernel sealer must run on an ephemeral key for sessions, got %v", err)
+	}
+
+	ctx := t.Context()
+	owner, err := srv.Users.Create(ctx, user.CreateRequest{Email: "sealer@example.com", Name: "Sealer", Source: user.SourceOIDC})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	o, err := srv.Orgs.BootstrapSingleton(ctx, "sealer-org", "Sealer Org", owner.ID)
+	if err != nil {
+		t.Fatalf("bootstrap org: %v", err)
+	}
+	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	p, err := srv.Projects.Create(orgCtx, o.ID, "sealer-project", "Sealer Project")
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	_, err = srv.Credentials.UploadServiceAccount(tenant.WithProject(orgCtx, p.ID), "probe", []byte(serviceAccountFixture))
+	if !sealer.IsUnavailableError(err) {
+		t.Errorf("UploadServiceAccount error = %v, want *UnavailableError: a credential sealed under an ephemeral key is unreadable after a restart", err)
 	}
 }
 

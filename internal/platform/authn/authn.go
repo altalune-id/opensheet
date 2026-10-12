@@ -1,35 +1,37 @@
-// Package authn authenticates a raw credential into a session.Principal, independent of credential kind.
+// Package authn classifies and verifies machine credentials for the control and data planes.
 package authn
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"altalune.id/opensheet/internal/platform/session"
 )
 
-// KeyPrefix marks an opensheet API key.
-const KeyPrefix = "osk_"
-
 // Shape classifies a raw credential by form alone.
 type Shape int
 
+// The credential shapes Scheme can recognize.
 const (
 	ShapeUnknown Shape = iota
 	ShapeAPIKey
 	ShapeJWT
 )
 
-// Looks classifies raw by shape alone.
-func Looks(raw string) Shape {
+// Scheme classifies raw credentials; its zero value recognizes JWTs only.
+type Scheme struct{ Prefix string }
+
+// Looks classifies raw by shape alone, without touching a store.
+func (s Scheme) Looks(raw string) Shape {
 	if raw == "" {
 		return ShapeUnknown
 	}
-	if strings.HasPrefix(raw, KeyPrefix) {
+	if s.Prefix != "" && strings.HasPrefix(raw, s.Prefix) {
 		return ShapeAPIKey
 	}
-	if strings.Count(raw, ".") == 2 && !strings.Contains(raw, " ") {
+	if strings.Count(raw, ".") == 2 && !strings.ContainsAny(raw, " \t") {
 		return ShapeJWT
 	}
 	return ShapeUnknown
@@ -43,30 +45,28 @@ type Authenticator interface {
 // Chain tries each Authenticator in order and returns the first success.
 type Chain []Authenticator
 
-// Authenticate implements Authenticator.
-// SECURITY: every failure collapses to one opaque error.
+// Authenticate implements Authenticator. SECURITY: every failure collapses to one opaque error, whatever the cause.
 func (c Chain) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
+	var causes []error
 	for _, a := range c {
 		p, err := a.Authenticate(ctx, raw)
 		if err == nil {
 			return p, nil
 		}
+		causes = append(causes, err)
 	}
-	return session.Principal{}, &UnauthorizedError{}
+	return session.Principal{}, &UnauthorizedError{causes: errors.Join(causes...)}
 }
 
 // CredentialFrom extracts a raw credential from the request's Authorization or X-API-Key header.
-func CredentialFrom(r *http.Request) string {
-	return CredentialFromHeader(r.Header)
-}
+func CredentialFrom(r *http.Request) string { return CredentialFromHeader(r.Header) }
 
-// CredentialFromHeader extracts a raw credential from the Authorization or X-API-Key header.
-// SECURITY: query strings are not consulted — they leak into access logs and Referer.
+// CredentialFromHeader extracts a raw credential from an Authorization or X-API-Key header.
 func CredentialFromHeader(h http.Header) string {
 	if v := h.Get("Authorization"); v != "" {
 		for _, scheme := range []string{"Bearer ", "bearer "} {
-			if raw, ok := strings.CutPrefix(v, scheme); ok {
-				return strings.TrimSpace(raw)
+			if after, ok := strings.CutPrefix(v, scheme); ok {
+				return strings.TrimSpace(after)
 			}
 		}
 		return ""

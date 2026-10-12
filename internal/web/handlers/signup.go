@@ -16,6 +16,7 @@ import (
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
+	slugs "altalune.id/opensheet/slug"
 )
 
 // SignupHandler owns /signup/complete — cloud-only workspace bootstrap for new OIDC users without a pre-existing membership.
@@ -34,7 +35,7 @@ func NewSignupHandler(d Deps, users *user.Service, orgs *org.Service, projects *
 }
 
 // Register wires the /signup/complete routes onto mux.
-func (h *SignupHandler) Register(mux *http.ServeMux) {
+func (h *SignupHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /signup/complete", h.GetSignup)
 	mux.HandleFunc("POST /signup/complete", h.PostSignup)
 }
@@ -84,19 +85,12 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 	view.ProjectName = strings.TrimSpace(r.PostForm.Get("project_name"))
 	view.ProjectSlug = strings.TrimSpace(r.PostForm.Get("project_slug"))
 	view.Name = strings.TrimSpace(r.PostForm.Get("name"))
-	if view.ProjectName == "" {
-		view.ProjectName = "Default Project"
-	}
-	if view.ProjectSlug == "" {
-		view.ProjectSlug = h.defaultProjectSlug()
-	}
+	view.ProjectName = cmp.Or(view.ProjectName, defaultProjectName)
+	view.ProjectSlug = cmp.Or(view.ProjectSlug, strings.TrimSpace(h.Cfg.Tenant.PersonalProjectSlug))
 
 	view.FieldErrors = map[string]string{}
 	if view.OrgName == "" {
 		view.FieldErrors["org_name"] = "Enter an organization name."
-	}
-	if view.OrgSlug == "" {
-		view.FieldErrors["org_slug"] = "Enter an organization slug."
 	}
 	if view.AskDisplayName && view.Name == "" {
 		view.FieldErrors["name"] = "Enter your display name."
@@ -183,13 +177,6 @@ func (h *SignupHandler) hasMembership(r *http.Request, userID uuid.UUID) bool {
 	return len(orgs) > 0
 }
 
-func (h *SignupHandler) defaultProjectSlug() string {
-	if s := strings.TrimSpace(h.Cfg.Tenant.PersonalProjectSlug); s != "" {
-		return s
-	}
-	return "default"
-}
-
 func (h *SignupHandler) defaultView(p session.Principal) templates.SignupCompleteView {
 	return templates.SignupCompleteView{
 		Email:          p.Email,
@@ -198,13 +185,19 @@ func (h *SignupHandler) defaultView(p session.Principal) templates.SignupComplet
 		AskAccept:      h.Cfg.Compliance.RequireAcceptance && p.TermsAcceptedAt.IsZero(),
 		TermsURL:       cmp.Or(strings.TrimSpace(h.Cfg.Compliance.TermsURL), web.Path(h.Cfg.HTTP.BasePath, "/terms")),
 		PrivacyURL:     cmp.Or(strings.TrimSpace(h.Cfg.Compliance.PrivacyURL), web.Path(h.Cfg.HTTP.BasePath, "/privacy")),
-		OrgSlug:        user.SlugFromEmail(p.Email, ""),
-		ProjectName:    "Default Project",
-		ProjectSlug:    h.defaultProjectSlug(),
+		OrgSlug:        slugs.Generate(),
+		ProjectName:    defaultProjectName,
+		ProjectSlug:    firstRunSlug(h.Cfg.Tenant.PersonalProjectSlug),
 		FieldErrors:    map[string]string{},
 	}
 }
 
 func (h *SignupHandler) render(w http.ResponseWriter, r *http.Request, view templates.SignupCompleteView) {
+	if view.OrgSlug == "" {
+		view.OrgSlug = slugs.Generate()
+	}
+	if view.ProjectSlug == "" {
+		view.ProjectSlug = firstRunSlug(h.Cfg.Tenant.PersonalProjectSlug)
+	}
 	Render(w, r, templates.SignupCompleteLayout(h.Base(r, "Complete signup"), view))
 }

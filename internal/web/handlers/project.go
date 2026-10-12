@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
-	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
+	slugs "altalune.id/opensheet/slug"
 )
 
 // ProjectHandler owns the /projects routes.
@@ -19,22 +19,13 @@ func NewProjectHandler(d Deps, projects *project.Service) *ProjectHandler {
 	return &ProjectHandler{Deps: d}
 }
 
-// requireOrg resolves the org named by the path, gating membership before anything reads its rows.
-func (h *ProjectHandler) requireOrg(w http.ResponseWriter, r *http.Request) (*org.Org, *http.Request, bool) {
-	p, _, ok := h.LoadSession(r)
-	if !ok {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return nil, nil, false
-	}
-	return h.OrgScopeFor(w, r, p, r.PathValue("org"))
-}
-
 // GetList renders /orgs/{org}/projects.
 func (h *ProjectHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	o, r, ok := h.requireOrg(w, r)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	o, r := sc.org, sc.req
 	items, err := h.Projects.List(r.Context(), o.ID)
 	if err != nil {
 		h.LogErr("web project: list", err)
@@ -49,27 +40,24 @@ func (h *ProjectHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // GetNew renders /orgs/{org}/projects/new.
 func (h *ProjectHandler) GetNew(w http.ResponseWriter, r *http.Request) {
-	o, _, ok := h.requireOrg(w, r)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	o := sc.org
 	Render(w, r, templates.ProjectNewLayout(
 		h.LayoutForOrg(r, "Create project", o.Slug, "projects"),
-		templates.ProjectNewView{OrgSlug: o.Slug},
+		templates.ProjectNewView{OrgSlug: o.Slug, Slug: slugs.Generate()},
 	))
 }
 
 // PostCreate handles POST /orgs/{org}/projects.
 func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
-	p, sid, authed := h.LoadSession(r)
-	if !authed {
-		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return
-	}
-	o, r, ok := h.OrgScopeFor(w, r, p, r.PathValue("org"))
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, sid, o, r := sc.principal, sc.sid, sc.org, sc.req
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
@@ -82,6 +70,9 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		msg := err.Error()
 		if project.IsAlreadyExistsError(err) {
 			msg = "Slug is already taken."
+		}
+		if slug == "" {
+			slug = slugs.Generate()
 		}
 		Render(w, r, templates.ProjectNewLayout(
 			h.LayoutForOrg(r, "Create project", o.Slug, "projects"),
@@ -100,14 +91,11 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 
 // PostRename handles POST /orgs/{org}/projects/{project}/rename.
 func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
-	o, r, ok := h.requireOrg(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
-	proj, r, ok := h.ProjectScopeFor(w, r, o.ID, r.PathValue("project"))
-	if !ok {
-		return
-	}
+	o, proj, r := sc.org, sc.project, sc.req
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
@@ -125,7 +113,6 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/projects"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
-// projectPath builds a path under an org's project, so the shape lives in one place.
 func projectPath(orgSlug, projectSlug, suffix string) string {
 	return "/orgs/" + orgSlug + "/projects/" + projectSlug + suffix
 }
@@ -139,7 +126,7 @@ func projectSummaries(items []*project.Project) []templates.ProjectSummary {
 }
 
 // Register wires the project routes onto mux.
-func (h *ProjectHandler) Register(mux *http.ServeMux) {
+func (h *ProjectHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects", h.GetList)
 	mux.HandleFunc("GET /orgs/{org}/projects/new", h.GetNew)
 	mux.HandleFunc("POST /orgs/{org}/projects", h.PostCreate)

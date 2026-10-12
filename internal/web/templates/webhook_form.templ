@@ -1,0 +1,122 @@
+package templates
+
+import (
+	"strconv"
+
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+type WebhookEventOption struct {
+	Value    string
+	LabelKey string
+	Checked  bool
+}
+
+type WebhookFormView struct {
+	ProjectSlug    string
+	ID             string
+	URL            string
+	Description    string
+	Active         bool
+	Events         []WebhookEventOption
+	MaxURLLen      int
+	MaxDescription int
+	Error          WebhookError
+}
+
+func webhookFormAction(d web.LayoutData, f WebhookFormView) string {
+	if f.ID == "" {
+		return d.ProjectPath(f.ProjectSlug, "/webhooks")
+	}
+	return d.ProjectPath(f.ProjectSlug, "/webhooks/"+f.ID)
+}
+
+templ webhookForm(d web.LayoutData, f WebhookFormView) {
+	<form
+		method="post"
+		action={ templ.SafeURL(webhookFormAction(d, f)) }
+		if f.ID == "" {
+			hx-post={ webhookFormAction(d, f) }
+			hx-nonce={ d.Nonce }
+			hx-target="#webhook-page"
+			hx-swap="outerHTML"
+			hx-disable="find button, find input"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
+		}
+		class="space-y-4 rounded-lg border border-border bg-card p-5 shadow-sm"
+	>
+		@webhookErrorBanner(d, f.Error)
+		<div>
+			<label class="block text-sm font-medium text-foreground/90" for="webhook-url">{ d.Tr("webhooks.url_label") }</label>
+			<input
+				id="webhook-url"
+				name="url"
+				type="url"
+				required
+				maxlength={ strconv.Itoa(f.MaxURLLen) }
+				value={ f.URL }
+				placeholder="https://example.com/hooks/opensheet"
+				class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+			/>
+			<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("webhooks.url_help") }</p>
+		</div>
+		<div>
+			<label class="block text-sm font-medium text-foreground/90" for="webhook-description">{ d.Tr("webhooks.description_label") }</label>
+			<input
+				id="webhook-description"
+				name="description"
+				type="text"
+				maxlength={ strconv.Itoa(f.MaxDescription) }
+				value={ f.Description }
+				class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+			/>
+		</div>
+		<fieldset>
+			<legend class="block text-sm font-medium text-foreground/90">{ d.Tr("webhooks.events_label") }</legend>
+			<div class="mt-1.5 flex flex-wrap gap-2">
+				for _, opt := range f.Events {
+					<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+						<input type="checkbox" name="event_types" value={ opt.Value } checked?={ opt.Checked } class="h-3.5 w-3.5 rounded border-border"/>
+						<span>{ d.Tr(opt.LabelKey) }</span>
+						<code class="font-mono text-[11px] text-muted-foreground">{ opt.Value }</code>
+					</label>
+				}
+			</div>
+		</fieldset>
+		if f.ID != "" {
+			<label class="inline-flex items-center gap-2 text-sm text-foreground/90">
+				<input type="checkbox" name="active" value="1" checked?={ f.Active } class="h-3.5 w-3.5 rounded border-border"/>
+				<span>{ d.Tr("webhooks.active_label") }</span>
+			</label>
+		}
+		<div>
+			<button type="submit" class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				if f.ID == "" {
+					@icons.Icon("plus", "h-4 w-4")
+					<span>{ d.Tr("webhooks.create") }</span>
+				} else {
+					<span>{ d.Tr("webhooks.save") }</span>
+				}
+			</button>
+		</div>
+	</form>
+}
+
+templ WebhookNewPage(d web.LayoutData, f WebhookFormView) {
+	<section id="webhook-page">
+		<header class="border-b border-border pb-4">
+			<a href={ templ.SafeURL(d.ProjectPath(f.ProjectSlug, "/webhooks")) } class="text-xs text-muted-foreground hover:underline">{ d.Tr("webhooks.back") }</a>
+			<h1 class="mt-1 text-2xl font-semibold text-foreground">{ d.Tr("webhooks.new_title") }</h1>
+			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("webhooks.new_subtitle") }</p>
+		</header>
+		@webhookEphemeralBanner(d)
+		<div class="mt-6">
+			@webhookForm(d, f)
+		</div>
+	</section>
+}
+
+templ WebhookNewLayout(d web.LayoutData, f WebhookFormView) {
+	@Layout(web.WithContent(d, WebhookNewPage(d, f)))
+}

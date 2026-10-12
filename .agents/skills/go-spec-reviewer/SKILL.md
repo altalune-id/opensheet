@@ -50,43 +50,43 @@ Before reviewing, explore the existing codebase to understand conventions and sp
 
 ### Step 2 — Go Philosophy Check
 
-| Concern | What to Look For |
-|---------|-----------------|
-| Simplicity | Unnecessary layers, abstractions with only one implementation, over-engineered designs |
-| Dependencies | Every proposed third-party dependency justified against a stdlib alternative? (routing, slices/maps helpers, multierror, etc.) |
-| Interfaces | Defined by the consumer, not the implementor? Small (1–3 methods)? Used where polymorphism is actually needed? |
-| Error handling | Errors returned explicitly? Properly wrapped with `fmt.Errorf("%w", err)`? Not swallowed silently? Sentinel errors named where callers must branch? |
-| Context | `context.Context` threaded through any I/O, HTTP, or long-running calls? Timeouts specified? |
-| Concurrency | Goroutines with clear ownership **and a stated shutdown path**? Bounded concurrency where fan-out is unbounded input? Data races avoided? |
-| Package design | Each package has a single clear domain responsibility? New packages justified vs. extending existing ones? No `utils/`/`common/` proposals? |
-| Naming | Short, clear names following Go conventions? No stutter (`pkg.PkgThing`)? No `Get` prefixes? |
-| Testing | Does the spec say how this will be tested? Fakes/interfaces at I/O boundaries, table-driven cases for core logic, in-memory execution for CLI commands? |
-| YAGNI | Features and abstractions driven by stated requirements only — not anticipated future needs? |
+| Concern        | What to Look For                                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Simplicity     | Unnecessary layers, abstractions with only one implementation, over-engineered designs                                                                  |
+| Dependencies   | Every proposed third-party dependency justified against a stdlib alternative? (routing, slices/maps helpers, multierror, etc.)                          |
+| Interfaces     | Defined by the consumer, not the implementor? Small (1–3 methods)? Used where polymorphism is actually needed?                                          |
+| Error handling | Errors returned explicitly? Properly wrapped with `fmt.Errorf("%w", err)`? Not swallowed silently? Sentinel errors named where callers must branch?     |
+| Context        | `context.Context` threaded through any I/O, HTTP, or long-running calls? Timeouts specified?                                                            |
+| Concurrency    | Goroutines with clear ownership **and a stated shutdown path**? Bounded concurrency where fan-out is unbounded input? Data races avoided?               |
+| Package design | Each package has a single clear domain responsibility? New packages justified vs. extending existing ones? No `utils/`/`common/` proposals?             |
+| Naming         | Short, clear names following Go conventions? No stutter (`pkg.PkgThing`)? No `Get` prefixes?                                                            |
+| Testing        | Does the spec say how this will be tested? Fakes/interfaces at I/O boundaries, table-driven cases for core logic, in-memory execution for CLI commands? |
+| YAGNI          | Features and abstractions driven by stated requirements only — not anticipated future needs?                                                            |
 
 ### Step 3 — Cobra/Viper CLI Check (skip if not a CLI)
 
-| Concern | What to Look For |
-|---------|-----------------|
-| Command construction | New commands built via factory functions, not package-level `var`s? (Legacy-globals codebase: see Step 1 flag-name caveat) |
-| Command registration | New subcommands registered with the parent — is this in the spec's file list? |
-| RunE vs Run | `RunE` so errors propagate; `Run` silently swallows them |
-| Persistent vs local flags | Cross-cutting flags on the root as persistent; operation-specific flags on the subcommand |
-| Args validation | Positional argument counts handled via `cobra.Args` validators, not inside `RunE`? |
-| Viper binding | Env var names and config keys explicitly bound? Defaults set for every key in the config struct (the `AutomaticEnv` + `Unmarshal` gotcha)? Business logic receives typed config structs, never Viper itself? |
-| Output | Command output written via `cmd.OutOrStdout()` so it's testable? |
-| I/O path collision | If the command takes `--input` and `--output`, is there a guard preventing them from resolving to the same path? |
+| Concern                   | What to Look For                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Command construction      | New commands built via factory functions, not package-level `var`s? (Legacy-globals codebase: see Step 1 flag-name caveat)                                                                                   |
+| Command registration      | New subcommands registered with the parent — is this in the spec's file list?                                                                                                                                |
+| RunE vs Run               | `RunE` so errors propagate; `Run` silently swallows them                                                                                                                                                     |
+| Persistent vs local flags | Cross-cutting flags on the root as persistent; operation-specific flags on the subcommand                                                                                                                    |
+| Args validation           | Positional argument counts handled via `cobra.Args` validators, not inside `RunE`?                                                                                                                           |
+| Viper binding             | Env var names and config keys explicitly bound? Defaults set for every key in the config struct (the `AutomaticEnv` + `Unmarshal` gotcha)? Business logic receives typed config structs, never Viper itself? |
+| Output                    | Command output written via `cmd.OutOrStdout()` so it's testable?                                                                                                                                             |
+| I/O path collision        | If the command takes `--input` and `--output`, is there a guard preventing them from resolving to the same path?                                                                                             |
 
 ### Step 4 — General Spec Completeness
 
-| Category | What to Look For |
-|----------|-----------------|
-| Completeness | TODOs, placeholders, "TBD", incomplete sections, missing error paths |
-| Consistency | Internal contradictions, conflicting requirements, types named differently in different sections |
-| Clarity | Requirements ambiguous enough that two implementors would build different things |
-| Scope | Focused enough for a single implementation plan? Not covering multiple independent subsystems? |
-| Data flow | Clear what enters and exits each function or step? |
+| Category      | What to Look For                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| Completeness  | TODOs, placeholders, "TBD", incomplete sections, missing error paths                                        |
+| Consistency   | Internal contradictions, conflicting requirements, types named differently in different sections            |
+| Clarity       | Requirements ambiguous enough that two implementors would build different things                            |
+| Scope         | Focused enough for a single implementation plan? Not covering multiple independent subsystems?              |
+| Data flow     | Clear what enters and exits each function or step?                                                          |
 | Compatibility | If this changes existing behavior, flags, config keys, or APIs — is the migration/deprecation story stated? |
-| Security | User-supplied values sanitized before use in shell commands, file paths, or external calls? |
+| Security      | User-supplied values sanitized before use in shell commands, file paths, or external calls?                 |
 
 ### Calibration
 
@@ -104,10 +104,13 @@ Approve unless there are gaps that would lead to a flawed or incomplete implemen
 **Status:** Approved | Approved with Questions | Issues Found
 
 **Issues (block implementation):**
+
 - [Section X]: [specific issue] — [why it matters for implementation]
 
 **Questions for Author (need answers, don't block a sound design):**
+
 - [Section Y]: [the ambiguity] — [the two+ readings an implementor could take]
 
 **Recommendations (advisory):**
+
 - [suggestions that improve correctness, idiomaticity, or clarity]

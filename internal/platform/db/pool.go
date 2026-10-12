@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 )
 
@@ -10,6 +11,8 @@ import (
 type Pool struct {
 	W *sql.DB
 	R *sql.DB
+
+	uow *sql.DB
 }
 
 // OpenPool opens the writer and, for Postgres, any configured reader connection.
@@ -22,7 +25,19 @@ func OpenPool(ctx context.Context, cfg DBConfig, log *slog.Logger) (Pool, error)
 		if log != nil && cfg.Reader.DSN != "" {
 			log.Debug("db: reader DSN ignored for sqlite driver")
 		}
-		return Pool{W: writer, R: writer}, nil
+		p := Pool{W: writer, R: writer}
+		if sqliteInMemory(cfg.DSN) {
+			return p, nil
+		}
+		uowCfg := cfg
+		uowCfg.DSN = sqliteDSNWithImmediateTx(cfg.DSN)
+		uow, uErr := Open(ctx, uowCfg, log)
+		if uErr != nil {
+			_ = p.Close()
+			return Pool{}, uErr
+		}
+		p.uow = uow
+		return p, nil
 	}
 
 	p := Pool{W: writer, R: writer}
@@ -46,13 +61,17 @@ func OpenPool(ctx context.Context, cfg DBConfig, log *slog.Logger) (Pool, error)
 	return p, nil
 }
 
-// Close closes every distinct handle; safe when R aliases W.
+// Close closes every distinct handle and joins their errors; safe when R aliases W.
 func (p Pool) Close() error {
+	var errs []error
+	if p.uow != nil {
+		errs = append(errs, p.uow.Close())
+	}
 	if p.R != nil && p.R != p.W {
-		_ = p.R.Close()
+		errs = append(errs, p.R.Close())
 	}
 	if p.W != nil {
-		return p.W.Close()
+		errs = append(errs, p.W.Close())
 	}
-	return nil
+	return errors.Join(errs...)
 }

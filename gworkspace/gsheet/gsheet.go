@@ -165,23 +165,30 @@ func tabTitles(meta *sheetsapi.Spreadsheet) []string {
 	return out
 }
 
-// NormalizeHeaders keys a header row: it trims each name, names a blank column col_N, dedupes a repeat
-// as name_N, and reports one warning per renamed column.
+// NormalizeHeaders keys a header row: it trims each name, names a blank column col_N, dedupes a repeat as the first free name_N, and reports one warning per renamed column.
 func NormalizeHeaders(raw []string) (names, warnings []string) {
 	names = make([]string, len(raw))
-	seen := map[string]int{}
+	repeats := map[string]int{}
+	taken := map[string]bool{}
 	for i, h := range raw {
 		name := strings.TrimSpace(h)
 		if name == "" {
 			name = "col_" + strconv.Itoa(i+1)
 			warnings = append(warnings, fmt.Sprintf("column %d has a blank header; exposed as %q", i+1, name))
 		}
-		seen[name]++
-		if n := seen[name]; n > 1 {
+		repeats[name]++
+		if taken[name] {
+			n := max(repeats[name], 2)
 			deduped := name + "_" + strconv.Itoa(n)
+			for taken[deduped] {
+				n++
+				deduped = name + "_" + strconv.Itoa(n)
+			}
+			repeats[name] = n
 			warnings = append(warnings, fmt.Sprintf("duplicate header %q in column %d; exposed as %q", name, i+1, deduped))
 			name = deduped
 		}
+		taken[name] = true
 		names[i] = name
 	}
 	return names, warnings

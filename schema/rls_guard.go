@@ -23,16 +23,24 @@ const currentOrgIDGUC = "app.current_org_id"
 
 // RLSAuditError enumerates tenant-scoped tables whose RLS posture is wrong.
 type RLSAuditError struct {
-	MissingRLS    []string
-	MissingForce  []string
-	MissingPolicy []string
+	MissingRLS         []string
+	MissingForce       []string
+	MissingPolicy      []string
+	UnscopedPolicy     []string
+	MissingWritePolicy []string
 }
 
 func (e *RLSAuditError) Error() string {
 	return fmt.Sprintf(
-		"rls audit: %d missing RLS, %d missing FORCE, %d missing tenant policy",
+		"rls audit: %d missing RLS, %d missing FORCE, %d missing tenant policy, %d unscoped policy, %d missing write policy",
 		len(e.MissingRLS), len(e.MissingForce), len(e.MissingPolicy),
+		len(e.UnscopedPolicy), len(e.MissingWritePolicy),
 	)
+}
+
+func (e *RLSAuditError) empty() bool {
+	return len(e.MissingRLS) == 0 && len(e.MissingForce) == 0 && len(e.MissingPolicy) == 0 &&
+		len(e.UnscopedPolicy) == 0 && len(e.MissingWritePolicy) == 0
 }
 
 // IsRLSAuditError reports whether err's tree contains a *RLSAuditError.
@@ -81,7 +89,7 @@ func checkBypassRLS(ctx context.Context, conn *sql.DB, allowBypass bool) error {
 	return nil
 }
 
-// AuditPolicies asserts each table has RLS enabled, FORCE enabled, and a policy scoped by app.current_org_id, read either inline or through a helper function.
+// AuditPolicies asserts each table has RLS enabled, FORCE enabled, and policies that scope both reads and writes by app.current_org_id, read either inline or through a helper function.
 func AuditPolicies(ctx context.Context, conn *sql.DB, tables []string) error {
 	if len(tables) == 0 {
 		return nil
@@ -90,7 +98,7 @@ func AuditPolicies(ctx context.Context, conn *sql.DB, tables []string) error {
 	if err != nil {
 		return err
 	}
-	policyOK, err := loadPolicyFlags(ctx, conn, tables)
+	posture, err := loadPolicyPosture(ctx, conn, tables)
 	if err != nil {
 		return err
 	}
@@ -102,14 +110,23 @@ func AuditPolicies(ctx context.Context, conn *sql.DB, tables []string) error {
 		if !forceOn[t] {
 			audit.MissingForce = append(audit.MissingForce, t)
 		}
-		if !policyOK[t] {
+		p := posture[t]
+		if !p.scopedRead {
 			audit.MissingPolicy = append(audit.MissingPolicy, t)
+		}
+		if p.unscoped {
+			audit.UnscopedPolicy = append(audit.UnscopedPolicy, t)
+		}
+		if p.scopedRead && !p.writeCovered {
+			audit.MissingWritePolicy = append(audit.MissingWritePolicy, t)
 		}
 	}
 	sort.Strings(audit.MissingRLS)
 	sort.Strings(audit.MissingForce)
 	sort.Strings(audit.MissingPolicy)
-	if len(audit.MissingRLS) == 0 && len(audit.MissingForce) == 0 && len(audit.MissingPolicy) == 0 {
+	sort.Strings(audit.UnscopedPolicy)
+	sort.Strings(audit.MissingWritePolicy)
+	if audit.empty() {
 		return nil
 	}
 	return audit
@@ -145,34 +162,81 @@ func loadRLSFlags(ctx context.Context, conn *sql.DB, tables []string) (rls, forc
 	return rls, force, nil
 }
 
-func loadPolicyFlags(ctx context.Context, conn *sql.DB, tables []string) (map[string]bool, error) {
+type policyRow struct {
+	qual      string
+	withCheck string
+	cmd       string
+}
+
+type policyPosture struct {
+	scopedRead   bool
+	unscoped     bool
+	writeCovered bool
+}
+
+// SECURITY: an empty with_check makes Postgres reuse qual for writes; a non-empty one must carry a tenant marker of its own or INSERT/UPDATE can write any org_id.
+func (p *policyPosture) observe(row policyRow, markers []string) {
+	qualScoped := row.qual != "" && containsMarker(row.qual, markers)
+	checkScoped := row.withCheck != "" && containsMarker(row.withCheck, markers)
+	if qualScoped {
+		p.scopedRead = true
+	}
+	if row.qual != "" && !qualScoped {
+		p.unscoped = true
+	}
+	if row.withCheck != "" && !checkScoped {
+		p.unscoped = true
+	}
+	if row.qual == "" && row.withCheck == "" {
+		p.unscoped = true
+	}
+	if coversWrites(row.cmd) {
+		p.writeCovered = true
+	}
+}
+
+func containsMarker(expr string, markers []string) bool {
+	return slices.ContainsFunc(markers, func(m string) bool { return strings.Contains(expr, m) })
+}
+
+func coversWrites(cmd string) bool {
+	switch strings.ToUpper(strings.TrimSpace(cmd)) {
+	case "ALL", "INSERT", "UPDATE", "DELETE":
+		return true
+	}
+	return false
+}
+
+func loadPolicyPosture(ctx context.Context, conn *sql.DB, tables []string) (map[string]policyPosture, error) {
 	markers, err := tenantScopeMarkers(ctx, conn)
 	if err != nil {
 		return nil, err
 	}
-	ok := make(map[string]bool, len(tables))
+	posture := make(map[string]policyPosture, len(tables))
 	rows, err := conn.QueryContext(ctx, `
-		SELECT tablename, COALESCE(qual, '')
+		SELECT tablename, COALESCE(qual, ''), COALESCE(with_check, ''), cmd
 		FROM pg_policies
 		WHERE tablename = ANY ($1)
+		  AND schemaname = ANY (current_schemas(false))
 	`, tables)
 	if err != nil {
 		return nil, fmt.Errorf("rls audit: pg_policies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var name, qual string
-		if scanErr := rows.Scan(&name, &qual); scanErr != nil {
+		var name string
+		var row policyRow
+		if scanErr := rows.Scan(&name, &row.qual, &row.withCheck, &row.cmd); scanErr != nil {
 			return nil, fmt.Errorf("rls audit: scan pg_policies: %w", scanErr)
 		}
-		if slices.ContainsFunc(markers, func(m string) bool { return strings.Contains(qual, m) }) {
-			ok[name] = true
-		}
+		p := posture[name]
+		p.observe(row, markers)
+		posture[name] = p
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
 		return nil, fmt.Errorf("rls audit: pg_policies rows: %w", rowsErr)
 	}
-	return ok, nil
+	return posture, nil
 }
 
 // NOTE: migration 002 moved the GUC read into a NULL-safe helper, so a policy's qual names that function instead of the GUC.

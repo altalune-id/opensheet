@@ -286,6 +286,10 @@ func (r *Runner) runEntry(ctx context.Context, e *jobEntry, manual bool) error {
 	}
 	defer r.wg.Done()
 
+	// NOTE: mint unconditionally rather than reqid.Ensure — ctx descends from the process root,
+	// whose id Ensure would reuse for every line this Runner emits since boot.
+	ctx = reqid.WithContext(ctx, reqid.New())
+
 	if !e.inFlight.CompareAndSwap(false, true) {
 		r.log.WarnContext(ctx, "scheduler.job_overlap", "job", e.job.Name)
 		r.recordRun(ctx, e.job, StatusOverlap, 0)
@@ -318,7 +322,6 @@ func (r *Runner) invoke(ctx context.Context, e *jobEntry, manual bool) error {
 		defer release()
 	}
 
-	ctx, _ = reqid.Ensure(ctx)
 	start := r.now()
 
 	var (

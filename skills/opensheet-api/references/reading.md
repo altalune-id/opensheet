@@ -6,7 +6,7 @@ A JSON array of objects keyed by the tab's header row. Every value is a string â
 does not infer types.
 
 ```json
-[{"id":"aB3","name":"Ada","amount":"12"}]
+[{ "id": "aB3", "name": "Ada", "amount": "12" }]
 ```
 
 Blank headers become `col_1`, `col_2`; duplicates become `name_2`. The UI shows these as
@@ -16,19 +16,19 @@ warnings when you publish.
 
 Repeat `?where=` to AND clauses together. Form: `column:operator[:value]`.
 
-| Operator | Meaning |
-|---|---|
-| `eq` `ne` | equal / not equal |
-| `gt` `gte` `lt` `lte` | ordered comparison |
-| `contains` `starts` | substring / prefix |
-| `in` | value in a comma-separated list |
-| `empty` `present` | cell is blank / not blank (no value part) |
+| Operator              | Meaning                                   |
+| --------------------- | ----------------------------------------- |
+| `eq` `ne`             | equal / not equal                         |
+| `gt` `gte` `lt` `lte` | ordered comparison                        |
+| `contains` `starts`   | substring / prefix                        |
+| `in`                  | value in a comma-separated list           |
+| `empty` `present`     | cell is blank / not blank (no value part) |
 
 ```
 ?where=status:eq:paid&where=amount:gte:100&where=note:present
 ```
 
-Cells are text, so `amount:gt:9` is a *string* comparison by default. Add a hint on the
+Cells are text, so `amount:gt:9` is a _string_ comparison by default. Add a hint on the
 operator to compare numerically or by date:
 
 ```

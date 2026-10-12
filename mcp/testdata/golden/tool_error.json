@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "io.modelcontextprotocol/serverInfo": {
+      "name": "opensheet",
+      "version": "wirefreeze"
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"code\":\"GEN003\",\"message\":\"credential lacks the required scope\",\"meta\":{\"scope\":\"posts:write\",\"tool\":\"blog_publish\"}}"
+    }
+  ],
+  "isError": true,
+  "resultType": "complete"
+}

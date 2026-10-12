@@ -42,7 +42,6 @@ func newQueryFixtureOf(t *testing.T, body string, opts harnessOpts) *queryFixtur
 	return &queryFixture{h: h, f: f, sh: sh}
 }
 
-// resolve re-reads the aggregate the way a fresh request does, so validated_at and the generation are never stale in memory.
 func (q *queryFixture) resolve(t *testing.T) {
 	t.Helper()
 	sh, err := q.f.store.ByID(q.f.ctx(), q.sh.ID)
@@ -184,7 +183,6 @@ func idsOf(t *testing.T, payload []byte) []string {
 	return out
 }
 
-// walkNames pages a sorted read to exhaustion through the route, re-resolving the aggregate between pages as a fresh request does.
 func (q *queryFixture) walkNames(t *testing.T, f sheet.RowFilter) ([]string, []int) {
 	t.Helper()
 	var (

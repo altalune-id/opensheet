@@ -141,7 +141,7 @@ func TestMigrateUp_SQLite_CreatesAllTables(t *testing.T) {
 		"opensheet_spreadsheets",
 		"opensheet_sheets",
 		"opensheet_api_keys",
-		"opensheet_api_key_sheets",
+		"opensheet_api_key_projects",
 		"opensheet_sheet_snapshots",
 		"opensheet_bootstrap",
 		"opensheet_sessions",

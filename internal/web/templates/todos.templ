@@ -6,13 +6,13 @@ import (
 )
 
 type TodosView struct {
-	OrgSlug     string
+	OrgSlug string
 	ProjectID   string
 	ProjectSlug string
 	ProjectName string
 	Items       []TodoRow
 	Error       string
-	ErrorCode   string
+	ErrorCode string
 }
 
 // TodoList is the HTMX-swappable list section — POST to /todos targets #todo-list.
@@ -38,8 +38,12 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 				method="post"
 				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos/clear")) }
 				hx-post={ d.ProjectPath(v.ProjectSlug, "/todos/clear") }
+				hx-nonce={ d.Nonce }
 				hx-target="#todo-list"
 				hx-swap="outerHTML"
+				hx-disable="find button, find input"
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
 				class="inline"
 			>
 				<button type="submit" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -55,9 +59,13 @@ templ TodosPage(d web.LayoutData, v TodosView) {
 			method="post"
 			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/todos")) }
 			hx-post={ d.ProjectPath(v.ProjectSlug, "/todos") }
+			hx-nonce={ d.Nonce }
 			hx-target="#todo-list"
 			hx-swap="outerHTML"
-			hx-on::after-request="if(event.detail.successful) this.reset()"
+			hx-disable="find button, find input"
+			hx-status:4xx="target:#hx-error swap:innerHTML"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
+			data-reset-on-success
 			class="mt-6 flex gap-2"
 		>
 			<input

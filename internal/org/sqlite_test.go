@@ -312,3 +312,121 @@ func TestSQLite_SaveMembership_UpdatesRole(t *testing.T) {
 		t.Errorf("role after upsert = %q want %q", got.Role, org.RoleOwner)
 	}
 }
+
+func TestSQLite_SystemOrg(t *testing.T) {
+	store, sqlDB, prefix := newSQLiteStoreForTest(t)
+	owner := seedUser(t, sqlDB, prefix)
+	ctx := context.Background()
+
+	_, err := store.SystemOrg(ctx)
+	if !org.IsNotFoundError(err) {
+		t.Fatalf("want NotFoundError on an empty store, got %T: %v", err, err)
+	}
+
+	plain, err := org.NewOrg("plain", "Plain", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, plain); err != nil {
+		t.Fatalf("Save plain: %v", err)
+	}
+	if _, err := store.SystemOrg(ctx); !org.IsNotFoundError(err) {
+		t.Fatalf("a non-system org must not be returned, got %T: %v", err, err)
+	}
+
+	sys, err := org.NewOrg("custom-edited-slug", "Singleton", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys.System = true
+	if err := store.Save(ctx, sys); err != nil {
+		t.Fatalf("Save system: %v", err)
+	}
+
+	got, err := store.SystemOrg(ctx)
+	if err != nil {
+		t.Fatalf("SystemOrg: %v", err)
+	}
+	if got.ID != sys.ID || got.Slug != "custom-edited-slug" || !got.System || got.OwnerID != owner {
+		t.Errorf("SystemOrg = %+v, want the system org", got)
+	}
+}
+
+func TestSQLite_SecondSystemOrgIsRefused(t *testing.T) {
+	store, sqlDB, prefix := newSQLiteStoreForTest(t)
+	owner := seedUser(t, sqlDB, prefix)
+	ctx := context.Background()
+
+	first, err := org.NewOrg("first-system", "First", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.System = true
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("Save first: %v", err)
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("re-saving the one system org must stay allowed: %v", err)
+	}
+
+	second, err := org.NewOrg("second-system", "Second", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.System = true
+	err = store.Save(ctx, second)
+	if !org.IsSystemOrgExistsError(err) {
+		t.Fatalf("want SystemOrgExistsError, got %T: %v", err, err)
+	}
+
+	plain, err := org.NewOrg("plain-org", "Plain", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, plain); err != nil {
+		t.Fatalf("a non-system org must not trip the guard: %v", err)
+	}
+	plain.System = true
+	if err := store.Save(ctx, plain); !org.IsSystemOrgExistsError(err) {
+		t.Fatalf("promoting a second org to system must be refused, got %T: %v", err, err)
+	}
+	dup, err := org.NewOrg("plain-org", "Dup", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ctx, dup); !org.IsAlreadyExistsError(err) {
+		t.Fatalf("a slug clash must stay AlreadyExistsError, got %T: %v", err, err)
+	}
+}
+
+func TestSQLite_BootstrapSingleton_TwoOnboardingsLeaveOneSystemOrg(t *testing.T) {
+	store, sqlDB, prefix := newSQLiteStoreForTest(t)
+	first, second := seedUser(t, sqlDB, prefix), seedUser(t, sqlDB, prefix)
+	svc := newServiceWithStore(t, store)
+	ctx := context.Background()
+
+	o, err := svc.BootstrapSingleton(ctx, "brave-cove-1234", "Acme", first)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	again, err := svc.BootstrapSingleton(ctx, "misty-reef-5678", "Other", second)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if again.ID != o.ID {
+		t.Fatalf("second onboarding created org %s, want the system org %s", again.ID, o.ID)
+	}
+	var systems, total int
+	if err := sqlDB.QueryRow("SELECT count(*) FROM " + prefix + "orgs WHERE system = 1").Scan(&systems); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.QueryRow("SELECT count(*) FROM " + prefix + "orgs").Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if systems != 1 || total != 1 {
+		t.Fatalf("orgs: %d system of %d total, want exactly one", systems, total)
+	}
+	if _, err := store.MembershipOf(ctx, o.ID, second); err != nil {
+		t.Fatalf("the second admin must be a member of the system org: %v", err)
+	}
+}

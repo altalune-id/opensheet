@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
+	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
 )
 
@@ -21,9 +24,21 @@ func NewTodoHandler(d Deps, projects *project.Service, todos *todo.Service) *Tod
 	return &TodoHandler{Deps: d, Todos: todos}
 }
 
+func (h *TodoHandler) remember(sc ProjectScope) {
+	if sc.principal.ActiveOrgID == sc.org.ID && sc.principal.ActiveProjectID == sc.project.ID {
+		return
+	}
+	updated := sc.principal
+	updated.ActiveOrgID = sc.org.ID
+	updated.ActiveProjectID = sc.project.ID
+	if err := h.UpdateSession(sc.req, sc.sid, updated); err != nil {
+		h.LogErr("web todo: update session", err)
+	}
+}
+
 // GetOverview renders the project overview page.
 func (h *TodoHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -58,7 +73,7 @@ func (h *TodoHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
 
 // GetTodos renders the full page.
 func (h *TodoHandler) GetTodos(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -83,7 +98,7 @@ func (h *TodoHandler) GetTodos(w http.ResponseWriter, r *http.Request) {
 
 // PostCreate creates a todo and returns the refreshed list fragment.
 func (h *TodoHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -114,7 +129,7 @@ func (h *TodoHandler) PostToggle(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Toggle failed", "Could not update that todo.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoRowFragment(h.fragment(sc), todoRow(sc.org.Slug, sc.project.Slug, updated)))
+	Render(w, sc.req, templates.TodoRowFragment(h.ProjectFragmentBase(sc), todoRow(sc.org.Slug, sc.project.Slug, updated)))
 }
 
 // Delete removes the row.
@@ -132,7 +147,7 @@ func (h *TodoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // PostClear removes all done todos and returns the refreshed list fragment.
 func (h *TodoHandler) PostClear(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -142,41 +157,41 @@ func (h *TodoHandler) PostClear(w http.ResponseWriter, r *http.Request) {
 	h.writeListFragment(w, sc)
 }
 
-// requireTodo resolves the project scope from the path, then the todo inside it.
-func (h *TodoHandler) requireTodo(w http.ResponseWriter, r *http.Request) (projectScope, *todo.Todo, bool) {
-	sc, ok := h.requireProject(w, r)
+func (h *TodoHandler) requireTodo(w http.ResponseWriter, r *http.Request) (ProjectScope, *todo.Todo, bool) {
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
-	id, ok := h.pathID(w, r, "todo")
-	if !ok {
-		return projectScope{}, nil, false
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed todo id.")
+		return ProjectScope{}, nil, false
 	}
 	t, err := h.Todos.ByID(sc.req.Context(), id)
 	if err != nil {
 		if todo.IsNotFoundError(err) {
 			h.ErrorPage(w, sc.req, http.StatusNotFound, "Not found", "That todo no longer exists.")
-			return projectScope{}, nil, false
+			return ProjectScope{}, nil, false
 		}
 		h.LogErr("web todo: byID", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that todo.", err)
-		return projectScope{}, nil, false
+		return ProjectScope{}, nil, false
 	}
 	return sc, t, true
 }
 
-func (h *TodoHandler) writeListFragment(w http.ResponseWriter, sc projectScope) {
+func (h *TodoHandler) writeListFragment(w http.ResponseWriter, sc ProjectScope) {
 	items, err := h.Todos.List(sc.req.Context(), todo.ListOpts{})
 	if err != nil {
 		h.LogErr("web todo: list", err)
 		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "List failed", "Could not load todos.", err)
 		return
 	}
-	Render(w, sc.req, templates.TodoList(h.fragment(sc), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
+	Render(w, sc.req, templates.TodoList(h.ProjectFragmentBase(sc), renderRowsFor(sc.org.Slug, sc.project.Slug, items)))
 }
 
 // Register wires the todo routes onto mux.
-func (h *TodoHandler) Register(mux *http.ServeMux) {
+func (h *TodoHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/overview", h.GetOverview)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/todos", h.GetTodos)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/todos", h.PostCreate)

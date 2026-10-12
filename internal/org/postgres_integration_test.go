@@ -50,7 +50,6 @@ func newPostgresStoreForTest(t *testing.T) (store org.Store, tc tenant.Context, 
 	return store, tc, prefix
 }
 
-// scopedTo returns a context naming orgID, the way org.Create and the handlers do in production.
 func scopedTo(t *testing.T, tc tenant.Context, orgID uuid.UUID) context.Context {
 	t.Helper()
 	tc.OrgID = orgID

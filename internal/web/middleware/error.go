@@ -3,9 +3,6 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
-	"strconv"
-
-	"github.com/a-h/templ"
 
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/web"
@@ -32,20 +29,22 @@ func (t TemplateErrorPage) RenderError(w http.ResponseWriter, r *http.Request, e
 		msg = err.Message()
 	}
 	status := statusFromApp(err)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if isHTMX(r) {
-		w.WriteHeader(status)
-		_, wErr := w.Write(htmxErrorFragment(status, title, msg))
-		return wErr
-	}
+	view := templates.ErrorView{Status: status, Title: title, Message: msg}
+	var data web.LayoutData
 	if t.Layout != nil {
-		data := t.Layout(r, title)
+		data = t.Layout(r, title)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if web.IsHTMXRequest(r) {
 		w.WriteHeader(status)
-		return templates.ErrorLayout(data, templates.ErrorView{Status: status, Title: title, Message: msg}).Render(r.Context(), w)
+		return templates.ErrorFragment(data, view).Render(r.Context(), w)
 	}
 	w.WriteHeader(status)
+	if t.Layout != nil {
+		return templates.ErrorLayout(data, view).Render(r.Context(), w)
+	}
 	//nolint:contextcheck // ErrorPage does not need ctx; write to r.Context() for logging.
-	return templates.ErrorPage(web.LayoutData{}, templates.ErrorView{Status: status, Title: title, Message: msg}).Render(r.Context(), w)
+	return templates.ErrorPage(data, view).Render(r.Context(), w)
 }
 
 // LogError writes a plain-text response and, when Log is non-nil, logs the error.
@@ -72,15 +71,6 @@ func (l LogError) RenderError(w http.ResponseWriter, r *http.Request, err *apper
 	return wErr
 }
 
-func isHTMX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
-
-func statusFromApp(err *apperror.AppError) int {
-	return err.HTTPStatus()
-}
-
-func htmxErrorFragment(status int, title, msg string) []byte {
-	return []byte(
-		`<div class="alt-error" data-status="` + strconv.Itoa(status) + `"><strong>` +
-			templ.EscapeString(title) + `</strong> ` + templ.EscapeString(msg) + `</div>`,
-	)
+func statusFromApp(_ *apperror.AppError) int {
+	return http.StatusInternalServerError
 }

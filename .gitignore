@@ -43,6 +43,9 @@ node_modules/
 .opensheet-data
 .cache
 
+# Local make timestamp; the vendored UI assets themselves are committed.
+/internal/web/static/.vendor-stamp
+
 # Debugging / profiling
 *.prof
 .playwright-mcp

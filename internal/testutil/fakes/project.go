@@ -13,8 +13,9 @@ import (
 
 // Project is an in-memory project.Store.
 type Project struct {
-	mu   sync.Mutex
-	rows map[uuid.UUID]*project.Project
+	mu         sync.Mutex
+	rows       map[uuid.UUID]*project.Project
+	takenSlugs int
 }
 
 // NewProject returns an empty in-memory project.Store.
@@ -24,7 +25,7 @@ func NewProject() *Project {
 
 var _ project.Store = (*Project)(nil)
 
-// Save upserts the project by ID; a slug collision inside the same org returns AlreadyExistsError.
+// Save upserts the project by ID; it mirrors the per-org slug and one-system-project unique indexes.
 func (r *Project) Save(_ context.Context, p *project.Project) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -34,6 +35,9 @@ func (r *Project) Save(_ context.Context, p *project.Project) error {
 		}
 		if existing.OrgID == p.OrgID && existing.Slug == p.Slug {
 			return &project.AlreadyExistsError{Field: "slug", Value: p.Slug}
+		}
+		if p.System && existing.System && existing.OrgID == p.OrgID {
+			return &project.SystemProjectExistsError{OrgID: p.OrgID.String(), Slug: p.Slug}
 		}
 	}
 	c := *p
@@ -53,10 +57,21 @@ func (r *Project) ByID(_ context.Context, id uuid.UUID) (*project.Project, error
 	return &c, nil
 }
 
+// TakeNextSlugs makes the next n BySlug lookups report the slug as taken, without storing a row.
+func (r *Project) TakeNextSlugs(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.takenSlugs = n
+}
+
 // BySlug returns the project with the given (org, slug) or a *NotFoundError.
 func (r *Project) BySlug(_ context.Context, orgID uuid.UUID, slug string) (*project.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.takenSlugs > 0 {
+		r.takenSlugs--
+		return &project.Project{ID: uuid.New(), OrgID: orgID, Slug: slug, Name: slug}, nil
+	}
 	for _, p := range r.rows {
 		if p.OrgID == orgID && p.Slug == slug {
 			c := *p

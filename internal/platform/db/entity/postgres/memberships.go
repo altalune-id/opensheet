@@ -13,8 +13,7 @@ type Memberships struct {
 	CreatedAt postgres.ColumnTimestampz
 	System    postgres.ColumnBool
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewMemberships builds the memberships binding.
@@ -30,17 +29,15 @@ func NewMemberships(schema, tablePrefix string) *Memberships {
 		createdAt = postgres.TimestampzColumn("created_at")
 		system    = postgres.BoolColumn("system")
 		all       = postgres.ColumnList{id, orgID, userID, role, createdAt, system}
-		mutable   = postgres.ColumnList{orgID, userID, role, system}
 	)
 	return &Memberships{
-		Table:          postgres.NewTable(schema, tablePrefix+"memberships", "memberships", all...),
-		ID:             id,
-		OrgID:          orgID,
-		UserID:         userID,
-		Role:           role,
-		CreatedAt:      createdAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"memberships", "memberships", all...),
+		ID:         id,
+		OrgID:      orgID,
+		UserID:     userID,
+		Role:       role,
+		CreatedAt:  createdAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

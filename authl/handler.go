@@ -221,7 +221,7 @@ func (c *Client) fetchUserInfo(ctx context.Context, token *oauth2.Token) (*userI
 	return &out, nil
 }
 
-// sanitizeReturnTo accepts only same-origin absolute paths; rejects protocol-relative and absolute URLs, and normalizes backslashes to forward slashes.
+// SECURITY: only same-origin absolute paths are accepted; a protocol-relative or absolute URL is an open redirect.
 func sanitizeReturnTo(raw string) string {
 	normalized := strings.ReplaceAll(raw, "\\", "/")
 	u, err := url.Parse(normalized)

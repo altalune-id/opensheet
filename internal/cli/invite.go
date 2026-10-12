@@ -65,7 +65,7 @@ func newInviteListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.C
 					}
 					rows = append(rows, []string{
 						inv.ID.String(), inv.Email, string(inv.Role), status,
-						inv.ExpiresAt.Format("2006-01-02"),
+						tableDay(inv.ExpiresAt),
 					})
 				}
 				return render.Table(cmd.OutOrStdout(), []string{"ID", "EMAIL", "ROLE", "STATUS", "EXPIRES"}, rows)
@@ -150,7 +150,7 @@ func inviteToMap(inv *invite.Invite) map[string]any {
 		"email":      inv.Email,
 		"role":       string(inv.Role),
 		"status":     status,
-		"expires_at": inv.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
-		"created_at": inv.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"expires_at": rfc3339UTC(inv.ExpiresAt),
+		"created_at": rfc3339UTC(inv.CreatedAt),
 	}
 }

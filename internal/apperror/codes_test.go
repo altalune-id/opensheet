@@ -2,6 +2,7 @@ package apperror_test
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,7 +17,6 @@ var (
 	reDoc   = regexp.MustCompile(`(?m)^\|\s*` + "`" + `([A-Z]{3}[0-9]{3})` + "`" + `\s*\|`)
 )
 
-// registry parses codes.go so the assertions below have a single source of truth that cannot drift.
 func registry(t *testing.T) map[string]string {
 	t.Helper()
 	b, err := os.ReadFile("codes.go")
@@ -58,11 +58,25 @@ func TestCodes_UnexpectedFailuresUseTheReservedBlock(t *testing.T) {
 	}
 }
 
+func documentedCodes(t *testing.T) string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join("..", "..", "docs", "errors", "*.md"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no docs/errors/*.md: %v", err)
+	}
+	var b strings.Builder
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		require.NoError(t, err)
+		b.Write(raw)
+	}
+	return b.String()
+}
+
 func TestCodes_EveryRefIsDocumented(t *testing.T) {
-	b, err := os.ReadFile("../../docs/ERROR_CODES.md")
-	require.NoError(t, err, "docs/ERROR_CODES.md is the table users are pointed at")
+	doc := documentedCodes(t)
 	documented := map[string]bool{}
-	for _, m := range reDoc.FindAllStringSubmatch(string(b), -1) {
+	for _, m := range reDoc.FindAllStringSubmatch(doc, -1) {
 		documented[m[1]] = true
 	}
 	reg := registry(t)
@@ -73,13 +87,13 @@ func TestCodes_EveryRefIsDocumented(t *testing.T) {
 		}
 	}
 	sort.Strings(missing)
-	require.Empty(t, missing, "add these to docs/ERROR_CODES.md:\n%s", strings.Join(missing, "\n"))
+	require.Empty(t, missing, "add these to docs/errors/*.md:\n%s", strings.Join(missing, "\n"))
 
 	refs := map[string]bool{}
 	for _, ref := range reg {
 		refs[ref] = true
 	}
 	for ref := range documented {
-		require.True(t, refs[ref], "docs/ERROR_CODES.md lists %s, which no code defines", ref)
+		require.True(t, refs[ref], "docs/errors/*.md lists %s, which no code defines", ref)
 	}
 }

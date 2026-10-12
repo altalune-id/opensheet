@@ -1,0 +1,11 @@
+{
+  "id": "018f9c3e-1111-7000-8000-000000000001",
+  "slug": "hello-world",
+  "title": "Hello, world",
+  "body_markdown": "# Hello\n\nBody.",
+  "category_id": "018f9c3e-2222-7000-8000-000000000002",
+  "tag_ids": [],
+  "first_published_at": "2026-09-20T10:00:00Z",
+  "updated_at": "2026-09-27T04:11:00Z",
+  "version": 3
+}

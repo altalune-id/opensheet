@@ -7,12 +7,20 @@ import (
 
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
-	"altalune.id/opensheet/internal/web"
 )
 
-// projectScope is the org and project a project-scoped page acts on, with a request already carrying both scopes.
-type projectScope struct {
+// OrgScope is the org an org-scoped route acts on, with a request already carrying the tenant scope.
+type OrgScope struct {
+	principal session.Principal
+	sid       string
+	org       *org.Org
+	req       *http.Request
+}
+
+// ProjectScope is the org and project a project-scoped route acts on, with a request already carrying both scopes.
+type ProjectScope struct {
 	principal session.Principal
 	sid       string
 	org       *org.Org
@@ -20,56 +28,60 @@ type projectScope struct {
 	req       *http.Request
 }
 
-// requireProject resolves the org and project the path names, gating membership before any row is read.
-func (d Deps) requireProject(w http.ResponseWriter, r *http.Request) (projectScope, bool) {
-	return d.requireProjectSlugs(w, r, r.PathValue("org"), r.PathValue("project"))
+// RequireOrg resolves the org the path names, gating membership before anything reads its rows. SECURITY: the slug is attacker-supplied and RLS cannot gate it, so this membership check is the only thing separating one org's members from another's rows.
+func (d Deps) RequireOrg(w http.ResponseWriter, r *http.Request) (OrgScope, bool) {
+	return d.RequireOrgFrom(w, r, func(r *http.Request) string { return r.PathValue("org") })
 }
 
-// requireProjectSlugs resolves an explicitly supplied org and project pair, for the Google routes whose path cannot carry one.
-func (d Deps) requireProjectSlugs(w http.ResponseWriter, r *http.Request, orgSlug, projectSlug string) (projectScope, bool) {
+// RequireOrgFrom is RequireOrg for a route that names its org elsewhere, such as a form field; slug is read only once the caller is signed in.
+func (d Deps) RequireOrgFrom(w http.ResponseWriter, r *http.Request, slug func(*http.Request) string) (OrgScope, bool) {
+	p, sid, ok := d.RequireSignedIn(w, r)
+	if !ok {
+		return OrgScope{}, false
+	}
+	o, r, ok := d.OrgScopeFor(w, r, p, slug(r))
+	if !ok {
+		return OrgScope{}, false
+	}
+	return OrgScope{principal: p, sid: sid, org: o, req: r}, true
+}
+
+// RequireSignedIn loads the caller's session, redirecting to login when there is none.
+func (d Deps) RequireSignedIn(w http.ResponseWriter, r *http.Request) (session.Principal, string, bool) {
 	p, sid, ok := d.LoadSession(r)
-	if !ok {
+	if !ok || p.UserID == uuid.Nil {
 		http.Redirect(w, r, ResolveReturnTo(d.Cfg.HTTP.BasePath, "/login"), http.StatusSeeOther)
-		return projectScope{}, false
+		return session.Principal{}, "", false
 	}
-	o, r, ok := d.OrgScopeFor(w, r, p, orgSlug)
-	if !ok {
-		return projectScope{}, false
-	}
-	proj, r, ok := d.ProjectScopeFor(w, r, o.ID, projectSlug)
-	if !ok {
-		return projectScope{}, false
-	}
-	return projectScope{principal: p, sid: sid, org: o, project: proj, req: r}, true
+	return p, sid, true
 }
 
-// remember stores the org and project as the session's last-used pair, which only / reads.
-func (d Deps) remember(sc projectScope) {
-	if sc.principal.ActiveOrgID == sc.org.ID && sc.principal.ActiveProjectID == sc.project.ID {
-		return
-	}
-	updated := sc.principal
-	updated.ActiveOrgID = sc.org.ID
-	updated.ActiveProjectID = sc.project.ID
-	if err := d.UpdateSession(sc.req, sc.sid, updated); err != nil {
-		d.LogErr("web: update session", err)
-	}
-}
-
-// fragment builds the LayoutData an HTMX partial renders with, pinning the org and project so LayoutData.ProjectPath resolves.
-func (d Deps) fragment(sc projectScope) web.LayoutData {
-	base := d.Base(sc.req, "")
-	base.ActiveOrg = &web.ActiveOrg{ID: sc.org.ID.String(), Slug: sc.org.Slug, Name: sc.org.Name}
-	base.ActiveProject = &web.ActiveProject{ID: sc.project.ID.String(), Slug: sc.project.Slug, Name: sc.project.Name}
-	return base
-}
-
-// pathID parses the {id} path value, rendering a 400 page when it is malformed.
-func (d Deps) pathID(w http.ResponseWriter, r *http.Request, what string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(r.PathValue("id"))
+// MemberOrgScopes returns an OrgScope for every org the caller belongs to. SECURITY: org.Service.List joins the caller's memberships, so every org here is one the caller is a member of right now.
+func (d Deps) MemberOrgScopes(r *http.Request, p session.Principal, sid string) ([]OrgScope, error) {
+	orgs, err := d.Orgs.List(r.Context(), p.UserID)
 	if err != nil {
-		d.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed "+what+" id.")
-		return uuid.Nil, false
+		return nil, err
 	}
-	return id, true
+	out := make([]OrgScope, 0, len(orgs))
+	for _, o := range orgs {
+		out = append(out, OrgScope{principal: p, sid: sid, org: o, req: orgScopedRequest(r, p, o)})
+	}
+	return out, nil
+}
+
+func orgScopedRequest(r *http.Request, p session.Principal, o *org.Org) *http.Request {
+	return r.WithContext(tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID}))
+}
+
+// RequireProject resolves the org and project the path names, gating org membership before the project is looked up. SECURITY: membership is org-level by design, so this admits ANY project in an org the caller belongs to — see ../../../docs/multitenancy/request-scope.md.
+func (d Deps) RequireProject(w http.ResponseWriter, r *http.Request) (ProjectScope, bool) {
+	sc, ok := d.RequireOrg(w, r)
+	if !ok {
+		return ProjectScope{}, false
+	}
+	proj, req, ok := d.ProjectScopeFor(w, sc.req, sc.org.ID, sc.req.PathValue("project"))
+	if !ok {
+		return ProjectScope{}, false
+	}
+	return ProjectScope{principal: sc.principal, sid: sc.sid, org: sc.org, project: proj, req: req}, true
 }

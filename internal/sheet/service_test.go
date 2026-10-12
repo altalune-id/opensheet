@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func newSvcGoogle(
 	snaps sheet.SnapshotStore,
 	attempts sheet.IdempotencyStore,
 	publicEnabled bool,
+	opts ...sheet.Option,
 ) (*sheet.Service, *fakeSheets, *int) {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -69,7 +71,7 @@ func newSvcGoogle(
 		anySheetSource{}, fakes.NewSheetTokenSources(), fakes.NewSheetReauthers(), google.factory(),
 		log, unexpected,
 	)
-	svc := sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}, snaps, attempts, publish)
+	svc := sheet.NewService(store, log, unexpected, fakeCaps{public: publicEnabled}, snaps, attempts, publish, opts...)
 	return svc, google, &calls
 }
 
@@ -339,6 +341,24 @@ func TestService_Create_ValidatesTheTableContract(t *testing.T) {
 		}
 		if !stored.SoftDelete {
 			t.Error("the stored sheet reports SoftDelete false, want the flag persisted by the insert")
+		}
+	})
+	t.Run("stamps the header row so capabilities can answer before any read", func(t *testing.T) {
+		store := fakes.NewSheet()
+		svc, google, _ := newSvcGoogle(t, store, fakes.NewSheetSnapshots(), sheet.NewMemoryIdempotencyStore(), false)
+		google.setRows(http.StatusOK, `{"values":[["id","name","email"]]}`)
+		ctx, _ := tenantCtx(t)
+
+		got, err := svc.Create(ctx, sheet.CreateRequest{SpreadsheetID: uuid.New(), Tab: "Q1", Slug: "prices", Visibility: sheet.VisibilityKey})
+		if err != nil {
+			t.Fatalf("Create err = %v", err)
+		}
+		stored, sErr := svc.ByID(ctx, got.ID)
+		if sErr != nil {
+			t.Fatalf("ByID err = %v", sErr)
+		}
+		if want := []string{"id", "name", "email"}; !slices.Equal(stored.HeaderColumns, want) {
+			t.Errorf("HeaderColumns = %#v, want %#v", stored.HeaderColumns, want)
 		}
 	})
 	t.Run("rejects a tab with no id column and creates nothing", func(t *testing.T) {

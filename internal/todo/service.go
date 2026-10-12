@@ -12,22 +12,30 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/queue"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer = otel.Tracer("altalune.id/opensheet/internal/todo")
 
+// Queue submits jobs for a background handler to run.
+type Queue interface {
+	Submit(ctx context.Context, j queue.Job, data any) error
+}
+
 // Service is the todos driving port.
 type Service struct {
 	store      Store
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
+	queue      Queue
 }
 
 // NewService binds the service to its dependencies.
-func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc) *Service {
-	return &Service{store: store, log: log.With("module", "todo"), unexpected: unexpected}
+func NewService(store Store, log *slog.Logger, unexpected apperror.UnexpectedFunc, q Queue) *Service {
+	return &Service{store: store, log: log.With("module", "todo"), unexpected: unexpected, queue: q}
 }
 
 // Create constructs a Todo in the caller's tenant scope and persists it.
@@ -49,6 +57,7 @@ func (s *Service) Create(ctx context.Context, title string) (*Todo, error) {
 		span.RecordError(err)
 		return nil, err
 	}
+	t.Author = authorFromContext(ctx)
 	if err := s.store.Save(ctx, t); err != nil {
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "todo.Create: save", err,
@@ -108,7 +117,40 @@ func (s *Service) Toggle(ctx context.Context, id uuid.UUID) (*Todo, error) {
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "todo.Toggle: save", err, "todo_id", id)
 	}
+	if t.Done {
+		if qErr := s.queue.Submit(ctx, logCompletionJob(), logCompletionV1{ID: t.ID, Title: t.Title, DoneAt: time.Now().UTC()}); qErr != nil {
+			span.RecordError(qErr)
+			_ = s.unexpected(ctx, "todo.Toggle: submit", qErr, "todo_id", t.ID)
+		}
+	}
 	return t, nil
+}
+
+// LogCompletion logs the identified todo's completion, when it still belongs to the caller's tenant scope.
+func (s *Service) LogCompletion(ctx context.Context, id uuid.UUID) error {
+	ctx, span := tracer.Start(ctx, "todo.LogCompletion",
+		trace.WithAttributes(attribute.String("todo.id", id.String())))
+	defer span.End()
+
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+
+	t, err := s.store.ByID(ctx, id)
+	if err != nil {
+		if IsNotFoundError(err) {
+			return nil
+		}
+		span.RecordError(err)
+		return s.unexpected(ctx, "todo.LogCompletion: byID", err, "todo_id", id)
+	}
+	if t.OrgID != tc.OrgID || t.ProjectID != tc.ProjectID {
+		return nil
+	}
+	s.log.InfoContext(ctx, "todo.completion_logged",
+		slog.String("todo_id", t.ID.String()), slog.String("title", t.Title))
+	return nil
 }
 
 // Delete removes the identified todo from the caller's tenant scope.
@@ -188,7 +230,15 @@ func (s *Service) ClearDone(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// AutoCompleteStale marks every open todo older than olderThan as done in the caller's org scope.
+func authorFromContext(ctx context.Context) Author {
+	p := session.PrincipalFrom(ctx)
+	if p.KeyID != uuid.Nil {
+		return AuthorKey(p.KeyID)
+	}
+	return AuthorUser(p.UserID)
+}
+
+// AutoCompleteStale marks every open todo older than olderThan as done in the caller's org scope; a bulk update, so it submits no completion job.
 func (s *Service) AutoCompleteStale(ctx context.Context, olderThan time.Duration) (int, error) {
 	ctx, span := tracer.Start(ctx, "todo.AutoCompleteStale")
 	defer span.End()

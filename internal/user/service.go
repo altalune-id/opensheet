@@ -3,6 +3,7 @@ package user
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -203,14 +204,35 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 	if strings.TrimSpace(claims.Issuer) == "" || strings.TrimSpace(claims.Subject) == "" {
 		return nil, &InvalidEmailError{Reason: "oidc claims missing issuer or subject"}
 	}
+	issuer := strings.TrimSpace(claims.Issuer)
+	subject := strings.TrimSpace(claims.Subject)
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
+
+	// SECURITY: the subject is the stable identity, not the email; resolving by email first breaks login when the IdP address changes.
+	linked, err := s.store.ByIDP(ctx, issuer, subject)
+	if err == nil {
+		return s.refreshFromClaims(ctx, linked, claims)
+	}
+	if !IsNotFoundError(err) {
+		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: byIDP", err)
+	}
+
 	existing, err := s.store.ByEmail(ctx, email)
 	if err == nil {
+		dirty := false
 		name := strings.TrimSpace(claims.Name)
 		if name != "" && existing.Name != name {
 			if err := existing.Rename(name); err != nil {
 				return nil, err
 			}
+			dirty = true
+		}
+		if existing.IDPSubject == "" {
+			existing.IDPIssuer = issuer
+			existing.IDPSubject = subject
+			dirty = true
+		}
+		if dirty {
 			if err := s.store.Save(ctx, existing); err != nil {
 				return nil, s.unexpected(ctx, "user.EnsureFromOIDC: refresh", err)
 			}
@@ -225,11 +247,43 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 	if err != nil {
 		return nil, err
 	}
+	u.IDPIssuer = issuer
+	u.IDPSubject = subject
 	if err := s.store.Save(ctx, u); err != nil {
-		if IsAlreadyExistsError(err) {
+		var dup *AlreadyExistsError
+		if errors.As(err, &dup) {
+			if dup.Field == "idp_subject" {
+				return s.store.ByIDP(ctx, issuer, subject)
+			}
 			return s.store.ByEmail(ctx, u.Email)
 		}
 		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: save", err)
+	}
+	return u, nil
+}
+
+func (s *Service) refreshFromClaims(ctx context.Context, u *User, claims Claims) (*User, error) {
+	dirty := false
+	if name := strings.TrimSpace(claims.Name); name != "" && u.Name != name {
+		if err := u.Rename(name); err != nil {
+			return nil, err
+		}
+		dirty = true
+	}
+	if email := strings.ToLower(strings.TrimSpace(claims.Email)); email != "" && u.Email != email {
+		if err := u.ChangeEmail(email); err != nil {
+			return nil, err
+		}
+		dirty = true
+	}
+	if !dirty {
+		return u, nil
+	}
+	if err := s.store.Save(ctx, u); err != nil {
+		if IsAlreadyExistsError(err) {
+			return nil, err
+		}
+		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: refresh", err)
 	}
 	return u, nil
 }

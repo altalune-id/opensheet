@@ -34,7 +34,6 @@ const (
 
 var errStoreTouched = &credential.NotFoundError{ID: "the store must not be touched"}
 
-// tokenResponse is what the fake Google token endpoint hands back.
 type tokenResponse struct {
 	status       int
 	refreshToken string
@@ -97,8 +96,6 @@ func oauthConfig(tokenURL string) *oauth2.Config {
 	}
 }
 
-// A cfg that is not a usable OAuth client yields no connector, which is how a
-// deployment with no Google client reaches the workflow.
 func connectorFor(cfg *oauth2.Config) *gworkspace.Connector {
 	c, err := gworkspace.NewConnector(cfg, nil)
 	if err != nil {
@@ -171,7 +168,6 @@ func scope(t *testing.T) tenant.Context {
 	return tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
 }
 
-// emptySealer reports success while producing no ciphertext.
 type emptySealer struct{}
 
 func (emptySealer) Seal([]byte, []byte) ([]byte, error) { return nil, nil }

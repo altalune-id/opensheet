@@ -1,58 +1,35 @@
 package authn
 
-import (
-	"errors"
+import "errors"
 
-	"google.golang.org/grpc/codes"
+// UnauthorizedError is the single opaque authentication failure.
+type UnauthorizedError struct{ causes error }
 
-	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
-	"altalune.id/opensheet/internal/apperror"
-)
-
-// UnauthorizedError reports that no authenticator accepted the credential.
-type UnauthorizedError struct{}
-
-// SECURITY: the message must not distinguish missing, malformed, unknown, revoked or expired credentials.
 func (*UnauthorizedError) Error() string { return "authn: unauthorized" }
 
-// ToAppError converts the typed error into the wire envelope.
-func (*UnauthorizedError) ToAppError() *apperror.AppError {
-	return apperror.New(
-		apperror.CodeAPIKeyUnauthorized,
-		"Unauthorized",
-		codes.Unauthenticated,
-		&apperrorv1.ErrorDetail{Code: apperror.CodeAPIKeyUnauthorized},
-	)
+// Causes returns why each authenticator refused, for server-side logging only. SECURITY: never reachable through Error or Unwrap, so a cause cannot reach a caller by being formatted or matched.
+func (e *UnauthorizedError) Causes() error {
+	if e == nil {
+		return nil
+	}
+	return e.causes
 }
 
-// IsUnauthorizedError reports whether err's chain contains an *UnauthorizedError.
+// IsUnauthorizedError reports whether err is an *UnauthorizedError.
 func IsUnauthorizedError(err error) bool {
-	_, ok := errors.AsType[*UnauthorizedError](err)
-	return ok
+	var target *UnauthorizedError
+	return errors.As(err, &target)
 }
 
-// InsufficientScopeError reports that the principal lacks a required scope.
+// InsufficientScopeError names the scope the credential was missing.
 type InsufficientScopeError struct{ Scope string }
 
 func (e *InsufficientScopeError) Error() string {
-	return "authn: scope: missing " + e.Scope
+	return "authn: credential lacks scope " + e.Scope
 }
 
-// ToAppError converts the typed error into the wire envelope.
-func (e *InsufficientScopeError) ToAppError() *apperror.AppError {
-	return apperror.New(
-		apperror.CodeAPIKeyInsufficientScope,
-		"Missing required scope: "+e.Scope,
-		codes.PermissionDenied,
-		&apperrorv1.ErrorDetail{
-			Code: apperror.CodeAPIKeyInsufficientScope,
-			Meta: map[string]string{"scope": e.Scope},
-		},
-	)
-}
-
-// IsInsufficientScopeError reports whether err's chain contains an *InsufficientScopeError.
+// IsInsufficientScopeError reports whether err is an *InsufficientScopeError.
 func IsInsufficientScopeError(err error) bool {
-	_, ok := errors.AsType[*InsufficientScopeError](err)
-	return ok
+	var target *InsufficientScopeError
+	return errors.As(err, &target)
 }

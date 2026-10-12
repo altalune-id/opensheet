@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/user"
+	"altalune.id/opensheet/internal/web"
 )
 
 // LocaleHandler serves POST /locale, persisting the locale choice for signed-in users.
@@ -23,7 +23,7 @@ func NewLocaleHandler(d Deps, users *user.Service) *LocaleHandler {
 }
 
 // Register mounts POST /locale on mux.
-func (h *LocaleHandler) Register(mux *http.ServeMux) {
+func (h *LocaleHandler) Register(mux web.Mux) {
 	if h.I18n == nil {
 		return
 	}

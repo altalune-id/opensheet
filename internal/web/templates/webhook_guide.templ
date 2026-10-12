@@ -1,0 +1,185 @@
+package templates
+
+import (
+	"strconv"
+
+	"altalune.id/opensheet/internal/web"
+)
+
+// WebhookSnippet is one signature verifier the console offers to copy.
+type WebhookSnippet struct {
+	Lang  string
+	Label string
+	Code  string
+}
+
+// WebhookGuideView carries what the integration guide quotes: header names, the attempt limit and the verifiers.
+type WebhookGuideView struct {
+	EventIDHeader    string
+	DeliveryIDHeader string
+	TimestampHeader  string
+	SignatureHeader  string
+	MaxAttempts      int
+	TotalRetryHours  int
+	FirstWaitSeconds int
+	LongestWaitHours int
+	Open             bool
+	Snippets         []WebhookSnippet
+}
+
+templ webhookGuideStep(n int, text string) {
+	<li class="flex items-start gap-3">
+		<span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">{ strconv.Itoa(n) }</span>
+		<span class="min-w-0 flex-1">{ text }</span>
+	</li>
+}
+
+templ webhookGuideNote(text, header string) {
+	<li class="flex items-start gap-3">
+		<span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/40"></span>
+		<span class="min-w-0 flex-1">
+			{ text }
+			if header != "" {
+				<code class="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">{ header }</code>
+			}
+		</span>
+	</li>
+}
+
+// WebhookGuide is the "How to integrate" panel on the endpoint list; it opens by default while the project has no endpoints.
+templ WebhookGuide(d web.LayoutData, g WebhookGuideView) {
+	<details data-webhook-guide open?={ g.Open } class="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
+		<summary class="cursor-pointer text-sm font-semibold text-foreground">{ d.Tr("webhooks.guide_heading") }</summary>
+		<p class="mt-2 text-sm text-muted-foreground">{ d.Tr("webhooks.guide_intro") }</p>
+		<ol class="mt-4 space-y-2 text-sm text-foreground/90">
+			@webhookGuideStep(1, d.Tr("webhooks.guide_step_url"))
+			@webhookGuideStep(2, d.Tr("webhooks.guide_step_events"))
+			@webhookGuideStep(3, d.Tr("webhooks.guide_step_secret"))
+			@webhookGuideStep(4, d.Tr("webhooks.guide_step_verify"))
+			@webhookGuideStep(5, d.Tr("webhooks.guide_step_test"))
+			@webhookGuideStep(6, d.Tr("webhooks.guide_step_inspect"))
+			@webhookGuideStep(7, d.Tr("webhooks.guide_step_retry"))
+		</ol>
+		@webhookReceiverNotes(d, g)
+	</details>
+}
+
+templ webhookReceiverNotes(d web.LayoutData, g WebhookGuideView) {
+	<h3 class="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("webhooks.guide_receiver_heading") }</h3>
+	<ul class="mt-2 space-y-2 text-sm text-foreground/90">
+		@webhookGuideNote(d.Tr("webhooks.guide_respond"), "")
+		@webhookGuideNote(d.Tr("webhooks.guide_dedupe"), g.DeliveryIDHeader)
+		@webhookGuideNote(d.Tr("webhooks.guide_correlate"), g.EventIDHeader)
+		@webhookGuideNote(d.Tr("webhooks.guide_retries", "Attempts", g.MaxAttempts, "TotalHours", g.TotalRetryHours, "FirstSeconds", g.FirstWaitSeconds, "LongestHours", g.LongestWaitHours), "")
+	</ul>
+}
+
+// WebhookVerifyPanel is the collapsible "Verify signatures" section: one copyable verifier per language, switched by tabs.
+templ WebhookVerifyPanel(d web.LayoutData, g WebhookGuideView) {
+	<details data-webhook-verify class="mt-6 rounded-lg border border-border bg-card p-5 shadow-sm">
+		<summary class="cursor-pointer text-sm font-semibold text-foreground">{ d.Tr("webhooks.verify_heading") }</summary>
+		<p class="mt-2 text-sm text-muted-foreground">{ d.Tr("webhooks.verify_intro") }</p>
+		<p class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+			<span>{ d.Tr("webhooks.verify_headers_label") }</span>
+			<code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ g.TimestampHeader }</code>
+			<code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ g.SignatureHeader }</code>
+		</p>
+		<p class="mt-2 text-xs text-muted-foreground">{ d.Tr("webhooks.verify_env") }</p>
+		if len(g.Snippets) > 0 {
+			<div data-tabs class="mt-3 rounded-md border border-border/70">
+				<nav role="tablist" aria-orientation="horizontal" aria-label={ d.Tr("webhooks.verify_languages") } class="tab-bar">
+					for i, s := range g.Snippets {
+						<button
+							type="button"
+							role="tab"
+							id={ webhookSnippetTabID(s.Lang) }
+							aria-controls={ webhookSnippetPanelID(s.Lang) }
+							aria-selected={ strconv.FormatBool(i == 0) }
+							tabindex={ webhookTabIndex(i == 0) }
+						>{ s.Label }</button>
+					}
+				</nav>
+				for i, s := range g.Snippets {
+					<div
+						role="tabpanel"
+						id={ webhookSnippetPanelID(s.Lang) }
+						aria-labelledby={ webhookSnippetTabID(s.Lang) }
+						data-snippet={ s.Lang }
+						hidden?={ i != 0 }
+						class="px-3 py-2"
+					>
+						<div class="flex justify-end">
+							@copyButton(d, s.Code, d.Tr("webhooks.verify_copy"), d.Tr("webhooks.verify_copy_label", "Lang", s.Label))
+						</div>
+						<pre class="mt-1 max-h-96 overflow-auto rounded border border-border/70 bg-background p-2 font-mono text-xs text-foreground"><code>{ s.Code }</code></pre>
+					</div>
+				}
+			</div>
+			@tabsScript(d.Nonce)
+		}
+		@webhookReceiverNotes(d, g)
+	</details>
+}
+
+func webhookSnippetTabID(lang string) string {
+	return "webhook-verify-tab-" + lang
+}
+
+func webhookSnippetPanelID(lang string) string {
+	return "webhook-verify-panel-" + lang
+}
+
+func webhookTabIndex(selected bool) string {
+	if selected {
+		return "0"
+	}
+	return "-1"
+}
+
+// tabsScript binds, once per page, the click and arrow-key switching of every [data-tabs] tab set.
+templ tabsScript(nonce string) {
+	<script nonce={ nonce }>
+	(function() {
+	if (window.opensheetTabsBound) return;
+	window.opensheetTabsBound = true;
+	var tabsOf = function(root) {
+		return Array.prototype.filter.call(root.querySelectorAll('[role="tab"]'), function(t) {
+			return t.closest('[data-tabs]') === root;
+		});
+	};
+	var select = function(tab) {
+		var root = tab.closest('[data-tabs]');
+		if (!root) return;
+		tabsOf(root).forEach(function(t) {
+			var on = t === tab;
+			t.setAttribute('aria-selected', on ? 'true' : 'false');
+			t.tabIndex = on ? 0 : -1;
+			var panel = document.getElementById(t.getAttribute('aria-controls'));
+			if (panel) panel.hidden = !on;
+		});
+	};
+	document.addEventListener('click', function(e) {
+		if (!e.target || !e.target.closest) return;
+		var tab = e.target.closest('[data-tabs] [role="tab"]');
+		if (tab) select(tab);
+	});
+	document.addEventListener('keydown', function(e) {
+		if (!e.target || !e.target.closest) return;
+		var tab = e.target.closest('[data-tabs] [role="tab"]');
+		if (!tab) return;
+		var tabs = tabsOf(tab.closest('[data-tabs]'));
+		var i = tabs.indexOf(tab);
+		var step = getComputedStyle(tab).direction === 'rtl' ? -1 : 1;
+		var next = null;
+		if (e.key === 'ArrowRight') next = tabs[(i + step + tabs.length) % tabs.length];
+		if (e.key === 'ArrowLeft') next = tabs[(i - step + tabs.length) % tabs.length];
+		if (e.key === 'Home') next = tabs[0];
+		if (e.key === 'End') next = tabs[tabs.length - 1];
+		if (!next) return;
+		e.preventDefault();
+		select(next);
+		next.focus();
+	});
+	})();
+	</script>
+}

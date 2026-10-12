@@ -25,7 +25,7 @@ func TestOnboardHandler_PostOIDCComplete_PromotesWithGenesisEmailSet(t *testing.
 
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 

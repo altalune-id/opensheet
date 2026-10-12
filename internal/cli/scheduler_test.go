@@ -100,3 +100,21 @@ func TestServe_SchedulerFlagsAreMutuallyExclusive(t *testing.T) {
 	err := root.ExecuteContext(t.Context())
 	require.ErrorContains(t, err, "none of the others can be")
 }
+
+func TestServe_ConsumerFlagsAreMutuallyExclusive(t *testing.T) {
+	tests := [][]string{
+		{"serve", "--no-consumer", "--consumer-only"},
+		{"serve", "--scheduler-only", "--consumer-only"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args[1:], " "), func(t *testing.T) {
+			root := cli.NewRootCmd(schedulerBootStub(t), nil)
+			root.SetOut(new(bytes.Buffer))
+			root.SetErr(new(bytes.Buffer))
+			root.SetArgs(args)
+
+			err := root.ExecuteContext(t.Context())
+			require.ErrorContains(t, err, "none of the others can be")
+		})
+	}
+}

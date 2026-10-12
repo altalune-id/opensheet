@@ -218,6 +218,7 @@ func TestService_Errors_ChainThroughAppError(t *testing.T) {
 type erroringStore struct {
 	inner           org.Store
 	bySlugErr       error
+	systemOrgErr    error
 	saveErr         error
 	byIDErr         error
 	listErr         error
@@ -239,6 +240,12 @@ func (e *erroringStore) BySlug(ctx context.Context, s string) (*org.Org, error) 
 		return nil, e.bySlugErr
 	}
 	return e.inner.BySlug(ctx, s)
+}
+func (e *erroringStore) SystemOrg(ctx context.Context) (*org.Org, error) {
+	if e.systemOrgErr != nil {
+		return nil, e.systemOrgErr
+	}
+	return e.inner.SystemOrg(ctx)
 }
 func (e *erroringStore) ByID(ctx context.Context, id uuid.UUID) (*org.Org, error) {
 	if e.byIDErr != nil {

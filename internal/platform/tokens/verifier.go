@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/platform/session"
 )
@@ -22,7 +23,7 @@ type oidcVerifier struct {
 	audience string
 }
 
-// NewVerifier constructs a Verifier from cfg. Empty Issuer disables verification.
+// NewVerifier constructs a Verifier from cfg, with an empty Issuer disabling verification.
 func NewVerifier(ctx context.Context, cfg Config) (Verifier, error) {
 	if cfg.Issuer == "" {
 		return disabledVerifier{}, nil
@@ -74,16 +75,32 @@ func (o *oidcVerifier) Verify(ctx context.Context, raw string) (session.Principa
 	if len(scopes) == 0 && claims.Scope != "" {
 		scopes = splitScope(claims.Scope)
 	}
+	orgID, err := parseOrgClaim(claims.OrgID)
+	if err != nil {
+		return session.Principal{}, err
+	}
+	// SECURITY: org_id lands on ClaimedOrgID, never ActiveOrgID, so an issuer cannot name the tenant.
 	return session.Principal{
-		Email:      claims.Email,
-		Name:       claims.Name,
-		Source:     session.SourceToken,
-		IDPIssuer:  tok.Issuer,
-		IDPSubject: tok.Subject,
-		IDPOrgID:   claims.OrgID,
-		Scopes:     scopes,
-		IssuedAt:   tok.IssuedAt,
+		Email:        claims.Email,
+		Name:         claims.Name,
+		Source:       session.SourceToken,
+		IDPIssuer:    tok.Issuer,
+		IDPSubject:   tok.Subject,
+		Scopes:       scopes,
+		ClaimedOrgID: orgID,
+		IssuedAt:     tok.IssuedAt,
 	}, nil
+}
+
+func parseOrgClaim(raw string) (uuid.UUID, error) {
+	if raw == "" {
+		return uuid.Nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, &InvalidTokenError{Reason: "org_id claim is not a uuid", Cause: err}
+	}
+	return id, nil
 }
 
 type disabledVerifier struct{}

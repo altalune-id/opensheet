@@ -15,8 +15,7 @@ type Projects struct {
 	UpdatedAt postgres.ColumnTimestampz
 	System    postgres.ColumnBool
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewProjects builds the projects binding.
@@ -34,19 +33,17 @@ func NewProjects(schema, tablePrefix string) *Projects {
 		updatedAt = postgres.TimestampzColumn("updated_at")
 		system    = postgres.BoolColumn("system")
 		all       = postgres.ColumnList{id, orgID, slug, name, createdBy, createdAt, updatedAt, system}
-		mutable   = postgres.ColumnList{orgID, slug, name, createdBy, updatedAt, system}
 	)
 	return &Projects{
-		Table:          postgres.NewTable(schema, tablePrefix+"projects", "projects", all...),
-		ID:             id,
-		OrgID:          orgID,
-		Slug:           slug,
-		Name:           name,
-		CreatedBy:      createdBy,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"projects", "projects", all...),
+		ID:         id,
+		OrgID:      orgID,
+		Slug:       slug,
+		Name:       name,
+		CreatedBy:  createdBy,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

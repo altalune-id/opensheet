@@ -30,6 +30,7 @@ func (s *pgStore) Save(ctx context.Context, sid string, p Principal, exp time.Ti
 		return err
 	}
 	now := time.Now().UTC()
+	// NOTE: UPSERT, not INSERT — live call sites re-Save under an existing sid on every org switch.
 	stmt := s.table.INSERT(
 		s.table.SID,
 		s.table.UserID,

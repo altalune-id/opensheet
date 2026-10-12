@@ -28,7 +28,7 @@ A release is a promise. Once a version is tagged and fetched through the module 
 
 - **v0.x.y** — no compatibility promise. Break freely, but document breaks in release notes. Staying on v0 indefinitely is a cop-out for a widely-used library: dependents deserve a promise.
 - **v1.x.y** — the promise: code written against v1.0.0 compiles against every later v1 release. Minor versions add, patches fix. Nothing is removed or changed incompatibly. Ever.
-- **v2+** — a *different module* with a different import path (`module github.com/you/lib/v2`, imported as `.../lib/v2`). This is semantic import versioning and it is not optional — a v2 tag without the `/v2` module path is broken for module-mode consumers.
+- **v2+** — a _different module_ with a different import path (`module github.com/you/lib/v2`, imported as `.../lib/v2`). This is semantic import versioning and it is not optional — a v2 tag without the `/v2` module path is broken for module-mode consumers.
 
 **Plan to stay on v1 forever.** A major version bump splits your ecosystem: every dependent must migrate manually, and transitive dependencies mix v1 and v2 in the same build. Cobra, pflag, and the standard library have held v1 for a decade by expanding rather than replacing. Reach for v2 only when the API is genuinely unfixable additively — and treat it as launching a new library, because that's what it costs.
 
@@ -36,18 +36,18 @@ A release is a promise. Once a version is tagged and fetched through the module 
 
 LLMs and humans both misjudge this. The compiler-visible breaks:
 
-| Change | Breaking? | Why |
-|--------|-----------|-----|
-| Removing/renaming any exported identifier | **Yes** | Obvious |
-| Changing a function/method signature | **Yes** | Includes adding a variadic parameter — the signature changes |
-| **Adding a method to an exported interface** | **Yes** | Every external implementor no longer satisfies it |
-| Adding a field to a struct | Usually no | **Breaks callers using unkeyed composite literals** and exact-type assignments; safe if you've documented keyed-literals-only |
-| Adding a method to a struct | No | Unless it collides with a method promoted from an embedded type in *their* code — rare, accepted risk |
-| Adding a new function, type, or package | No | This is what minor versions are for |
-| Changing an untyped constant's value | **Yes** | Compiled into caller binaries |
-| Tightening input validation | **Behaviorally yes** | Code that worked now errors — treat as breaking |
-| Changing error *messages* | No | But breaking for anyone string-matching; give them `errors.Is`-able sentinels instead |
-| Raising the `go` directive in go.mod | **Effectively yes** | Dependents on older toolchains can no longer build you — see go.mod hygiene |
+| Change                                       | Breaking?            | Why                                                                                                                           |
+| -------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Removing/renaming any exported identifier    | **Yes**              | Obvious                                                                                                                       |
+| Changing a function/method signature         | **Yes**              | Includes adding a variadic parameter — the signature changes                                                                  |
+| **Adding a method to an exported interface** | **Yes**              | Every external implementor no longer satisfies it                                                                             |
+| Adding a field to a struct                   | Usually no           | **Breaks callers using unkeyed composite literals** and exact-type assignments; safe if you've documented keyed-literals-only |
+| Adding a method to a struct                  | No                   | Unless it collides with a method promoted from an embedded type in _their_ code — rare, accepted risk                         |
+| Adding a new function, type, or package      | No                   | This is what minor versions are for                                                                                           |
+| Changing an untyped constant's value         | **Yes**              | Compiled into caller binaries                                                                                                 |
+| Tightening input validation                  | **Behaviorally yes** | Code that worked now errors — treat as breaking                                                                               |
+| Changing error _messages_                    | No                   | But breaking for anyone string-matching; give them `errors.Is`-able sentinels instead                                         |
+| Raising the `go` directive in go.mod         | **Effectively yes**  | Dependents on older toolchains can no longer build you — see go.mod hygiene                                                   |
 
 **The interface trap deserves emphasis:** if your library exports an interface that users implement, it is frozen at v1. Design for this — either keep exported interfaces tiny and stable, or add an unexported method so only you can implement it, or accept functions/structs instead of defining the interface at all (interfaces belong to consumers — see the `go` skill).
 

@@ -51,7 +51,7 @@ type pgFixture struct {
 	b         orgTree
 }
 
-// newPgFixture migrates as a BYPASSRLS owner and hands back a store bound to a NOBYPASSRLS app role, so RLS actually applies.
+// NOTE: migrates as a BYPASSRLS owner but returns a store on a NOBYPASSRLS role, so RLS actually applies.
 func newPgFixture(t *testing.T) *pgFixture {
 	t.Helper()
 	h := pgtest.New(t)
@@ -130,7 +130,7 @@ func newPgFixture(t *testing.T) *pgFixture {
 	return f
 }
 
-// concurrent hands back a row store and unit of work on their own pool, because appDB caps at one connection and a test of the sheet's write lock needs real overlap rather than pool-level serialization.
+// NOTE: own pool because appDB caps at one connection, which would serialize the writers and pass vacuously.
 func (f *pgFixture) concurrent(t *testing.T, conns int) (sheet.RowStore, sheet.UnitOfWork) {
 	t.Helper()
 	sqlDB, err := db.Open(t.Context(), db.DBConfig{
@@ -533,7 +533,26 @@ func TestPostgres_Sheet_UpdateDoesNotResetGeneration(t *testing.T) {
 	got, err := f.store.ByID(ctx, sh.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Harga", got.Tab, "the upsert must still apply the metadata edit")
-	assert.EqualValues(t, 7, got.Generation, "generation must not be in MutableColumns")
+	assert.EqualValues(t, 8, got.Generation, "a retab bumps the stored generation and never resets it to the loaded one")
 	assert.Equal(t, "settled", got.ContentDigest,
 		"a metadata edit must not write back the digest it loaded, or an outstanding cursor is refused for nothing")
+}
+
+// TestPostgres_Sheet_SaveOfAnotherOrgsIDIsNotFound pins the conflict clause's org predicate: org B carrying org A's row id must not take the UPDATE branch.
+func TestPostgres_Sheet_SaveOfAnotherOrgsIDIsNotFound(t *testing.T) {
+	f := newPgFixture(t)
+	victim, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Kamar", Slug: "prices", Visibility: sheet.VisibilityKey})
+	require.NoError(t, err)
+	require.NoError(t, f.store.Save(f.a.ctx(t), victim))
+
+	attack, err := sheet.New(sheet.NewParams{OrgID: f.b.orgID, ProjectID: f.b.projectID, SpreadsheetID: f.b.spreadsheetID, Tab: "Kamar", Slug: "hijacked", Visibility: sheet.VisibilityPublic})
+	require.NoError(t, err)
+	attack.ID = victim.ID
+
+	err = f.store.Save(f.b.ctx(t), attack)
+	require.True(t, sheet.IsNotFoundError(err), "want *NotFoundError, got %T: %v", err, err)
+
+	still, err := f.store.ByID(f.a.ctx(t), victim.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "prices", still.Slug, "org B rewrote org A's row across the tenant boundary")
 }

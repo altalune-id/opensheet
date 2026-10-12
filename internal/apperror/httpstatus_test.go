@@ -15,8 +15,8 @@ func TestHTTPStatus_MapsFromGRPCCode(t *testing.T) {
 		want int
 	}{
 		{"not found", CodeSheetNotFound, codes.NotFound, http.StatusNotFound},
-		{"unauthenticated", CodeAPIKeyUnauthorized, codes.Unauthenticated, http.StatusUnauthorized},
-		{"permission denied", CodeAPIKeyInsufficientScope, codes.PermissionDenied, http.StatusForbidden},
+		{"unauthenticated", CodeUnauthenticated, codes.Unauthenticated, http.StatusUnauthorized},
+		{"permission denied", CodeForbidden, codes.PermissionDenied, http.StatusForbidden},
 		{"validation", CodeSheetInvalidSlug, codes.InvalidArgument, http.StatusBadRequest},
 		{"already exists", CodeSheetAlreadyExists, codes.AlreadyExists, http.StatusConflict},
 		{"quota", CodeGoogleQuotaExceeded, codes.ResourceExhausted, http.StatusTooManyRequests},

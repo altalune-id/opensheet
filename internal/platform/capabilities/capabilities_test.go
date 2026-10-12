@@ -83,27 +83,35 @@ func TestFrom_APIEnabled(t *testing.T) {
 	}
 }
 
+func TestFrom_EphemeralEncryptionKey(t *testing.T) {
+	c := config.Defaults()
+	c.Security.EncryptionKey = ""
+	if !From(c).EphemeralEncryptionKey {
+		t.Error("an empty security.encryptionKey must report an ephemeral key")
+	}
+	c.Security.EncryptionKey = "configured"
+	if From(c).EphemeralEncryptionKey {
+		t.Error("a configured security.encryptionKey must not report an ephemeral key")
+	}
+}
 func TestFrom_OpensheetCapabilities(t *testing.T) {
 	c := &config.Config{Mode: config.ModeSelfhosted}
 	c.Google.OAuth.ClientID = "cid"
 	c.Google.OAuth.ClientSecret = "csecret"
 	c.Google.Picker.APIKey = "pk"
 	c.Sheets.PublicEnabled = true
-	c.Security.EncryptionKey = "deadbeef"
 
 	caps := From(c)
-	if !caps.GoogleConnect || !caps.GooglePicker || !caps.PublicSheets || !caps.Encryption {
-		t.Fatalf("caps = %#v, want all four true", caps)
+	if !caps.GoogleConnect || !caps.GooglePicker || !caps.PublicSheets {
+		t.Fatalf("caps = %#v, want all three true", caps)
 	}
 
 	empty := From(&config.Config{Mode: config.ModeSelfhosted})
-	if empty.GoogleConnect || empty.GooglePicker || empty.PublicSheets || empty.Encryption {
-		t.Fatalf("caps = %#v, want all four false", empty)
+	if empty.GoogleConnect || empty.GooglePicker || empty.PublicSheets {
+		t.Fatalf("caps = %#v, want all three false", empty)
 	}
 }
 
-// gworkspace.NewConnector requires both id and secret, so a half-configured client
-// must not advertise the connect flow — the UI would offer a button that always errors.
 func TestFrom_GoogleConnectNeedsBothIDAndSecret(t *testing.T) {
 	tests := []struct {
 		name       string

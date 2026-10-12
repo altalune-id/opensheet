@@ -1,7 +1,8 @@
-.PHONY: help build test test-race test-cover vet fmt check module-shape generate ui-vendor buf migrate docker clean install-tools lint dev
+.PHONY: help build test test-race test-cover vet fmt check module-shape generate templ-normalize templ-normalize-check buf migrate docker clean install-tools lint dev test-integration test-all comment-check comment-list ui-vendor ui-verify ui-vendor-check mcp-ui-vendor
 
 GO      ?= go
 BIN     := bin/opensheet
+INTEGRATION_TIMEOUT  ?= 30m
 VERSION := $(shell cat version/VERSION 2>/dev/null || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD   := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -27,11 +28,14 @@ test-cover: ## Run tests with coverage report
 
 test-integration: ## Run integration tests. Uses TEST_PG_DSN if set, else spins ephemeral Postgres via testcontainers (docker or podman socket required).
 	@if [ -n "$$TEST_PG_DSN" ]; then \
-		echo "→ using TEST_PG_DSN=$$TEST_PG_DSN"; \
+		echo "→ using TEST_PG_DSN=$$TEST_PG_DSN (-p 1: packages share one cluster)"; \
 	else \
 		echo "→ TEST_PG_DSN unset — testcontainers will spin ephemeral Postgres (needs docker/podman socket)"; \
 	fi
-	$(GO) test -race -tags integration ./...
+	@# NOTE: -p 1 under a shared TEST_PG_DSN — parallel packages racing CREATE/DROP ROLE on one
+	@# cluster fail cleanup with "tuple concurrently updated". Own-container runs have no such contention.
+	$(GO) test -race -tags integration -timeout $(INTEGRATION_TIMEOUT) \
+		$$([ -n "$$TEST_PG_DSN" ] && echo -p 1) ./...
 
 test-all: test test-integration ## Unit + integration
 
@@ -44,10 +48,11 @@ fmt: ## gofmt -w
 module-shape: ## Verify each domain module carries its canonical file set
 	@bash scripts/check-module-shape.sh
 
-check: fmt vet module-shape test ## fmt + vet + module-shape + test — pre-commit gate
+check: fmt vet templ-normalize module-shape test-race ## fmt + vet + templ-normalize + module-shape + race tests — pre-commit gate
 
 generate: ## Regenerate templ + buf outputs (pnpm-managed buf, go-tool templ)
-	$(GO) tool templ generate
+	$(GO) tool templ generate -path .
+	@bash scripts/templ-normalize.sh
 	@if command -v pnpm >/dev/null 2>&1; then \
 		pnpm exec buf generate; \
 	else \
@@ -55,8 +60,32 @@ generate: ## Regenerate templ + buf outputs (pnpm-managed buf, go-tool templ)
 		$(GO) tool buf generate; \
 	fi
 
-ui-vendor: ## Download pinned static assets into internal/web/static
-	@if [ -x scripts/ui-vendor.sh ]; then bash scripts/ui-vendor.sh; else echo "(scripts/ui-vendor.sh missing — skipping)"; fi
+templ-normalize: ## Pin generated templ FileName paths to repo-root-relative form
+	@bash scripts/templ-normalize.sh
+
+templ-normalize-check: ## Fail if any generated templ FileName is not root-relative (CI check)
+	@bash scripts/templ-normalize.sh --check
+
+UI_TEMPL_SRC := $(shell find internal/web -name '*.templ')
+
+internal/web/static/.vendor-stamp: scripts/ui-vendor.sh
+	bash scripts/ui-vendor.sh
+	@touch $@
+
+internal/web/static/app.css: internal/web/static/.vendor-stamp internal/web/static/app.tailwind.css internal/web/tailwind.config.js $(UI_TEMPL_SRC)
+	bash scripts/ui-vendor.sh --css-only
+
+ui-vendor: internal/web/static/app.css ## Download the SHA-256 pinned static assets and compile app.css
+
+ui-verify: ## Check the committed static assets against their pinned digests (no network)
+	bash scripts/ui-vendor.sh --verify
+
+ui-vendor-check: ## Fail if the committed static assets drift from the pinned sources (CI check)
+	bash scripts/ui-vendor.sh --force
+	@git diff --exit-code -- internal/web/static/ || { echo "internal/web/static/ is stale — run \`make ui-vendor\` and commit the result."; exit 1; }
+
+mcp-ui-vendor: ## Re-download the SHA-256 pinned MCP Apps assets into internal/mcp/ui/assets and mcp/testdata
+	bash scripts/mcp-ui-vendor.sh
 
 config-examples: ## Regenerate .env.example and config.example.yaml from config struct tags
 	$(GO) tool gen-config-example
@@ -68,6 +97,12 @@ config-examples-check: ## Fail if .env.example or config.example.yaml is stale (
 
 tenant-tables: ## Regenerate schema/tenant_tables_gen.go from RLS migrations
 	$(GO) tool gen-tenant-tables
+
+comment-check: ## Fail on any comment that breaks the repo comment discipline (CI check)
+	$(GO) tool comment-lint .
+
+comment-list: ## List comment-discipline violations without failing
+	@$(GO) tool comment-lint -list .
 
 i18n-check: ## Verify every d.Tr key in .templ files has a translation in every locale (CI check)
 	$(GO) tool i18n-lint -check
@@ -106,10 +141,10 @@ compose-logs: ## Tail logs from the local dev stack
 	@if command -v docker >/dev/null 2>&1; then docker compose logs -f --tail=100; \
 	elif command -v podman-compose >/dev/null 2>&1; then podman-compose logs -f --tail=100; fi
 
-compose-nuke: ## Stop the stack AND wipe the bind-mounted postgres data
+compose-nuke: ## Stop the stack AND wipe the bind-mounted postgres and nats data
 	@if command -v docker >/dev/null 2>&1; then docker compose down -v; \
 	elif command -v podman-compose >/dev/null 2>&1; then podman-compose down -v; fi
-	rm -rf docker/data/pg
+	rm -rf docker/data/pg docker/data/nats
 
 install-tools: ## Install pinned developer tools (pnpm devDeps + go tool templ)
 	@if command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; \
@@ -119,7 +154,7 @@ lint: ## Run golangci-lint if present; else fall back to go vet
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; \
 	else echo "golangci-lint not installed; running go vet instead"; $(GO) vet ./...; fi
 
-dev: build ## Rebuild + run the server (defaults to serve)
+dev: ui-vendor build ## Rebuild + run the server (defaults to serve)
 	$(BIN) serve
 
 clean: ## Remove build artifacts + generated code

@@ -25,6 +25,18 @@ func (s *postgresStore) BySlug(ctx context.Context, slug string) (*Org, error) {
 	return orgs[0], nil
 }
 
+// SECURITY: resolves the singleton org on login before any tenant scope exists; the SECURITY DEFINER wrapper is what lifts RLS, not the caller's role.
+func (s *postgresStore) SystemOrg(ctx context.Context) (*Org, error) {
+	orgs, err := s.scanOrgs(ctx, s.resolveSystemOrgStmt, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(orgs) == 0 {
+		return nil, &NotFoundError{System: true}
+	}
+	return orgs[0], nil
+}
+
 func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Org, error) {
 	tx, owned, err := s.txAcquire(ctx)
 	if err != nil {

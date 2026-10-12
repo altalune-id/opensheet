@@ -55,7 +55,7 @@ func newOrgListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Comm
 			default:
 				rows := make([][]string, 0, len(orgs))
 				for _, o := range orgs {
-					rows = append(rows, []string{o.Slug, o.Name, o.CreatedAt.Format("2006-01-02")})
+					rows = append(rows, []string{o.Slug, o.Name, tableDay(o.CreatedAt)})
 				}
 				return render.Table(cmd.OutOrStdout(), []string{"SLUG", "NAME", "CREATED"}, rows)
 			}
@@ -90,9 +90,8 @@ func newOrgCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Co
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe org slug (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe org slug (generated when omitted)")
 	cmd.Flags().StringVar(&name, "name", "", "Human-readable org name (required)")
-	_ = cmd.MarkFlagRequired("slug")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -103,6 +102,6 @@ func orgToMap(o *org.Org) map[string]any {
 		"slug":       o.Slug,
 		"name":       o.Name,
 		"owner_id":   o.OwnerID.String(),
-		"created_at": o.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"created_at": rfc3339UTC(o.CreatedAt),
 	}
 }

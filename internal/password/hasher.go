@@ -12,7 +12,7 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// OWASP 2026 baseline for Argon2id. Params encoded into every hash so they can be tuned later without a migration.
+// NOTE: OWASP 2026 baseline for Argon2id; the params are encoded into every hash so they can be tuned without a migration.
 const (
 	defaultMemoryKiB uint32 = 19456
 	defaultTime      uint32 = 2

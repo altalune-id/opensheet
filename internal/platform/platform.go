@@ -14,6 +14,8 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/db"
+	"altalune.id/opensheet/internal/platform/outbox"
+	"altalune.id/opensheet/internal/platform/queue"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
@@ -31,6 +33,7 @@ type Kernel struct {
 	Log      *slog.Logger
 	Reporter *apperror.Reporter
 	Sessions session.Store
+	Sealer   sealer.Sealer
 	Verifier tokens.Verifier
 	Mail     mailer.Mailer
 	AltAuth  *authl.Client
@@ -39,7 +42,9 @@ type Kernel struct {
 	Notify   []apperror.ReportSink
 	Nano     NanoIDFunc
 	Caps     capabilities.Capabilities
-	Sealer   sealer.Sealer
+	Outbox   outbox.Store
+	// Queue is always non-nil: Disabled(log) when queue.enabled is false.
+	Queue *queue.Client
 
 	closers []io.Closer
 }

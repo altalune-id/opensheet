@@ -43,6 +43,7 @@ type sqliteSheetStateRow struct {
 	SoftDelete    int64  `alias:"sheets.soft_delete"`
 	ContentDigest string `alias:"sheets.content_digest"`
 	Generation    int64  `alias:"sheets.generation"`
+	HeaderColumns string `alias:"sheets.header_columns"`
 }
 
 type sqliteRowStats struct {
@@ -163,15 +164,24 @@ func (s *sqliteRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row Proje
 				sqliteNullableTime(row.DeletedAt), tc.OrgID.String(), tc.ProjectID.String(),
 			).
 			ON_CONFLICT(s.rows.SheetID, s.rows.Tab, s.rows.RowID).
+			// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping another org's sheet id from rewriting that org's row.
 			DO_UPDATE(
 				sqlite.SET(
 					s.rows.RowIndex.SET(sqlite.Int(int64(row.RowIndex))),
 					s.rows.Data.SET(sqlite.String(data)),
 					s.rows.DeletedAt.SET(sqliteNullableTimeExpr(row.DeletedAt)),
-				),
+				).WHERE(s.rows.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
 			)
-		if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+		res, execErr := stmt.ExecContext(ctx, tx)
+		if execErr != nil {
 			return fmt.Errorf("sheet.rows.sqlite.UpsertRow: %w", execErr)
+		}
+		n, raErr := res.RowsAffected()
+		if raErr != nil {
+			return fmt.Errorf("sheet.rows.sqlite.UpsertRow: rows affected: %w", raErr)
+		}
+		if n == 0 {
+			return &NotFoundError{ID: k.SheetID.String()}
 		}
 		return s.bumpGeneration(ctx, tx, tc, k.SheetID)
 	})
@@ -230,7 +240,7 @@ func (s *sqliteRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (SheetS
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		stmt := sqlite.SELECT(
 			s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
-			s.sheets.ContentDigest, s.sheets.Generation,
+			s.sheets.ContentDigest, s.sheets.Generation, s.sheets.HeaderColumns,
 		).
 			FROM(s.sheets).
 			WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
@@ -243,9 +253,14 @@ func (s *sqliteRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (SheetS
 			}
 			return fmt.Errorf("sheet.rows.sqlite.StateOf: %w", qErr)
 		}
+		headerColumns, dErr := decodeHeaderColumns(scanned.HeaderColumns)
+		if dErr != nil {
+			return dErr
+		}
 		out = SheetState{
 			Contract: ContractState{
 				OK: scanned.OK != 0, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete != 0,
+				HeaderColumns: headerColumns,
 			},
 			Digest:     scanned.ContentDigest,
 			Generation: scanned.Generation,
@@ -695,12 +710,17 @@ func (s *sqliteRowStore) commitRefresh(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
 	contract ContractState, digest string, bump bool,
 ) error {
+	headerColumns, err := encodeHeaderColumns(contract.HeaderColumns)
+	if err != nil {
+		return err
+	}
 	sets := []any{
 		s.sheets.ValidatedAt.SET(sqlite.String(sqliteent.SQLiteTime(time.Now()))),
 		s.sheets.ContractOK.SET(sqlite.Int(boolToInt(contract.OK))),
 		s.sheets.ContractReason.SET(sqlite.String(contract.Reason)),
 		s.sheets.SoftDelete.SET(sqlite.Int(boolToInt(contract.SoftDelete))),
 		s.sheets.ContentDigest.SET(sqlite.String(digest)),
+		s.sheets.HeaderColumns.SET(sqlite.String(headerColumns)),
 	}
 	if bump {
 		sets = append(sets, s.sheets.Generation.SET(s.sheets.Generation.ADD(sqlite.Int(1))))
@@ -719,14 +739,20 @@ func (s *sqliteRowStore) commitRefresh(
 func (s *sqliteRowStore) markContract(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
 ) error {
+	headerColumns, err := encodeHeaderColumns(contract.HeaderColumns)
+	if err != nil {
+		return err
+	}
 	stmt := s.sheets.UPDATE(
 		s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+		s.sheets.HeaderColumns,
 	).
 		SET(
 			sqlite.String(sqliteent.SQLiteTime(time.Now())),
 			sqlite.Int(boolToInt(contract.OK)),
 			sqlite.String(contract.Reason),
 			sqlite.Int(boolToInt(contract.SoftDelete)),
+			sqlite.String(headerColumns),
 		).
 		WHERE(s.sheets.ID.EQ(sqlite.String(sheetID.String())).
 			AND(s.sheets.OrgID.EQ(sqlite.String(tc.OrgID.String()))))

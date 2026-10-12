@@ -14,7 +14,7 @@ const (
 	sweepTimeout = 2 * time.Minute
 )
 
-// sweepJobName keys this job in logs, metrics, the leader lock, the CLI, and scheduler.jobs config overrides.
+// NOTE: renaming this changes the leader lock key and breaks scheduler.jobs config overrides.
 const sweepJobName = "sheet-write-attempt-sweep"
 
 // Scheduler adapts *Service to scheduler.Provider.

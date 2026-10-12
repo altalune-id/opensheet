@@ -266,8 +266,7 @@ func containsAll(haystack, needles []string) bool {
 	return true
 }
 
-// db.schema defaults to public so postgres migrations render a qualified name; an empty env var
-// cannot clear it, because AutomaticEnv without AllowEmptyEnv reads "" as unset.
+// TestLoad_SchemaDefaultAndOptOut covers db.schema's default, which an empty env var cannot clear.
 func TestLoad_SchemaDefaultAndOptOut(t *testing.T) {
 	cfg, err := Load("")
 	if err != nil {
@@ -296,5 +295,38 @@ func TestLoad_SchemaDefaultAndOptOut(t *testing.T) {
 	}
 	if fileCfg.DB.Schema != "" {
 		t.Errorf("file schema = %q, want empty; the config file is the only working opt-out", fileCfg.DB.Schema)
+	}
+}
+
+// NOTE: with a config type set, viper would match the extensionless compiled binary and parse it as YAML.
+func TestLoad_SearchPathIgnoresExtensionlessBinary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Chdir(dir)
+
+	if err := os.WriteFile(filepath.Join(dir, "opensheet"), []byte("\x7fELF\x02\x01\x01not yaml"), 0o600); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+
+	if _, err := Load(""); err != nil {
+		t.Fatalf("Load must ignore an extensionless file named opensheet, got %v", err)
+	}
+}
+
+func TestLoad_SearchPathStillFindsExtensionedConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Chdir(dir)
+
+	if err := os.WriteFile(filepath.Join(dir, "opensheet.yaml"), []byte("mode: selfhosted\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Mode != ModeSelfhosted {
+		t.Fatalf("Mode = %q, want %q — the extensioned config was not read", cfg.Mode, ModeSelfhosted)
 	}
 }

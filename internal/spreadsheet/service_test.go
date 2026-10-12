@@ -47,7 +47,6 @@ func (f *fakeTokenSources) TokenSourceFor(_ context.Context, credentialID uuid.U
 	return staticTokenSource{}, nil
 }
 
-// appErrStub stands in for another module's typed error: it carries a wire code, so it must pass through.
 type appErrStub struct{}
 
 func (*appErrStub) Error() string { return "credential: reauthorization needed" }

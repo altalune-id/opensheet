@@ -190,3 +190,19 @@ func IsSystemProtectedError(err error) bool {
 	_, ok := errors.AsType[*SystemProtectedError](err)
 	return ok
 }
+
+// SystemProjectExistsError signals a write that would leave an org with more than one system project.
+type SystemProjectExistsError struct {
+	OrgID string
+	Slug  string
+}
+
+func (e *SystemProjectExistsError) Error() string {
+	return "project: org " + e.OrgID + " already has a system project; " + e.Slug + " cannot be a second one"
+}
+
+// IsSystemProjectExistsError reports whether err's tree contains a *SystemProjectExistsError.
+func IsSystemProjectExistsError(err error) bool {
+	_, ok := errors.AsType[*SystemProjectExistsError](err)
+	return ok
+}
