@@ -19,6 +19,7 @@ jobs:
       - env-example-drift-check
       - templ-drift-check
       - proto-drift-check
+      - comment-check
     steps:
       - name: Stage 1 static analysis complete
         run: echo "static analysis green — proceeding to Stage 2"
@@ -100,7 +101,6 @@ jobs:
           version: v2.12.2
           args: --timeout=3m ./...
 
-  # Dockerfile linting.
   hadolint:
     runs-on: ubuntu-latest
     steps:
@@ -109,7 +109,6 @@ jobs:
         with:
           dockerfile: Dockerfile
 
-  # YAML style / correctness on workflows + example config.
   yamllint:
     runs-on: ubuntu-latest
     steps:
@@ -150,9 +149,7 @@ jobs:
             echo "origin/main has no .proto files — skipping buf breaking"
           fi
 
-  # Drift check: regenerate protobuf output and fail if the committed files no longer match
-  # the .proto sources. Not a build step — a safety net against PRs that edit .proto without
-  # committing the regenerated code alongside.
+  # Drift check: committed protobuf output must match the .proto sources.
   proto-drift-check:
     runs-on: ubuntu-latest
     steps:
@@ -175,7 +172,7 @@ jobs:
             exit 1
           fi
 
-  # Same idea for templ output. `_templ.go` files are committed source; this catches drift.
+  # Drift check: committed `_templ.go` output must match the .templ sources.
   templ-drift-check:
     runs-on: ubuntu-latest
     steps:
@@ -191,6 +188,17 @@ jobs:
             echo "templ output is stale — run \`go tool templ generate\` and commit."
             exit 1
           fi
+
+  # Discipline check: comments must obey the rule in AGENTS.md.
+  comment-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Verify comment discipline
+        run: go tool comment-lint .
 
   # Drift check: .env.example must match what `internal/platform/config` declares.
   env-example-drift-check:
@@ -221,7 +229,7 @@ jobs:
         env:
           GHCR_OWNER: ${{ github.repository_owner }}
 
-  # Build the container image (no push) — catches Dockerfile regressions on PRs before dev.yml would hit them on merge.
+  # Build the container image without pushing.
   docker-build:
     needs: lint-gate
     runs-on: ubuntu-latest
@@ -240,7 +248,33 @@ jobs:
             VERSION=ci
             COMMIT=${{ github.sha }}
 
-  # Vulnerability scan against stdlib + dependencies. Runs in Stage 3 alongside integration tests since it's expensive.
+  # Boots the real binary and asserts every vendored static asset is actually served.
+  ui-asset-smoke:
+    needs: lint-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Re-vendor and fail on drift from the committed bytes
+        run: make ui-vendor-check
+      - name: Boot + assert static assets
+        run: bash scripts/verify-serve-smoke.sh
+
+  # Boots the real binary with mcp.enabled + mcp.appsUI and asserts the MCP surface over the wire.
+  mcp-smoke:
+    needs: lint-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      - name: Boot + assert the MCP surface
+        run: bash scripts/verify-mcp-smoke.sh
+
+  # Vulnerability scan against stdlib + dependencies.
   govulncheck:
     needs: lint-gate
     runs-on: ubuntu-latest

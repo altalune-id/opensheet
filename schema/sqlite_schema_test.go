@@ -15,8 +15,7 @@ import (
 	"altalune.id/opensheet/internal/platform/config"
 )
 
-// TestSQLiteSchema_MatchesGolden pins the whole SQLite shape: sqlite_master carries the
-// full CREATE text, so a dropped column or constraint fails here rather than at runtime.
+// TestSQLiteSchema_MatchesGolden pins the whole SQLite shape: sqlite_master carries the full CREATE text, so a dropped column or constraint fails here rather than at runtime.
 func TestSQLiteSchema_MatchesGolden(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)

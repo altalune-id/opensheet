@@ -56,8 +56,7 @@ func createRole(t *testing.T, admin *sql.DB, name, attrs string) {
 	require.NoError(t, err)
 }
 
-// newPGFixture migrates as an owner role and returns a Store bound to a NOBYPASSRLS app role.
-// SECURITY: a superuser connection proves nothing about RLS.
+// newPGFixture migrates as an owner role and returns a Store bound to a NOBYPASSRLS app role. SECURITY: a superuser connection proves nothing about RLS.
 func newPGFixture(t *testing.T) *pgFixture {
 	t.Helper()
 	h := pgtest.New(t)
@@ -330,4 +329,25 @@ func TestPostgres_Credential_EnrollsInAnOuterUnitOfWork(t *testing.T) {
 	got, err := f.store.ByID(f.ctx(t), c.ID)
 	require.NoError(t, err, "the outer transaction must have committed the row")
 	require.Equal(t, "in-tx", got.Name)
+}
+
+// TestPostgres_Credential_SaveOfAnotherOrgsIDIsNotFound pins the conflict clause's org predicate: org B carrying org A's row id must not take the UPDATE branch.
+func TestPostgres_Credential_SaveOfAnotherOrgsIDIsNotFound(t *testing.T) {
+	f := newPGFixture(t)
+	own := f.ctx(t)
+	victim := f.newCredential(t, "org A's credential")
+	require.NoError(t, f.store.Save(own, victim))
+
+	foreign := tenant.Into(t.Context(), tenant.Context{OrgID: f.otherOrg, ProjectID: f.otherPrj, UserID: f.userID})
+	attack, err := credential.New(uuid.Nil, f.otherOrg, f.otherPrj, f.userID,
+		"Hijacked", credential.KindServiceAccount, "evil@x.iam.gserviceaccount.com", []byte{0x01})
+	require.NoError(t, err)
+	attack.ID = victim.ID
+
+	err = f.store.Save(foreign, attack)
+	require.True(t, credential.IsNotFoundError(err), "want *NotFoundError, got %T: %v", err, err)
+
+	still, err := f.store.ByID(own, victim.ID)
+	require.NoError(t, err)
+	require.Equal(t, "org A's credential", still.Name, "org B rewrote org A's row across the tenant boundary")
 }

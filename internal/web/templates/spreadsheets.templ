@@ -88,6 +88,10 @@ templ SpreadsheetSection(d web.LayoutData, v SpreadsheetsView) {
 				method="post"
 				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) }
 				hx-post={ d.ProjectPath(v.ProjectSlug, "/spreadsheets") }
+				hx-nonce={ d.Nonce }
+				hx-disable="find button, find input"
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
 				hx-target="#spreadsheets-section"
 				hx-swap="outerHTML"
 				class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm"
@@ -204,6 +208,9 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 			<div
 				id="spreadsheet-tabs"
 				hx-get={ d.ProjectPath(v.ProjectSlug, "/spreadsheets/"+v.ID+"/tabs") }
+				hx-nonce={ d.Nonce }
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
 				hx-trigger="load"
 				hx-swap="innerHTML"
 				class="mt-3 text-sm text-muted-foreground"
@@ -214,6 +221,9 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 		<div
 			id="spreadsheet-bulk-publish"
 			hx-get={ d.ProjectPath(v.ProjectSlug, "/spreadsheets/"+v.ID+"/publish") }
+			hx-nonce={ d.Nonce }
+			hx-status:4xx="target:#hx-error swap:innerHTML"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
 			hx-trigger="load"
 			hx-swap="outerHTML"
 			class="mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm"
@@ -278,6 +288,10 @@ templ SpreadsheetBulkPublish(d web.LayoutData, v BulkPublishView) {
 			method="post"
 			action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets/"+v.SpreadsheetID+"/publish")) }
 			hx-post={ d.ProjectPath(v.ProjectSlug, "/spreadsheets/"+v.SpreadsheetID+"/publish") }
+			hx-nonce={ d.Nonce }
+			hx-disable="find button, find input"
+			hx-status:4xx="target:#hx-error swap:innerHTML"
+			hx-status:5xx="target:#hx-error swap:innerHTML"
 			hx-target="#spreadsheet-bulk-publish"
 			hx-swap="outerHTML"
 			class="mt-4"

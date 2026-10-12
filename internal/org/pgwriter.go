@@ -26,6 +26,9 @@ func (s *postgresStore) Save(ctx context.Context, o *Org) error {
 			s.orgs.System.SET(postgres.Bool(o.System)),
 		))
 	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+		if isPostgresOneSystemViolation(execErr, "orgs_one_system") {
+			return s.endTx(tx, owned, &SystemOrgExistsError{Slug: o.Slug})
+		}
 		if isPostgresUniqueViolation(execErr) {
 			return s.endTx(tx, owned, &AlreadyExistsError{Slug: o.Slug})
 		}

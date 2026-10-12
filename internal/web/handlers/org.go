@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
+	slugs "altalune.id/opensheet/slug"
 )
 
 // OrgHandler owns /orgs, /orgs/new, /orgs/{slug} and members routes.
@@ -46,7 +46,7 @@ func (h *OrgHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Organization creation is disabled in this deployment.")
 		return
 	}
-	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{}))
+	Render(w, r, templates.OrgNewLayout(h.Layout(r, "Create organization", web.ActiveNav{Scope: web.NavScopeOrg}), templates.OrgNewView{Slug: slugs.Generate()}))
 }
 
 // PostCreate handles POST /orgs (org creation is capability-gated).
@@ -83,22 +83,18 @@ func (h *OrgHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 
 // PostRename handles POST /orgs/{slug}/rename.
 func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
-	p, authed := h.requireAuth(w, r)
-	if !authed {
+	sc, ok := h.RequireOrg(w, r)
+	if !ok {
 		return
 	}
-	slug := r.PathValue("org")
+	p, o, r := sc.principal, sc.org, sc.req
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
-	if !ok {
-		return
-	}
 	// SECURITY: the slug comes from the URL, so membership in that org must be checked here — RLS no longer narrows this to the active org.
-	canManage, mErr := h.isManager(r.Context(), o.ID, p.UserID)
+	canManage, mErr := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to rename this organization.")
 		return
@@ -112,29 +108,25 @@ func (h *OrgHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Rename failed", err.Error())
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
 // GetShow renders /orgs/{slug} — the members view.
 func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
-	p, authed := h.requireAuth(w, r)
-	if !authed {
-		return
-	}
-	slug := r.PathValue("org")
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
+	p, o, r := sc.principal, sc.org, sc.req
 	profiles, err := h.Orgs.ListMemberProfiles(r.Context(), o.ID)
 	if err != nil {
 		h.LogErr("web org: members", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.", err)
 		return
 	}
-	canManage, _ := h.isManager(r.Context(), o.ID, p.UserID)
-	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, slug, "members"), templates.MembersView{
-		OrgSlug:   slug,
+	canManage, _ := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
+	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, o.Slug, "members"), templates.MembersView{
+		OrgSlug:   o.Slug,
 		Members:   memberProfileRows(profiles, o.ID, p.UserID),
 		CanManage: canManage,
 	}))
@@ -142,16 +134,12 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 
 // PostRemoveMember handles POST /orgs/{slug}/members/{user}/remove.
 func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
-	p, authed := h.requireAuth(w, r)
-	if !authed {
-		return
-	}
-	slug := r.PathValue("org")
-	o, r, ok := h.OrgScopeFor(w, r, p, slug)
+	sc, ok := h.RequireOrg(w, r)
 	if !ok {
 		return
 	}
-	canManage, mErr := h.isManager(r.Context(), o.ID, p.UserID)
+	p, o, r := sc.principal, sc.org, sc.req
+	canManage, mErr := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
 	if mErr != nil || !canManage {
 		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to manage members.")
 		return
@@ -183,16 +171,7 @@ func (h *OrgHandler) PostRemoveMember(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Remove failed", "Could not remove that member.")
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
-}
-
-// SECURITY: ctx must already carry the tenant scope; MembershipOf is RLS-filtered by org.
-func (h *OrgHandler) isManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
-	m, err := h.Orgs.MembershipOf(ctx, orgID, userID)
-	if err != nil {
-		return false, err
-	}
-	return m.Role == org.RoleOwner || m.Role == org.RoleAdmin, nil
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/members"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
 }
 
 func (h *OrgHandler) requireAuth(w http.ResponseWriter, r *http.Request) (session.Principal, bool) {
@@ -205,6 +184,9 @@ func (h *OrgHandler) requireAuth(w http.ResponseWriter, r *http.Request) (sessio
 }
 
 func (h *OrgHandler) renderNewErr(w http.ResponseWriter, r *http.Request, slug, name string, err error) {
+	if slug == "" {
+		slug = slugs.Generate()
+	}
 	msg := err.Error()
 	switch {
 	case org.IsAlreadyExistsError(err):
@@ -251,7 +233,7 @@ func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID) []te
 }
 
 // Register wires all org routes onto the mux.
-func (h *OrgHandler) Register(mux *http.ServeMux) {
+func (h *OrgHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs", h.GetList)
 	mux.HandleFunc("GET /orgs/new", h.GetNew)
 	mux.HandleFunc("POST /orgs", h.PostCreate)

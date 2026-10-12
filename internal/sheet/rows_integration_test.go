@@ -922,7 +922,6 @@ func TestQuery_IsIdenticalAcrossDrivers(t *testing.T) {
 	}
 }
 
-// pgNumGuard is the Postgres spelling of the whole num grammar: NumPattern bounds each digit run, the length test bounds the significant digits.
 const pgNumGuard = `SELECT $1::text ~ $2::text
                       AND length(ltrim(translate($1::text, '-.', ''), '0')) <= $3::int`
 
@@ -1206,4 +1205,150 @@ func TestPgRowStore_Query_AForgedSortedCursorIsRefused(t *testing.T) {
 				"a hand-edited cursor is the caller's mistake, not a 500: %v", err)
 		})
 	}
+}
+
+func TestPgRowStore_RefreshAndDriftPersistTheHeaderColumns(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := f.rows.Replace(ctx, k, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name", "email"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name", "email"}, got.HeaderColumns, "a refresh of a header-only tab must keep its header row")
+	state, err := f.rows.StateOf(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name", "email"}, state.Contract.HeaderColumns)
+
+	ok, err = f.rows.MarkContract(ctx, sh.ID, got.Generation,
+		sheet.ContractState{Reason: "no id column", HeaderColumns: []string{"name", "email"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	drifted, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"name", "email"}, drifted.HeaderColumns, "drift must persist the header row the refresh read")
+}
+
+func TestPostgres_Sheet_SaveRoundTripsTheHeaderColumns(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	for name, cols := range map[string][]string{
+		"never read":         nil,
+		"read and empty":     {},
+		"read with a header": {"id", "name", "email"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sh, err := sheet.New(sheet.NewParams{
+				OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID,
+				Tab: "Rates", Slug: "cols-" + strings.ReplaceAll(name, " ", "-"), Visibility: sheet.VisibilityKey,
+			})
+			require.NoError(t, err)
+			sh.HeaderColumns = cols
+			require.NoError(t, f.store.Save(ctx, sh))
+
+			got, err := f.store.ByID(ctx, sh.ID)
+			require.NoError(t, err)
+			assert.Equal(t, cols, got.HeaderColumns, "nil means never read and must not read back as an empty header row")
+		})
+	}
+}
+
+func TestPostgres_Sheet_HeaderColumnsSurviveAnUpsertOnTheSameTab(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	ok, err := f.rows.Replace(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	sh.SetWritable(true)
+	sh.Retab("Rates")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name"}, got.HeaderColumns,
+		"a metadata edit must not write back the header row it loaded before a refresh")
+}
+
+func TestPostgres_Sheet_RetabForgetsTheHeaderColumns(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	ok, err := f.rows.Replace(ctx, sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.HeaderColumns, "the old tab's header row must not describe the new tab")
+}
+
+func TestPostgres_Sheet_UpsertOnTheSameTabLeavesTheGenerationAlone(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	pgBumpGeneration(t, f, sh.ID)
+
+	sh.SetWritable(true)
+	sh.Retab("Rates")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, got.Generation, "only a tab change moves the generation")
+}
+
+func TestPgRowStore_ARefreshOfTheOldTabIsDiscardedAfterARetab(t *testing.T) {
+	f := newPgFixture(t)
+	ctx := f.a.ctx(t)
+	sh := pgSeedSheet(t, f, f.a, "prices", "Rates")
+	old := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	gen0, err := f.rows.LockSheet(ctx, sh.ID)
+	require.NoError(t, err)
+
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(ctx, sh))
+
+	ok, err := f.rows.Replace(ctx, old, gen0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "old"}})
+	require.NoError(t, err)
+	assert.False(t, ok, "a refresh that read the old tab must not commit after a retab")
+	ok, err = f.rows.MarkContract(ctx, sh.ID, gen0,
+		sheet.ContractState{Reason: "no id column", HeaderColumns: []string{"old"}})
+	require.NoError(t, err)
+	assert.False(t, ok, "a drift finding about the old tab must not commit after a retab")
+
+	got, err := f.store.ByID(ctx, sh.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.HeaderColumns)
+	assert.True(t, got.ContractOK)
+}
+
+// TestPgRowStore_UpsertRow_OfAnotherOrgsSheetIsNotFound pins the rows upsert's org predicate: org B writing org A's sheet and row id must not take the UPDATE branch.
+func TestPgRowStore_UpsertRow_OfAnotherOrgsSheetIsNotFound(t *testing.T) {
+	f := newPgFixture(t)
+	sh, err := sheet.New(sheet.NewParams{OrgID: f.a.orgID, ProjectID: f.a.projectID, SpreadsheetID: f.a.spreadsheetID, Tab: "Rates", Slug: "prices", Visibility: sheet.VisibilityKey})
+	require.NoError(t, err)
+	require.NoError(t, f.store.Save(f.a.ctx(t), sh))
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	require.NoError(t, f.rows.UpsertRow(f.a.ctx(t), k, sheet.ProjectedRow{RowID: "a", Data: gsheet.Row{"id": "a", "name": "ada"}}))
+
+	err = f.rows.UpsertRow(f.b.ctx(t), k, sheet.ProjectedRow{RowID: "a", Data: gsheet.Row{"id": "a", "name": "Hijacked"}})
+	require.True(t, sheet.IsNotFoundError(err), "want *NotFoundError, got %T: %v", err, err)
+
+	got, err := f.rows.RowByID(f.a.ctx(t), k, "a")
+	require.NoError(t, err)
+	assert.Equal(t, "ada", got.Data["name"], "org B rewrote org A's row across the tenant boundary")
 }

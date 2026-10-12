@@ -7,3 +7,6 @@ lint:
 breaking:
   use:
     - FILE
+  # TODO: remove after the template sync lands on main; opensheet's own apikey.v1 (sheet_ids, osk_ prefix lookup) is replaced by the template's apikey.v1 (resource_ids, org/project/personal keys), and migration 011 drops the old keys.
+  ignore:
+    - api/apikey/v1/apikey.proto

@@ -328,8 +328,6 @@ func TestHintOperandError(t *testing.T) {
 	}
 }
 
-// The data-plane envelope is {code, message} and the message is all a client
-// reads, so the two hint refusals must be distinguishable from the message alone.
 func TestHintErrors_MessagesTellTheTwoRefusalsApart(t *testing.T) {
 	notApplicable := (&HintNotApplicableError{Column: "qty", Op: RowOpContains, Hint: RowHintNum}).
 		ToAppError().Error()
@@ -403,8 +401,6 @@ func TestSortDepthError(t *testing.T) {
 	}
 }
 
-// SHT034 covers both cursor/sortedness directions, and the data-plane envelope
-// carries no meta, so the message is the only thing that can tell them apart.
 func TestInvalidCursorError_MessageTellsTheTwoPairingDirectionsApart(t *testing.T) {
 	onSorted := (&InvalidCursorError{Reason: reasonUnsortedCursorOnSortedRead}).ToAppError().Message()
 	onUnsorted := (&InvalidCursorError{Reason: reasonSortedCursorOnUnsortedRead}).ToAppError().Message()
@@ -431,9 +427,6 @@ func TestUnknownSortColumnError(t *testing.T) {
 	}
 }
 
-// SHT041 exists rather than reusing SHT014 because the data-plane envelope is
-// {code, message} with a static message, so only a distinct code tells a client
-// sending ?where=a:eq:1&sort=b:asc which parameter is wrong.
 func TestUnknownSortColumnError_IsDistinctFromUnknownColumnError(t *testing.T) {
 	sortErr := (&UnknownSortColumnError{Column: "qty", Tab: "Sheet1"}).ToAppError()
 	whereErr := (&UnknownColumnError{Column: "qty", Tab: "Sheet1"}).ToAppError()
@@ -445,8 +438,6 @@ func TestUnknownSortColumnError_IsDistinctFromUnknownColumnError(t *testing.T) {
 	}
 }
 
-// SHT039 collapses three conditions, so its message must say which one fired —
-// the envelope carries no meta, and Reason-style detail never reaches a client.
 func TestInvalidSortError_MessageTellsTheThreeConditionsApart(t *testing.T) {
 	messages := map[string]string{}
 	for name, raw := range map[string][]string{

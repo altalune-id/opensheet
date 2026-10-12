@@ -8,22 +8,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The tenant middleware is what makes r.Context() carry a tenant scope. Without it every handler
-// must remember tenant.Into, and the ones that forget fail at runtime with tenant: missing context.
+// TestWebHandler_InstallsTenantMiddlewareAfterSession proves r.Context() carries a tenant scope without each handler calling tenant.Into.
 func TestWebHandler_InstallsTenantMiddlewareAfterSession(t *testing.T) {
 	src, err := os.ReadFile("http.go")
 	require.NoError(t, err)
+	source := string(src)
 
-	chain := string(src)
-	start := strings.Index(chain, "Middlewares: []web.Middleware{")
-	require.Positive(t, start, "middleware chain not found — this guard needs updating")
-	end := strings.Index(chain[start:], "\n\t\t},")
-	require.Positive(t, end, "middleware chain end not found — this guard needs updating")
-	chain = chain[start : start+end]
+	structStart := strings.Index(source, "func surfaceChains(")
+	require.Positive(t, structStart, "surfaceChains func not found — this guard needs updating")
+	structEnd := strings.Index(source[structStart:], "\n\t}\n}")
+	require.Positive(t, structEnd, "surface chains struct end not found — this guard needs updating")
+	chains := source[structStart : structStart+structEnd]
 
-	session := strings.Index(chain, "webmw.Session(")
-	tenant := strings.Index(chain, "webmw.Tenant")
-	require.Positive(t, session, "session middleware missing from the chain")
-	require.Positive(t, tenant, "tenant middleware missing from the chain — handlers would see an unscoped r.Context()")
+	consoleStart := strings.Index(chains, "Console: slices.Concat(edge, []web.Middleware{")
+	require.Positive(t, consoleStart, "console chain not found — this guard needs updating")
+	consoleEnd := strings.Index(chains[consoleStart:], "\n\t\t}),")
+	require.Positive(t, consoleEnd, "console chain end not found — this guard needs updating")
+	console := chains[consoleStart : consoleStart+consoleEnd]
+
+	csp := strings.Index(console, "webmw.CSP(")
+	session := strings.Index(console, "webmw.Session(")
+	tenant := strings.Index(console, "webmw.Tenant")
+	require.Positive(t, csp, "CSP middleware missing from the console chain — nonce={ d.Nonce } would silently stop working")
+	require.Positive(t, session, "session middleware missing from the console chain")
+	require.Positive(t, tenant, "tenant middleware missing from the console chain — handlers would see an unscoped r.Context()")
 	require.Less(t, session, tenant, "tenant must run after session or the principal is not on the context yet")
+
+	other := chains[:consoleStart] + chains[consoleStart+consoleEnd:]
+	require.NotContains(t, other, "webmw.Session(", "session middleware must not run on the Control, Data, Ingest or Probes chains — those surfaces stay edge-only")
 }

@@ -4,9 +4,9 @@ import "altalune.id/opensheet/internal/web"
 
 type ProjectNewView struct {
 	OrgSlug   string
-	Slug      string
-	Name      string
-	Error     string
+	Slug  string
+	Name  string
+	Error string
 	ErrorCode string
 }
 
@@ -33,7 +33,7 @@ templ ProjectNewPage(d web.LayoutData, v ProjectNewView) {
 			</div>
 			<div>
 				<label for="project-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
-				<input id="project-slug" name="slug" type="text" required value={ v.Slug } placeholder={ d.Tr("project_new.slug_placeholder") } pattern="[a-z0-9-]+" class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+				<input id="project-slug" name="slug" type="text" value={ v.Slug } placeholder={ d.Tr("project_new.slug_placeholder") } pattern="[a-z0-9-]+" class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
 				<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("common.slug_hint") }</p>
 			</div>
 			<div class="flex items-center gap-3 pt-2">

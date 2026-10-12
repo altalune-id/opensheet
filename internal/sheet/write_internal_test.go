@@ -46,8 +46,6 @@ func TestRowOf_KeysARowLikeTheProjection(t *testing.T) {
 	require.Equal(t, gsheet.Row{"id": "a", "name": "Ada"}, patched)
 }
 
-// The rebuild must be a Go json.Marshal, never a SQL aggregation: jsonb normalizes \u0026 back to &
-// and reorders object keys, so a SQL-side rebuild would change the ETag for rows nobody edited.
 func TestRebuildPayload_IsByteIdenticalToJSONMarshal(t *testing.T) {
 	t.Parallel()
 	deletedAt := time.Now().UTC()

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+service BadDupService {
+  // FirstTwin claims the twin_tool name.
+  rpc FirstTwin(BadDupRequest) returns (BadDupResponse) {
+    option (mcp.v1.tool) = {name: "twin_tool"};
+  }
+  // SecondTwin claims the same name a second time.
+  rpc SecondTwin(BadDupRequest) returns (BadDupResponse) {
+    option (mcp.v1.tool) = {name: "twin_tool"};
+  }
+}
+
+message BadDupRequest {}
+
+message BadDupResponse {}

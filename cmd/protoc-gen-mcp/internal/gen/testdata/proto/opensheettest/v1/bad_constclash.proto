@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+// ClashService names two distinct tools that would generate one Go constant.
+service ClashService {
+  // FirstClash claims the twin name.
+  rpc FirstClash(ClashRequest) returns (ClashResponse) {
+    option (mcp.v1.tool) = {name: "twin"};
+  }
+  // SecondClash claims a name that pascal-cases to the same constant.
+  rpc SecondClash(ClashRequest) returns (ClashResponse) {
+    option (mcp.v1.tool) = {name: "_twin"};
+  }
+}
+
+message ClashRequest {
+  string target = 1;
+}
+
+message ClashResponse {
+  string result = 1;
+}

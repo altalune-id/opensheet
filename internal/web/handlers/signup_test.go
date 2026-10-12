@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -127,4 +128,27 @@ func TestSignupHandler_PostSignup_HappyPath(t *testing.T) {
 	o, err := f.Orgs.BySlug(ctx, "acme")
 	require.NoError(t, err)
 	assert.Equal(t, u.ID, o.OwnerID)
+}
+
+func TestSignupHandler_PostSignup_BlankProjectSlugIsGenerated(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.Cfg.Mode = config.ModeCloud
+	ctx := context.Background()
+	u, err := f.Users.Create(ctx, user.CreateRequest{Email: "alice@example.com", Name: "Alice", Source: user.SourceOIDC})
+	require.NoError(t, err)
+
+	h := handlers.NewSignupHandler(f.Deps, f.Users, f.Orgs, f.Projects)
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	rec := httptest.NewRecorder()
+	body := "org_name=Acme&org_slug=acme&project_name=Main&project_slug="
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/signup/complete", body, session.Principal{UserID: u.ID, Email: u.Email, Name: u.Name}))
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+
+	loc := rec.Header().Get("Location")
+	require.True(t, strings.HasPrefix(loc, "/orgs/acme/projects/"), loc)
+	projectSlug := strings.TrimSuffix(strings.TrimPrefix(loc, "/orgs/acme/projects/"), "/overview")
+	assert.Regexp(t, generatedSlugShape, projectSlug, "a blank project slug must be generated, not the literal default")
 }

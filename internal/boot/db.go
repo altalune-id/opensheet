@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/config"
@@ -26,6 +25,10 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 	if err != nil {
 		return db.Pool{}, nil, err
 	}
+	if err := schema.AssertRequiredTables(ctx, pool.W, &cfg.DB); err != nil {
+		_ = pool.Close()
+		return db.Pool{}, nil, fmt.Errorf("boot: %w", err)
+	}
 	if cfg.DB.Driver == db.DriverPostgres {
 		if err := schema.RLSGuard(ctx, pool.W, cfg); err != nil {
 			_ = pool.Close()
@@ -33,6 +36,35 @@ func openDBAndMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger)
 		}
 	}
 	return pool, tenant.NewPgConn(pool.W), nil
+}
+
+// NOTE: an ephemeral key leaves prior session rows unopenable, so a restart signs everyone out; the sweep reaps them at expiry.
+func buildSealer(cfg *config.Config, log *slog.Logger) (sealer.Sealer, error) {
+	key, err := sealerKey(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	sl, err := sealer.New(key)
+	if err != nil {
+		return nil, fmt.Errorf("boot: sealer: %w", err)
+	}
+	return sl, nil
+}
+
+func sealerKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
+	if cfg.Security.EncryptionKey != "" {
+		key, err := sealer.ParseKey(cfg.Security.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("boot: security.encryptionKey: %w", err)
+		}
+		return key, nil
+	}
+	key, err := sealer.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("boot: %w", err)
+	}
+	log.Warn("security.encryptionKey is empty — using an ephemeral key; sessions and webhook signing secrets will not survive a restart; set OPENSHEET_SECURITY_ENCRYPTION_KEY to persist them")
+	return key, nil
 }
 
 // MigratorDBConfig shapes the connection migrations run on: the migrator DSN when set, the migrator role always, on a single session.
@@ -66,23 +98,6 @@ func runMigrations(ctx context.Context, cfg *config.Config, log *slog.Logger) er
 		log.Info("boot: migrations applied via dedicated migrator connection")
 	}
 	return nil
-}
-
-func buildSealer(cfg *config.Config, log *slog.Logger) (sealer.Sealer, error) {
-	if strings.TrimSpace(cfg.Security.EncryptionKey) == "" {
-		// SECURITY: the app still serves the UI, but every credential seal and open is refused rather than silently stored in the clear.
-		log.Warn("boot: security.encryptionKey is empty - credential storage is disabled")
-		return sealer.Disabled(), nil
-	}
-	key, err := sealer.ParseKey(cfg.Security.EncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("boot: security.encryptionKey: %w", err)
-	}
-	sl, err := sealer.New(key)
-	if err != nil {
-		return nil, fmt.Errorf("boot: sealer: %w", err)
-	}
-	return sl, nil
 }
 
 func buildSnapshotStore(cfg *config.Config, k *platform.Kernel) (sheet.SnapshotStore, error) {

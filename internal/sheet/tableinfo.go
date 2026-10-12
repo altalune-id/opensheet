@@ -47,7 +47,7 @@ func (w *ReadWorkflow) TableInfo(ctx context.Context, sh *Sheet) (TableInfo, err
 	}
 	span.SetAttributes(attribute.String("sheet.tab", stats.Tab))
 
-	columns := tableColumns(stats, sh.SoftDelete)
+	columns := tableColumns(stats, sh)
 	return TableInfo{
 		Columns:           columns,
 		IDColumn:          idColumnKnown(columns, sh),
@@ -61,11 +61,15 @@ func (w *ReadWorkflow) TableInfo(ctx context.Context, sh *Sheet) (TableInfo, err
 	}, nil
 }
 
-// NOTE: deleted_at is stripped from data, so the persisted flag is the only trace of the column the projection keeps.
-func tableColumns(stats TableStats, softDelete bool) []string {
-	out := make([]string, 0, len(stats.Columns)+1)
-	out = append(out, stats.Columns...)
-	if softDelete && !slices.Contains(out, deletedAtColumn) {
+// NOTE: the persisted header row wins over the first live row's keys, and deleted_at comes only from the persisted flag.
+func tableColumns(stats TableStats, sh *Sheet) []string {
+	known := stats.Columns
+	if sh.HeaderColumns != nil {
+		known = sh.HeaderColumns
+	}
+	out := make([]string, 0, len(known)+1)
+	out = append(out, known...)
+	if sh.SoftDelete && !slices.Contains(out, deletedAtColumn) {
 		out = append(out, deletedAtColumn)
 	}
 	slices.Sort(out)

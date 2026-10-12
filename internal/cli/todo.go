@@ -177,7 +177,7 @@ func protoTodoToMap(t *todov1.Todo) map[string]any {
 		"done":       t.GetDone(),
 	}
 	if ts := t.GetCreatedAt(); ts != nil {
-		out["created_at"] = ts.AsTime().Format("2006-01-02T15:04:05Z07:00")
+		out["created_at"] = rfc3339UTC(ts.AsTime())
 	}
 	return out
 }

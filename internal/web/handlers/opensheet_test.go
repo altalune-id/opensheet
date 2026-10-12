@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -26,7 +27,6 @@ import (
 
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
-	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/org"
@@ -40,6 +40,7 @@ import (
 	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/handlers"
+	"altalune.id/opensheet/internal/web/middleware"
 )
 
 const (
@@ -84,7 +85,6 @@ func testServiceAccount(t *testing.T, tokenURL string) string {
 	return string(raw)
 }
 
-// sheetsFixture adds the four opensheet domain services to handlerFixture, all on in-memory fakes.
 type sheetsFixture struct {
 	*handlerFixture
 	Caps       capabilities.Capabilities
@@ -99,8 +99,6 @@ type sheetsFixture struct {
 	Sources    *fakes.SheetSources
 	Read       *sheet.ReadWorkflow
 	Fix        *sheet.FixWorkflow
-	KeyStore   *fakes.APIKey
-	Keys       *apikey.Service
 	Connect    *credential.ConnectWorkflow
 	Google     *fakeSheetsAPI
 	Org        *org.Org
@@ -132,7 +130,6 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		GoogleConnect: true,
 		GooglePicker:  true,
 		PublicSheets:  true,
-		Encryption:    true,
 	}
 	for _, fn := range tweak {
 		fn(&caps)
@@ -171,9 +168,6 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 	fix := sheet.NewFixWorkflow(sources, writeScopedTokens{svc: creds}, fakes.NewSheetReauthers(), writers,
 		discardLogger(), passthroughUnexpected())
 
-	keyStore := fakes.NewAPIKey()
-	keys := apikey.NewService(keyStore, discardLogger(), passthroughUnexpected(), fakes.NewAPIKeySheets())
-
 	connector, err := gworkspace.NewConnector(testOAuthConfig(google.tokenURL), nil)
 	require.NoError(t, err)
 	connect := credential.NewConnectWorkflow(credStore, sl, connector,
@@ -199,8 +193,6 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 		Sources:        sources,
 		Read:           read,
 		Fix:            fix,
-		KeyStore:       keyStore,
-		Keys:           keys,
 		Connect:        connect,
 		Google:         google,
 		Org:            o,
@@ -231,7 +223,6 @@ func testOAuthConfig(tokenURL string) *oauth2.Config {
 	}
 }
 
-// ctx returns a request context scoped to the fixture's org and project.
 func (f *sheetsFixture) ctx() context.Context {
 	return setTenantProject(context.Background(), f.Org.ID, f.Project.ID, f.Principal.UserID)
 }
@@ -240,7 +231,6 @@ func (f *sheetsFixture) path(suffix string) string {
 	return "/orgs/" + f.Org.Slug + "/projects/" + f.Project.Slug + suffix
 }
 
-// dataURL mirrors SheetHandler.dataURL so the tests assert the same string the page renders.
 func (f *sheetsFixture) dataURL(slug string) string {
 	return strings.TrimRight(f.Cfg.HTTP.BaseURL, "/") +
 		web.DataPath(f.Cfg.HTTP.BasePath, f.Org.Slug, f.Project.Slug, slug)
@@ -252,7 +242,6 @@ func (f *sheetsFixture) mux(t *testing.T) *http.ServeMux {
 	handlers.NewCredentialHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	handlers.NewSpreadsheetHandler(f.Deps, f.Projects, f.Sprds, f.Creds).Register(mux)
 	handlers.NewSheetHandler(f.Deps, f.Projects, f.Sheets, f.Sprds, f.Read, f.Fix).Register(mux)
-	handlers.NewAPIKeyHandler(f.Deps, f.Projects, f.Keys, f.Sheets).Register(mux)
 	handlers.NewGoogleConnectHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	return mux
 }
@@ -303,7 +292,6 @@ func (f *sheetsFixture) seedWritableSheet(t *testing.T, sprdID uuid.UUID, slug s
 	return sh
 }
 
-// fakeSheetsAPI serves the Google Sheets endpoints the read path uses plus an OAuth token endpoint.
 type fakeSheetsAPI struct {
 	mu           sync.Mutex
 	rowsBody     string
@@ -319,7 +307,6 @@ type fakeSheetsAPI struct {
 	tokenURL string
 }
 
-// sheetWrite is one values.update the fake received, so a test can assert what reached the spreadsheet.
 type sheetWrite struct {
 	url  string
 	body string
@@ -419,7 +406,7 @@ func (f *fakeSheetsAPI) breakGoogle() {
 	f.rowsStatus, f.metaStatus = http.StatusInternalServerError, http.StatusInternalServerError
 }
 
-// hideDocument mirrors a document the drive.file grant never covered: Google answers 404, not 403.
+// NOTE: Google answers 404, not 403, for a document the drive.file grant never covered.
 func (f *fakeSheetsAPI) hideDocument() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -471,7 +458,7 @@ func (f *sheetsFixture) upload(t *testing.T, name, payload string) *httptest.Res
 func TestOpensheetHandlers_UnauthRedirectToLogin(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
-	for _, target := range []string{"/credentials", "/spreadsheets", "/sheets", "/keys"} {
+	for _, target := range []string{"/credentials", "/spreadsheets", "/sheets"} {
 		t.Run(target, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			f.mux(t).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, f.path(target), nil))
@@ -483,7 +470,7 @@ func TestOpensheetHandlers_UnauthRedirectToLogin(t *testing.T) {
 func TestOpensheetHandlers_UnknownProjectIs404(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
-	for _, target := range []string{"/credentials", "/spreadsheets", "/sheets", "/keys"} {
+	for _, target := range []string{"/credentials", "/spreadsheets", "/sheets"} {
 		t.Run(target, func(t *testing.T) {
 			rec := f.do(t, http.MethodGet, "/orgs/acme/projects/ghost"+target, "")
 			assert.Equal(t, http.StatusNotFound, rec.Code)
@@ -498,7 +485,6 @@ func TestOpensheetHandlers_EmptyStates(t *testing.T) {
 		{"/credentials", `data-empty="credentials"`},
 		{"/spreadsheets", `data-empty="spreadsheets"`},
 		{"/sheets", `data-empty="sheets"`},
-		{"/keys", `data-empty="keys"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.target, func(t *testing.T) {
@@ -515,11 +501,12 @@ func TestOpensheetHandlers_ProjectSidebarOmitsTodos(t *testing.T) {
 	rec := f.do(t, http.MethodGet, f.path("/sheets"), "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
-	for _, want := range []string{"/credentials", "/spreadsheets", "/sheets", "/keys"} {
+	for _, want := range []string{"/credentials", "/spreadsheets", "/sheets", "/apikeys"} {
 		assert.Contains(t, body, f.path(want), "the project sidebar must link every opensheet section")
 	}
-	assert.NotContains(t, body, f.path("/todos"),
-		"todos stays routable but is no longer a navigable section")
+	for _, unmounted := range []string{"/todos", "/posts", "/categories", "/tags", "/webhooks"} {
+		assert.NotContains(t, body, f.path(unmounted), "opensheet does not mount the template's %s module", unmounted)
+	}
 }
 
 func TestCredentialHandler_UploadStoresAndReportsUnverified(t *testing.T) {
@@ -575,8 +562,6 @@ func TestCredentialHandler_Delete(t *testing.T) {
 	assert.Empty(t, items)
 }
 
-// The Postgres driver refuses a credential a spreadsheet still references; the page must say why
-// rather than reporting a generic failure.
 func TestCredentialHandler_DeleteRefusedWhileInUse(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
@@ -684,8 +669,7 @@ func TestSpreadsheetHandler_WritableCheckboxRoundTrips(t *testing.T) {
 	assert.NotContains(t, list.Body.String(), `data-spreadsheet-writable-badge`)
 }
 
-// A fragment renders with its own LayoutData, and LayoutData.ProjectPath collapses to "/orgs" when no
-// org is pinned — so an HTMX swap would replace the list with rows linking nowhere.
+// NOTE: LayoutData.ProjectPath collapses to "/orgs" when no org is pinned, so a fragment without its own scope links nowhere.
 func TestOpensheetHandlers_FragmentLinksStayProjectScoped(t *testing.T) {
 	t.Parallel()
 	f := newSheetsFixture(t)
@@ -697,7 +681,6 @@ func TestOpensheetHandlers_FragmentLinksStayProjectScoped(t *testing.T) {
 		{"credentials", http.MethodPost, "/credentials", ""},
 		{"spreadsheets", http.MethodPost, "/spreadsheets", url.Values{"credential_id": {c.ID.String()}}.Encode()},
 		{"sheets", http.MethodPost, "/sheets", url.Values{"spreadsheet_id": {sp.ID.String()}}.Encode()},
-		{"keys", http.MethodPost, "/keys", url.Values{"name": {"CI"}}.Encode()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -705,6 +688,53 @@ func TestOpensheetHandlers_FragmentLinksStayProjectScoped(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Body.String(), f.path(tc.target),
 				"the swapped fragment must keep links under the project")
+		})
+	}
+}
+
+// Under an enforcing CSP the hx-csp extension strips htmx attributes that carry no nonce, and the browser refuses an unnonced script.
+func TestOpensheetHandlers_HtmxAndScriptsCarryTheRequestNonce(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	c := f.seedCredential(t, credential.KindGoogleOAuth, "Prod")
+	sp := f.seedSpreadsheet(t, c.ID)
+	sh := f.seedSheet(t, sp.ID, "q1", sheet.VisibilityKey)
+
+	cases := []struct{ name, method, target, body string }{
+		{"credentials page", http.MethodGet, f.path("/credentials"), ""},
+		{"credentials fragment", http.MethodPost, f.path("/credentials"), ""},
+		{"spreadsheets page", http.MethodGet, f.path("/spreadsheets"), ""},
+		{"spreadsheets fragment", http.MethodPost, f.path("/spreadsheets"), url.Values{"credential_id": {c.ID.String()}}.Encode()},
+		{"spreadsheet page", http.MethodGet, f.path("/spreadsheets/" + sp.ID.String()), ""},
+		{"bulk publish fragment", http.MethodGet, f.path("/spreadsheets/" + sp.ID.String() + "/publish"), ""},
+		{"sheets page", http.MethodGet, f.path("/sheets"), ""},
+		{"sheets fragment", http.MethodPost, f.path("/sheets"), url.Values{"spreadsheet_id": {sp.ID.String()}}.Encode()},
+		{"sheet page", http.MethodGet, f.path("/sheets/" + sh.ID.String()), ""},
+		{"picker page", http.MethodGet, "/credentials/google/picker?state=" + url.QueryEscape(handlers.PickerStateFor(f.Deps.SecretBytes(), f.Org.Slug, f.Project.Slug, c.ID)), ""},
+	}
+	reHx := regexp.MustCompile(`<[a-z]+[^>]*\shx-(?:get|post)="[^"]*"[^>]*>`)
+	reScript := regexp.MustCompile(`(?s)(<script[^>]*>).*?</script>`)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			csp := middleware.CSP(middleware.CSPOptions{Enabled: true})(f.mux(t))
+			csp.ServeHTTP(rec, f.authedRequest(t, tc.method, tc.target, tc.body, f.Principal))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			nonce := regexp.MustCompile(`'nonce-([^']+)'`).FindStringSubmatch(rec.Header().Get("Content-Security-Policy"))
+			require.Len(t, nonce, 2)
+			body := rec.Body.String()
+			tags := reHx.FindAllString(body, -1)
+			if !strings.Contains(tc.name, "picker") {
+				require.NotEmpty(t, tags, "the case must exercise at least one htmx element")
+			}
+			for _, tag := range tags {
+				assert.Contains(t, tag, `hx-nonce="`+nonce[1]+`"`, tag)
+			}
+			for _, m := range reScript.FindAllStringSubmatch(body, -1) {
+				assert.Contains(t, m[1], `nonce="`+nonce[1]+`"`, m[1])
+			}
+			assert.NotContains(t, body, " onload=")
+			assert.NotContains(t, body, "hx-on")
 		})
 	}
 }
@@ -981,66 +1011,6 @@ func TestSheetHandler_BadIDIs400(t *testing.T) {
 	f := newSheetsFixture(t)
 	rec := f.do(t, http.MethodGet, f.path("/sheets/not-a-uuid"), "")
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
-func TestAPIKeyHandler_CreateShowsThePlaintextOnceAndTheListNeverDoes(t *testing.T) {
-	t.Parallel()
-	f := newSheetsFixture(t)
-	form := url.Values{"name": {"CI reader"}, "scopes": {authn.ScopeSheetsRead, authn.ScopeCachePurge}}
-
-	rec := f.do(t, http.MethodPost, f.path("/keys"), form.Encode())
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body := rec.Body.String()
-	require.Contains(t, body, `data-minted-key`)
-	i := strings.Index(body, apikey.Label+"_")
-	require.Positive(t, i, "the create response must show the plaintext exactly once")
-	plaintext := body[i : i+len(apikey.Label)+2+apikey.PrefixLen+apikey.SecretLen]
-	// NOTE: base64url includes '_', so the secret is the remainder after the second separator.
-	secret := strings.SplitN(plaintext, "_", 3)[2]
-	require.Len(t, secret, apikey.SecretLen)
-
-	list := f.do(t, http.MethodGet, f.path("/keys"), "")
-	require.Equal(t, http.StatusOK, list.Code)
-	listed := list.Body.String()
-	assert.NotContains(t, listed, plaintext, "the list page must never render a plaintext key")
-	assert.NotContains(t, listed, secret, "nor the secret half of one")
-
-	items, err := f.Keys.List(f.ctx())
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	require.Empty(t, items[0].SecretHash, "a list read must not even load the hash")
-}
-
-func TestAPIKeyHandler_CreateWithNoScopeRendersInline(t *testing.T) {
-	t.Parallel()
-	f := newSheetsFixture(t)
-	rec := f.do(t, http.MethodPost, f.path("/keys"), url.Values{"name": {"No scopes"}}.Encode())
-	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `data-error="keys"`)
-
-	items, err := f.Keys.List(f.ctx())
-	require.NoError(t, err)
-	assert.Empty(t, items)
-}
-
-func TestAPIKeyHandler_RevokeAndDelete(t *testing.T) {
-	t.Parallel()
-	f := newSheetsFixture(t)
-	k, _, err := f.Keys.Create(f.ctx(), apikey.CreateRequest{Name: "CI", Scopes: []string{authn.ScopeSheetsRead}})
-	require.NoError(t, err)
-
-	rec := f.do(t, http.MethodPost, f.path("/keys/"+k.ID.String()+"/revoke"), "")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	items, err := f.Keys.List(f.ctx())
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	require.NotNil(t, items[0].RevokedAt)
-
-	rec = f.do(t, http.MethodPost, f.path("/keys/"+k.ID.String()+"/delete"), "")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	items, err = f.Keys.List(f.ctx())
-	require.NoError(t, err)
-	assert.Empty(t, items)
 }
 
 func TestGoogleConnectHandler_CallbackRefusesAGrantThatDroppedDriveFile(t *testing.T) {

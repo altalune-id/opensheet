@@ -14,37 +14,41 @@ import (
 )
 
 type fakeOrgs struct {
-	mu          sync.Mutex
-	bySlug      map[string]*user.OrgRef
-	byID        map[uuid.UUID]*user.OrgRef
-	memberships map[[2]uuid.UUID]*user.MembershipRef
-	userToOrgs  map[uuid.UUID][]uuid.UUID
+	mu             sync.Mutex
+	byID           map[uuid.UUID]*user.OrgRef
+	memberships    map[[2]uuid.UUID]*user.MembershipRef
+	userToOrgs     map[uuid.UUID][]uuid.UUID
+	ListForUserErr error
 }
 
 func newFakeOrgs() *fakeOrgs {
 	return &fakeOrgs{
-		bySlug:      map[string]*user.OrgRef{},
 		byID:        map[uuid.UUID]*user.OrgRef{},
 		memberships: map[[2]uuid.UUID]*user.MembershipRef{},
 		userToOrgs:  map[uuid.UUID][]uuid.UUID{},
 	}
 }
 
-func (f *fakeOrgs) BySlug(_ context.Context, slug string) (*user.OrgRef, error) {
+func (f *fakeOrgs) SystemOrg(_ context.Context) (*user.OrgRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if o, ok := f.bySlug[slug]; ok {
-		cp := *o
-		return &cp, nil
+	var found *user.OrgRef
+	for _, o := range f.byID {
+		if o.System && (found == nil || o.CreatedAt.Before(found.CreatedAt)) {
+			found = o
+		}
 	}
-	return nil, &user.NotFoundError{}
+	if found == nil {
+		return nil, &user.SingletonOrgMissingError{}
+	}
+	cp := *found
+	return &cp, nil
 }
 
 func (f *fakeOrgs) Save(_ context.Context, o *user.OrgRef) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	cp := *o
-	f.bySlug[o.Slug] = &cp
 	f.byID[o.ID] = &cp
 	return nil
 }
@@ -52,6 +56,9 @@ func (f *fakeOrgs) Save(_ context.Context, o *user.OrgRef) error {
 func (f *fakeOrgs) ListForUser(_ context.Context, userID uuid.UUID) ([]*user.OrgRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ListForUserErr != nil {
+		return nil, f.ListForUserErr
+	}
 	ids := f.userToOrgs[userID]
 	out := make([]*user.OrgRef, 0, len(ids))
 	for _, id := range ids {
@@ -186,7 +193,7 @@ func TestOnboard_Selfhosted_AcceptsInvite(t *testing.T) {
 	invites := newFakeInvites()
 	users := fakes.NewUser()
 
-	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC(), System: true}
 	if err := orgs.Save(context.Background(), singleton); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +206,7 @@ func TestOnboard_Selfhosted_AcceptsInvite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	policy := user.Policy{Mode: user.PolicyModeSelfhosted, SingletonOrgSlug: "primary"}
+	policy := user.Policy{Mode: user.PolicyModeSelfhosted}
 	wf := user.NewOnboardWorkflow(users, orgs, projects, invites, policy, newTestLogger(), noopUnexpected())
 
 	userID := uuid.New()
@@ -223,15 +230,64 @@ func TestOnboard_Selfhosted_AcceptsInvite(t *testing.T) {
 	}
 }
 
+func TestOnboard_Selfhosted_FindsTheSystemOrgWhateverItsSlug(t *testing.T) {
+	t.Parallel()
+	orgs := newFakeOrgs()
+	plain := &user.OrgRef{ID: uuid.New(), Slug: "default", Name: "Plain", OwnerID: uuid.New(), CreatedAt: time.Now().UTC().Add(-time.Hour)}
+	singleton := &user.OrgRef{ID: uuid.New(), Slug: "wispy-frost-4821", Name: "Edited", OwnerID: uuid.New(), CreatedAt: time.Now().UTC(), System: true}
+	for _, o := range []*user.OrgRef{plain, singleton} {
+		if err := orgs.Save(context.Background(), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adminID := uuid.New()
+	if err := orgs.SaveMembership(context.Background(), &user.MembershipRef{OrgID: singleton.ID, UserID: adminID, Role: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wf := user.NewOnboardWorkflow(fakes.NewUser(), orgs, newFakeProjects(), newFakeInvites(),
+		user.Policy{Mode: user.PolicyModeSelfhosted}, newTestLogger(), noopUnexpected())
+
+	res, err := wf.Onboard(context.Background(), adminID, "admin@example.com")
+	if err != nil {
+		t.Fatalf("Onboard: %v", err)
+	}
+	if res.OrgID != singleton.ID {
+		t.Fatalf("orgID=%v, want the system org %v", res.OrgID, singleton.ID)
+	}
+
+	_, err = wf.Onboard(context.Background(), uuid.New(), "stranger@example.com")
+	if !user.IsNotInvitedError(err) {
+		t.Fatalf("an uninvited user must see NotInvitedError once the system org exists, got %T: %v", err, err)
+	}
+}
+
+func TestOnboard_Selfhosted_NoSystemOrgIsSignupRequired(t *testing.T) {
+	t.Parallel()
+	orgs := newFakeOrgs()
+	plain := &user.OrgRef{ID: uuid.New(), Slug: "default", Name: "Plain", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	if err := orgs.Save(context.Background(), plain); err != nil {
+		t.Fatal(err)
+	}
+
+	wf := user.NewOnboardWorkflow(fakes.NewUser(), orgs, newFakeProjects(), newFakeInvites(),
+		user.Policy{Mode: user.PolicyModeSelfhosted}, newTestLogger(), noopUnexpected())
+
+	_, err := wf.Onboard(context.Background(), uuid.New(), "alice@example.com")
+	if !user.IsSignupRequiredError(err) {
+		t.Fatalf("a non-system org must not stand in for the singleton, got %T: %v", err, err)
+	}
+}
+
 func TestOnboard_Selfhosted_NotInvited(t *testing.T) {
 	t.Parallel()
 	orgs := newFakeOrgs()
-	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC(), System: true}
 	if err := orgs.Save(context.Background(), singleton); err != nil {
 		t.Fatal(err)
 	}
 
-	policy := user.Policy{Mode: user.PolicyModeSelfhosted, SingletonOrgSlug: "primary"}
+	policy := user.Policy{Mode: user.PolicyModeSelfhosted}
 	wf := user.NewOnboardWorkflow(fakes.NewUser(), orgs, newFakeProjects(), newFakeInvites(), policy, newTestLogger(), noopUnexpected())
 
 	_, err := wf.Onboard(context.Background(), uuid.New(), "alice@example.com")

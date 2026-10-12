@@ -344,8 +344,7 @@ func TestPredicates_UnwrapThroughAChain(t *testing.T) {
 	}
 }
 
-// SECURITY: the tabs routes on the data plane are addressed by our UUID, so a refusal must not hand
-// the caller the Google file id. It stays in Error(), which only the log and the span see.
+// SECURITY: the tabs routes on the data plane are addressed by our UUID, so a refusal must not hand the caller the Google file id. It stays in Error(), which only the log and the span see.
 func TestNotWritableError_ToAppErrorNamesNoGoogleFileID(t *testing.T) {
 	t.Parallel()
 	err := &NotWritableError{ID: "11111111-1111-1111-1111-111111111111", GoogleFileID: "1SecretFileID"}

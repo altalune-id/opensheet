@@ -1,0 +1,121 @@
+package templates
+
+import (
+	"strconv"
+
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+type WebhookRow struct {
+	ID             string
+	URL            string
+	Description    string
+	EventLabelKeys []string
+	Active         bool
+	Rotating       bool
+	CreatedAt      string
+}
+
+type WebhooksView struct {
+	ProjectSlug string
+	Items       []WebhookRow
+	Limit       int
+	Guide       WebhookGuideView
+}
+
+templ webhookEphemeralBanner(d web.LayoutData) {
+	if d.Caps.EphemeralEncryptionKey {
+		<div data-ephemeral-key class="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+			<p class="font-semibold">{ d.Tr("webhooks.ephemeral_heading") }</p>
+			<p class="mt-1 text-xs">{ d.Tr("webhooks.ephemeral_warning") }</p>
+		</div>
+	}
+}
+
+// WebhookError is one banner: a message key, its error code, and the limit its copy names.
+type WebhookError struct {
+	Key  string
+	Code string
+	Max  int
+}
+
+templ webhookErrorBanner(d web.LayoutData, e WebhookError) {
+	if e.Key != "" {
+		@ErrorBanner(d, d.Tr(e.Key, "Max", e.Max), e.Code)
+	}
+}
+
+templ webhookActiveBadge(d web.LayoutData, active bool) {
+	if active {
+		<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">{ d.Tr("webhooks.active") }</span>
+	} else {
+		<span class="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("webhooks.inactive") }</span>
+	}
+}
+
+templ webhookEventBadges(d web.LayoutData, keys []string) {
+	<span class="flex flex-wrap gap-1">
+		for _, k := range keys {
+			<span class="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">{ d.Tr(k) }</span>
+		}
+	</span>
+}
+
+templ WebhooksPage(d web.LayoutData, v WebhooksView) {
+	<section>
+		<header class="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
+			<div>
+				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("webhooks.title") }</h1>
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("webhooks.subtitle") }</p>
+			</div>
+			<div class="flex items-center gap-3">
+				<span class="text-xs text-muted-foreground">{ d.Tr("webhooks.count", "Count", len(v.Items), "Limit", v.Limit) }</span>
+				if len(v.Items) < v.Limit {
+					<a
+						href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/webhooks/new")) }
+						class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+					>
+						@icons.Icon("plus", "h-4 w-4")
+						<span>{ d.Tr("webhooks.new") }</span>
+					</a>
+				}
+			</div>
+		</header>
+		@webhookEphemeralBanner(d)
+		<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+			if len(v.Items) == 0 {
+				<li class="px-4 py-8 text-center text-sm text-muted-foreground">{ d.Tr("webhooks.empty") }</li>
+			}
+			for _, e := range v.Items {
+				<li class="flex flex-wrap items-center gap-3 px-4 py-3">
+					<div class="min-w-0 flex-1">
+						<a
+							href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/webhooks/"+e.ID)) }
+							class="block truncate font-mono text-sm font-medium text-foreground hover:underline"
+						>{ e.URL }</a>
+						if e.Description != "" {
+							<p class="mt-0.5 truncate text-xs text-muted-foreground">{ e.Description }</p>
+						}
+						<p class="mt-1.5">
+							@webhookEventBadges(d, e.EventLabelKeys)
+						</p>
+					</div>
+					if e.Rotating {
+						<span class="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">{ d.Tr("webhooks.rotating") }</span>
+					}
+					@webhookActiveBadge(d, e.Active)
+				</li>
+			}
+		</ul>
+		@WebhookGuide(d, v.Guide)
+	</section>
+}
+
+templ WebhooksLayout(d web.LayoutData, v WebhooksView) {
+	@Layout(web.WithContent(d, WebhooksPage(d, v)))
+}
+
+func webhookAttemptLabel(n, limit int) string {
+	return strconv.Itoa(n) + "/" + strconv.Itoa(limit)
+}

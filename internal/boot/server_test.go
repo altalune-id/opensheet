@@ -36,9 +36,8 @@ func newSmokeCfg(t *testing.T) *config.Config {
 			Password: "hunter2",
 		},
 		Tenant: config.TenantConfig{
-			SingletonOrg:            config.SingletonOrgConfig{Slug: "default", Name: "Default"},
+			SingletonOrg:            config.SingletonOrgConfig{Name: "Default"},
 			PersonalOrgSlugFallback: "personal",
-			PersonalProjectSlug:     "default",
 		},
 		Log: logger.Config{Level: "error", Format: "json"},
 		Mail: config.MailConfig{
@@ -81,6 +80,9 @@ func TestBootServer_SQLite_WiresEveryService(t *testing.T) {
 	}
 	if srv.API == nil {
 		t.Fatal("API server must be wired")
+	}
+	if srv.API.APIKeys == nil {
+		t.Fatal("apikey.Service must be wired onto controlplane.Server, or apikey.v1.APIKeyService calls a nil service")
 	}
 }
 
@@ -135,6 +137,21 @@ func TestBootServer_SupervisorRunReturnsWhenCtxCanceled(t *testing.T) {
 	runErr := srv.Run(ctx)
 	if runErr != nil && !errors.Is(runErr, context.DeadlineExceeded) && !errors.Is(runErr, context.Canceled) {
 		t.Fatalf("Run: unexpected err %v", runErr)
+	}
+}
+
+func TestBootServer_RunReturnsNilOnACleanShutdown(t *testing.T) {
+	cfg := newSmokeCfg(t)
+	srv, err := boot.BootServer(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BootServer: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	if err := srv.Run(ctx); err != nil {
+		t.Fatalf("Run after a shutdown signal = %v, want nil", err)
 	}
 }
 

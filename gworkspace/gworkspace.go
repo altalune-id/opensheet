@@ -27,8 +27,7 @@ type settings struct {
 	timeout time.Duration
 }
 
-// WithBaseURL overrides the Google API endpoint.
-// SECURITY: WithBaseURL relaxes the private-host filter, so it must never be wired from config or any request-derived value; it exists for tests and for a code-supplied endpoint.
+// WithBaseURL overrides the Google API endpoint. SECURITY: WithBaseURL relaxes the private-host filter, so it must never be wired from config or any request-derived value; it exists for tests and for a code-supplied endpoint.
 func WithBaseURL(u string) Option {
 	return func(s *settings) { s.baseURL = strings.TrimSpace(u) }
 }

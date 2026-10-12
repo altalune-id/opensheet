@@ -6,67 +6,62 @@ import "github.com/go-jet/jet/v2/sqlite"
 type APIKeys struct {
 	sqlite.Table
 
-	ID         sqlite.ColumnString
-	OrgID      sqlite.ColumnString
-	ProjectID  sqlite.ColumnString
-	Name       sqlite.ColumnString
-	KeyPrefix  sqlite.ColumnString
-	SecretHash sqlite.ColumnBlob
-	// NOTE: scopes holds a JSON array; SQLite has no array type.
-	Scopes     sqlite.ColumnString
-	ExpiresAt  sqlite.ColumnString
-	LastUsedAt sqlite.ColumnString
-	RevokedAt  sqlite.ColumnString
-	CreatedAt  sqlite.ColumnString
+	ID          sqlite.ColumnString
+	OrgID       sqlite.ColumnString
+	ProjectID   sqlite.ColumnString
+	Kind        sqlite.ColumnString
+	AllProjects sqlite.ColumnBool
+	Name        sqlite.ColumnString
+	SecretHash  sqlite.ColumnBlob
+	SecretHint  sqlite.ColumnString
+	Scopes      sqlite.ColumnString
+	ResourceIDs sqlite.ColumnString
+	CreatedBy   sqlite.ColumnString
+	CreatedAt   sqlite.ColumnString
+	ExpiresAt   sqlite.ColumnString
+	RevokedAt   sqlite.ColumnString
+	LastUsedAt  sqlite.ColumnString
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
-	// PublicColumns omits secret_hash. SECURITY: select through it on every path that is not verifying a key.
-	PublicColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewAPIKeys builds the api_keys binding.
 func NewAPIKeys(tablePrefix string) *APIKeys {
 	var (
-		id         = sqlite.StringColumn("id")
-		orgID      = sqlite.StringColumn("org_id")
-		projectID  = sqlite.StringColumn("project_id")
-		name       = sqlite.StringColumn("name")
-		keyPrefix  = sqlite.StringColumn("key_prefix")
-		secretHash = sqlite.BlobColumn("secret_hash")
-		scopes     = sqlite.StringColumn("scopes")
-		expiresAt  = sqlite.StringColumn("expires_at")
-		lastUsedAt = sqlite.StringColumn("last_used_at")
-		revokedAt  = sqlite.StringColumn("revoked_at")
-		createdAt  = sqlite.StringColumn("created_at")
-		all        = sqlite.ColumnList{
-			id, orgID, projectID, name, keyPrefix, secretHash, scopes,
-			expiresAt, lastUsedAt, revokedAt, createdAt,
-		}
-		mutable = sqlite.ColumnList{
-			orgID, projectID, name, keyPrefix, secretHash, scopes,
-			expiresAt, lastUsedAt, revokedAt,
-		}
-		public = sqlite.ColumnList{
-			id, orgID, projectID, name, keyPrefix, scopes,
-			expiresAt, lastUsedAt, revokedAt, createdAt,
-		}
+		iD          = sqlite.StringColumn("id")
+		orgID       = sqlite.StringColumn("org_id")
+		projectID   = sqlite.StringColumn("project_id")
+		kind        = sqlite.StringColumn("kind")
+		allProjects = sqlite.BoolColumn("all_projects")
+		name        = sqlite.StringColumn("name")
+		secretHash  = sqlite.BlobColumn("secret_hash")
+		secretHint  = sqlite.StringColumn("secret_hint")
+		scopes      = sqlite.StringColumn("scopes")
+		resourceIDs = sqlite.StringColumn("resource_ids")
+		createdBy   = sqlite.StringColumn("created_by")
+		createdAt   = sqlite.StringColumn("created_at")
+		expiresAt   = sqlite.StringColumn("expires_at")
+		revokedAt   = sqlite.StringColumn("revoked_at")
+		lastUsedAt  = sqlite.StringColumn("last_used_at")
+		all         = sqlite.ColumnList{iD, orgID, projectID, kind, allProjects, name, secretHash, secretHint, scopes, resourceIDs, createdBy, createdAt, expiresAt, revokedAt, lastUsedAt}
 	)
 	return &APIKeys{
-		Table:          sqlite.NewTable("", tablePrefix+"api_keys", "api_keys", all...),
-		ID:             id,
-		OrgID:          orgID,
-		ProjectID:      projectID,
-		Name:           name,
-		KeyPrefix:      keyPrefix,
-		SecretHash:     secretHash,
-		Scopes:         scopes,
-		ExpiresAt:      expiresAt,
-		LastUsedAt:     lastUsedAt,
-		RevokedAt:      revokedAt,
-		CreatedAt:      createdAt,
-		AllColumns:     all,
-		MutableColumns: mutable,
-		PublicColumns:  public,
+		Table:       sqlite.NewTable("", tablePrefix+"api_keys", "api_keys", all...),
+		ID:          iD,
+		OrgID:       orgID,
+		ProjectID:   projectID,
+		Kind:        kind,
+		AllProjects: allProjects,
+		Name:        name,
+		SecretHash:  secretHash,
+		SecretHint:  secretHint,
+		Scopes:      scopes,
+		ResourceIDs: resourceIDs,
+		CreatedBy:   createdBy,
+		CreatedAt:   createdAt,
+		ExpiresAt:   expiresAt,
+		RevokedAt:   revokedAt,
+		LastUsedAt:  lastUsedAt,
+		AllColumns:  all,
 	}
 }

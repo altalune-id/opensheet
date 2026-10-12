@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+// NoDescService annotates an rpc that carries neither a description nor a leading comment.
+service NoDescService {
+  rpc Silent(NoDescRequest) returns (NoDescResponse) {
+    option (mcp.v1.tool) = {name: "silent_tool"};
+  }
+}
+
+message NoDescRequest {}
+
+message NoDescResponse {}

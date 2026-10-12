@@ -7,12 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"altalune.id/opensheet/internal/platform/session"
+	"github.com/google/uuid"
+
 	"altalune.id/opensheet/internal/platform/tokens"
 )
 
@@ -77,118 +79,113 @@ func TestNewVerifier_HappyDiscovery(t *testing.T) {
 	}
 }
 
-func TestVerify_CarriesOrgIDClaimIntoPrincipal(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var srv *httptest.Server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["EdDSA"]}`,
-			srv.URL, srv.URL+"/jwks")
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"k1","x":%q}]}`,
-			base64.RawURLEncoding.EncodeToString(pub))
-	})
-	srv = httptest.NewServer(mux)
-	defer srv.Close()
-
-	v, err := tokens.NewVerifier(t.Context(), tokens.Config{Issuer: srv.URL, Audience: "urn:test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	now := time.Now()
-	claims := map[string]any{
-		"iss":    srv.URL,
-		"aud":    "urn:test",
-		"sub":    "sub-1",
-		"exp":    now.Add(time.Hour).Unix(),
-		"iat":    now.Unix(),
-		"email":  "member@example.com",
-		"name":   "Member",
-		"org_id": "9b2b1a3e-0000-7000-8000-000000000001",
-		"scope":  "sheets:read sheets:write",
-	}
-	p, err := v.Verify(t.Context(), signEdDSA(t, priv, claims))
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if p.IDPOrgID != "9b2b1a3e-0000-7000-8000-000000000001" {
-		t.Errorf("IDPOrgID=%q want the org_id claim", p.IDPOrgID)
-	}
-	if p.IDPIssuer != srv.URL || p.IDPSubject != "sub-1" {
-		t.Errorf("idp fields=%q/%q", p.IDPIssuer, p.IDPSubject)
-	}
-	if p.Email != "member@example.com" || p.Source != session.SourceToken {
-		t.Errorf("principal=%+v", p)
-	}
-	if len(p.Scopes) != 2 {
-		t.Errorf("Scopes=%v want the two space-separated scopes", p.Scopes)
-	}
+type stubIssuer struct {
+	url  string
+	priv ed25519.PrivateKey
 }
 
-func TestVerify_AbsentOrgIDClaimLeavesIDPOrgIDEmpty(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var srv *httptest.Server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["EdDSA"]}`,
-			srv.URL, srv.URL+"/jwks")
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"k1","x":%q}]}`,
-			base64.RawURLEncoding.EncodeToString(pub))
-	})
-	srv = httptest.NewServer(mux)
-	defer srv.Close()
-
-	v, err := tokens.NewVerifier(t.Context(), tokens.Config{Issuer: srv.URL, Audience: "urn:test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	now := time.Now()
-	p, err := v.Verify(t.Context(), signEdDSA(t, priv, map[string]any{
-		"iss":    srv.URL,
-		"aud":    "urn:test",
-		"sub":    "sub-2",
-		"exp":    now.Add(time.Hour).Unix(),
-		"iat":    now.Unix(),
-		"scopes": []string{"cache:purge"},
-	}))
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if p.IDPOrgID != "" {
-		t.Errorf("IDPOrgID=%q want empty", p.IDPOrgID)
-	}
-	if len(p.Scopes) != 1 || p.Scopes[0] != "cache:purge" {
-		t.Errorf("Scopes=%v want the scopes array claim", p.Scopes)
-	}
-}
-
-func signEdDSA(t *testing.T, priv ed25519.PrivateKey, claims map[string]any) string {
+func newStubIssuer(t *testing.T) *stubIssuer {
 	t.Helper()
-	header, err := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "JWT", "kid": "k1"})
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(claims)
+	iss := &stubIssuer{priv: priv}
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["EdDSA"]}`,
+			srv.URL, srv.URL+"/jwks")
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k1","alg":"EdDSA","use":"sig","x":%q}]}`,
+			base64.RawURLEncoding.EncodeToString(pub))
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	iss.url = srv.URL
+	return iss
+}
+
+func (i *stubIssuer) mint(t *testing.T, audience string, claims map[string]any) string {
+	t.Helper()
+
+	payload := map[string]any{
+		"iss": i.url,
+		"aud": audience,
+		"sub": "sub-1",
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(time.Hour).Unix(),
+	}
+	maps.Copy(payload, claims)
+
+	seg := func(v any) string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	signing := seg(map[string]any{"alg": "EdDSA", "typ": "JWT", "kid": "k1"}) + "." + seg(payload)
+	return signing + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(i.priv, []byte(signing)))
+}
+
+func TestVerify_OrgClaimIsAHintNotAuthority(t *testing.T) {
+	iss := newStubIssuer(t)
+	v, err := tokens.NewVerifier(t.Context(), tokens.Config{Issuer: iss.url, Audience: "urn:test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(input)))
+	orgID := uuid.New()
+
+	tests := []struct {
+		name        string
+		claims      map[string]any
+		wantErr     bool
+		wantClaimed uuid.UUID
+	}{
+		{
+			name:        "org_id lands on ClaimedOrgID and leaves ActiveOrgID zero",
+			claims:      map[string]any{"org_id": orgID.String()},
+			wantClaimed: orgID,
+		},
+		{
+			name:        "absent org_id claims nothing",
+			claims:      nil,
+			wantClaimed: uuid.Nil,
+		},
+		{
+			name:    "org_id that is not a uuid is refused",
+			claims:  map[string]any{"org_id": "acme-corp"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := v.Verify(t.Context(), iss.mint(t, "urn:test", tt.claims))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected refusal, got principal %+v", p)
+				}
+				if !tokens.IsInvalidTokenError(err) {
+					t.Fatalf("want *InvalidTokenError, got %T: %v", err, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.ClaimedOrgID != tt.wantClaimed {
+				t.Fatalf("ClaimedOrgID = %v, want %v", p.ClaimedOrgID, tt.wantClaimed)
+			}
+			if p.ActiveOrgID != uuid.Nil {
+				t.Fatalf("ActiveOrgID = %v; a token must not name the active tenant", p.ActiveOrgID)
+			}
+		})
+	}
 }

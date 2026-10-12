@@ -1,0 +1,12 @@
+[
+  {
+    "_meta": {
+      "ui": {
+        "prefersBorder": false
+      }
+    },
+    "mimeType": "text/html;profile=mcp-app",
+    "name": "opensheet app",
+    "uri": "ui://opensheet/app"
+  }
+]

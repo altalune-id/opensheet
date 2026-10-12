@@ -121,34 +121,30 @@ components:
         name:
           type: string
           title: name
-        keyPrefix:
-          type: string
-          title: key_prefix
         scopes:
           type: array
           items:
             type: string
           title: scopes
-        sheetIds:
+        resourceIds:
           type: array
           items:
             type: string
-          title: sheet_ids
+          title: resource_ids
+        createdAt:
+          title: created_at
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
         expiresAt:
           title: expires_at
-          $ref: '#/components/schemas/google.protobuf.Timestamp'
-        lastUsedAt:
-          title: last_used_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
         revokedAt:
           title: revoked_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
-        createdAt:
-          title: created_at
+        lastUsedAt:
+          title: last_used_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: APIKey
       additionalProperties: false
-      description: 'SECURITY: no field of this message may ever carry the plaintext key or its hash; key_prefix is the public half.'
     apikey.v1.CreateRequest:
       type: object
       properties:
@@ -163,26 +159,27 @@ components:
           items:
             type: string
           title: scopes
-        sheetIds:
+        resourceIds:
           type: array
           items:
             type: string
-          title: sheet_ids
+          title: resource_ids
         expiresAt:
           title: expires_at
+          description: 'Required: when the key stops working, in the future and at most one year away'
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: CreateRequest
       additionalProperties: false
     apikey.v1.CreateResponse:
       type: object
       properties:
-        apiKey:
-          title: api_key
+        key:
+          title: key
           $ref: '#/components/schemas/apikey.v1.APIKey'
-        plaintextKey:
+        plaintext:
           type: string
-          title: plaintext_key
-          description: 'SECURITY: the only place the plaintext key is ever returned; no other RPC can retrieve it.'
+          title: plaintext
+          description: plaintext is the one-time secret. It is never present on any other response.
       title: CreateResponse
       additionalProperties: false
     apikey.v1.ListRequest:
@@ -196,11 +193,11 @@ components:
     apikey.v1.ListResponse:
       type: object
       properties:
-        apiKeys:
+        keys:
           type: array
           items:
             $ref: '#/components/schemas/apikey.v1.APIKey'
-          title: api_keys
+          title: keys
       title: ListResponse
       additionalProperties: false
     apikey.v1.RevokeRequest:
@@ -209,17 +206,13 @@ components:
         projectId:
           type: string
           title: project_id
-        apiKeyId:
+        id:
           type: string
-          title: api_key_id
+          title: id
       title: RevokeRequest
       additionalProperties: false
     apikey.v1.RevokeResponse:
       type: object
-      properties:
-        apiKey:
-          title: api_key
-          $ref: '#/components/schemas/apikey.v1.APIKey'
       title: RevokeResponse
       additionalProperties: false
     connect-protocol-version:

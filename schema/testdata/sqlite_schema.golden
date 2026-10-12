@@ -1,14 +1,27 @@
-index opensheet_api_key_sheets_org_idx
-CREATE INDEX opensheet_api_key_sheets_org_idx
-  ON opensheet_api_key_sheets (org_id)
+index opensheet_api_key_projects_org_project_idx
+CREATE INDEX opensheet_api_key_projects_org_project_idx
+  ON opensheet_api_key_projects (org_id, project_id)
 
-index opensheet_api_key_sheets_sheet_idx
-CREATE INDEX opensheet_api_key_sheets_sheet_idx
-  ON opensheet_api_key_sheets (sheet_id)
+index opensheet_api_keys_org_id_id_key
+CREATE UNIQUE INDEX opensheet_api_keys_org_id_id_key
+  ON opensheet_api_keys (org_id, id)
 
-index opensheet_api_keys_org_project_idx
-CREATE INDEX opensheet_api_keys_org_project_idx
+index opensheet_api_keys_org_kind_idx
+CREATE INDEX opensheet_api_keys_org_kind_idx
+  ON opensheet_api_keys (org_id, kind, created_at DESC)
+
+index opensheet_api_keys_personal_owner_idx
+CREATE INDEX opensheet_api_keys_personal_owner_idx
+  ON opensheet_api_keys (org_id, created_by, created_at DESC)
+  WHERE kind = 'personal'
+
+index opensheet_api_keys_project_idx
+CREATE INDEX opensheet_api_keys_project_idx
   ON opensheet_api_keys (org_id, project_id)
+
+index opensheet_api_keys_secret_hash_key
+CREATE UNIQUE INDEX opensheet_api_keys_secret_hash_key
+  ON opensheet_api_keys (secret_hash)
 
 index opensheet_credentials_authorized_by_idx
 CREATE INDEX opensheet_credentials_authorized_by_idx
@@ -26,6 +39,28 @@ CREATE INDEX opensheet_invites_email_pending_idx
 index opensheet_memberships_user_idx
 CREATE INDEX opensheet_memberships_user_idx
   ON opensheet_memberships (user_id)
+
+index opensheet_orgs_one_system
+CREATE UNIQUE INDEX opensheet_orgs_one_system
+  ON opensheet_orgs (system)
+  WHERE system = 1
+
+index opensheet_outbox_entries_due_idx
+CREATE INDEX opensheet_outbox_entries_due_idx
+  ON opensheet_outbox_entries (org_id, status, next_attempt_at)
+
+index opensheet_outbox_entries_org_target_created_idx
+CREATE INDEX opensheet_outbox_entries_org_target_created_idx
+  ON opensheet_outbox_entries (org_id, target, created_at DESC)
+
+index opensheet_projects_one_system
+CREATE UNIQUE INDEX opensheet_projects_one_system
+  ON opensheet_projects (org_id)
+  WHERE system = 1
+
+index opensheet_projects_org_id_id_key
+CREATE UNIQUE INDEX opensheet_projects_org_id_id_key
+  ON opensheet_projects (org_id, id)
 
 index opensheet_sessions_expires_idx
 CREATE INDEX opensheet_sessions_expires_idx
@@ -75,6 +110,11 @@ index opensheet_spreadsheets_org_project_idx
 CREATE INDEX opensheet_spreadsheets_org_project_idx
   ON opensheet_spreadsheets (org_id, project_id)
 
+index opensheet_todos_created_by_key_idx
+CREATE INDEX opensheet_todos_created_by_key_idx
+  ON opensheet_todos (created_by_key_id)
+  WHERE created_by_key_id IS NOT NULL
+
 index opensheet_todos_org_project_created_idx
 CREATE INDEX opensheet_todos_org_project_created_idx
   ON opensheet_todos (org_id, project_id, created_at DESC)
@@ -89,30 +129,46 @@ CREATE UNIQUE INDEX opensheet_users_idp_idx
   ON opensheet_users (idp_issuer, idp_subject)
   WHERE idp_issuer IS NOT NULL
 
-table opensheet_api_key_sheets
-CREATE TABLE opensheet_api_key_sheets (
-  api_key_id          TEXT NOT NULL REFERENCES opensheet_api_keys(id) ON DELETE CASCADE,
-  sheet_id            TEXT NOT NULL REFERENCES opensheet_sheets(id) ON DELETE CASCADE,
-  -- Mirrors the Postgres table, whose org_id exists so the join table can carry its own RLS policy.
-  org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
-  PRIMARY KEY (api_key_id, sheet_id)
+index opensheet_webhook_deliveries_org_delivery_idx
+CREATE INDEX opensheet_webhook_deliveries_org_delivery_idx
+  ON opensheet_webhook_deliveries (org_id, delivery_id)
+
+index opensheet_webhook_endpoints_org_project_idx
+CREATE INDEX opensheet_webhook_endpoints_org_project_idx
+  ON opensheet_webhook_endpoints (org_id, project_id)
+
+table opensheet_api_key_projects
+CREATE TABLE opensheet_api_key_projects (
+  org_id      TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  key_id      TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (key_id, project_id),
+  FOREIGN KEY (org_id, key_id) REFERENCES opensheet_api_keys(org_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id, project_id) REFERENCES opensheet_projects(org_id, id) ON DELETE CASCADE
 )
 
 table opensheet_api_keys
-CREATE TABLE opensheet_api_keys (
+CREATE TABLE "opensheet_api_keys" (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
-  project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  project_id          TEXT REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  kind                TEXT NOT NULL DEFAULT 'project',
+  all_projects        INTEGER NOT NULL DEFAULT 0,
   name                TEXT NOT NULL,
-  key_prefix          TEXT NOT NULL UNIQUE,
-  -- SECURITY: SHA-256 of the 256-bit secret half. The plaintext key is returned once, at mint, and never stored.
   secret_hash         BLOB NOT NULL,
-  -- JSON array of scope strings; SQLite has no array type.
+  secret_hint         TEXT NOT NULL DEFAULT '',
   scopes              TEXT NOT NULL DEFAULT '[]',
+  resource_ids        TEXT NOT NULL DEFAULT '[]',
+  created_by          TEXT REFERENCES opensheet_users(id) ON DELETE SET NULL,
+  created_at          TEXT NOT NULL,
   expires_at          TEXT,
-  last_used_at        TEXT,
   revoked_at          TEXT,
-  created_at          TEXT NOT NULL
+  last_used_at        TEXT,
+  CONSTRAINT opensheet_api_keys_kind_shape CHECK (
+    (kind = 'project' AND project_id IS NOT NULL AND all_projects = 0)
+    OR (kind IN ('org', 'personal') AND project_id IS NULL)
+  )
 )
 
 table opensheet_bootstrap
@@ -173,6 +229,23 @@ CREATE TABLE opensheet_orgs (
   created_by          TEXT NOT NULL REFERENCES opensheet_users(id),
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
+)
+
+table opensheet_outbox_entries
+CREATE TABLE opensheet_outbox_entries (
+  id                  TEXT PRIMARY KEY,
+  event_id            TEXT NOT NULL,
+  org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  target              TEXT NOT NULL,
+  payload             BLOB NOT NULL,
+  attempt             INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at     TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','delivered','failed')),
+  last_error          TEXT NOT NULL DEFAULT '',
+  created_at          TEXT NOT NULL,
+  delivered_at        TEXT,
+  UNIQUE (org_id, event_id, target)
 )
 
 table opensheet_projects
@@ -260,7 +333,7 @@ CREATE TABLE opensheet_sheets (
   cache_ttl_secs      INTEGER NOT NULL DEFAULT 0 CHECK (cache_ttl_secs >= 0 AND cache_ttl_secs <= 86400),
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL,
-  writable            INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0, validated_at TEXT, contract_ok INTEGER NOT NULL DEFAULT 1, contract_reason TEXT NOT NULL DEFAULT '', soft_delete INTEGER NOT NULL DEFAULT 0, content_digest TEXT NOT NULL DEFAULT '',
+  writable            INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0, validated_at TEXT, contract_ok INTEGER NOT NULL DEFAULT 1, contract_reason TEXT NOT NULL DEFAULT '', soft_delete INTEGER NOT NULL DEFAULT 0, content_digest TEXT NOT NULL DEFAULT '', header_columns TEXT NOT NULL DEFAULT '',
   UNIQUE (project_id, slug)
 )
 
@@ -280,15 +353,17 @@ CREATE TABLE opensheet_spreadsheets (
 )
 
 table opensheet_todos
-CREATE TABLE opensheet_todos (
+CREATE TABLE "opensheet_todos" (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
   project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
-  user_id             TEXT NOT NULL REFERENCES opensheet_users(id),
+  user_id             TEXT REFERENCES opensheet_users(id),
+  created_by_key_id   TEXT REFERENCES opensheet_api_keys(id) ON DELETE SET NULL,
   title               TEXT NOT NULL,
   done                INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL
+  updated_at          TEXT NOT NULL,
+  CONSTRAINT opensheet_todos_author_not_both CHECK (user_id IS NULL OR created_by_key_id IS NULL)
 )
 
 table opensheet_users
@@ -305,5 +380,40 @@ CREATE TABLE opensheet_users (
   terms_accepted_at   TEXT,
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
+)
+
+table opensheet_webhook_deliveries
+CREATE TABLE opensheet_webhook_deliveries (
+  id                  TEXT PRIMARY KEY,
+  org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  endpoint_id         TEXT NOT NULL REFERENCES opensheet_webhook_endpoints(id) ON DELETE CASCADE,
+  delivery_id         TEXT NOT NULL,
+  event_id            TEXT NOT NULL,
+  event_type          TEXT NOT NULL,
+  attempt             INTEGER NOT NULL,
+  status_code         INTEGER NOT NULL DEFAULT 0,
+  error               TEXT NOT NULL DEFAULT '',
+  response_body       TEXT NOT NULL DEFAULT '',
+  response_truncated  INTEGER NOT NULL DEFAULT 0,
+  response_headers    TEXT NOT NULL DEFAULT '[]',
+  duration_ms         INTEGER NOT NULL,
+  created_at          TEXT NOT NULL
+)
+
+table opensheet_webhook_endpoints
+CREATE TABLE opensheet_webhook_endpoints (
+  id                  TEXT PRIMARY KEY,
+  org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  project_id          TEXT NOT NULL REFERENCES opensheet_projects(id) ON DELETE CASCADE,
+  url                 TEXT NOT NULL,
+  description         TEXT NOT NULL DEFAULT '',
+  event_types         TEXT NOT NULL,
+  secret_primary      BLOB NOT NULL,
+  secret_secondary    BLOB,
+  active              INTEGER NOT NULL,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  CHECK (secret_secondary IS NULL OR length(secret_secondary) > 0)
 )
 

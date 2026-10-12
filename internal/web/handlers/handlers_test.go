@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -67,7 +68,6 @@ type handlerFixture struct {
 	InvStore  *fakes.Invite
 }
 
-// testStateSecret is 32 bytes as 64 hex characters — the shape docs/CONFIGURATION.md documents and config.ParseStateSecret accepts.
 const testStateSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 func newFixture(t *testing.T) *handlerFixture {
@@ -89,7 +89,7 @@ func newFixture(t *testing.T) *handlerFixture {
 	projects := project.NewService(projStore, discardLogger(), passthroughUnexpected())
 
 	todoStore := fakes.NewTodo()
-	todos := todo.NewService(todoStore, discardLogger(), passthroughUnexpected())
+	todos := todo.NewService(todoStore, discardLogger(), passthroughUnexpected(), &fakes.Queue{})
 
 	onbStore := fakes.NewOnboard()
 	onboards := onboard.NewService(onbStore, discardLogger(), passthroughUnexpected())
@@ -444,8 +444,7 @@ func TestProjectHandler_GetList_UnauthRedirect(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 }
 
-// TestProjectHandler_GetNew_UnknownOrgIs404 replaces the old active-org precondition: the org now comes
-// from the path, so an org the caller does not belong to is indistinguishable from one that does not exist.
+// TestProjectHandler_GetNew_UnknownOrgIs404 replaces the old active-org precondition: the org now comes from the path, so an org the caller does not belong to is indistinguishable from one that does not exist.
 func TestProjectHandler_GetNew_UnknownOrgIs404(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -687,7 +686,7 @@ func TestOnboardHandler_Register_MountsRoutes(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -701,7 +700,7 @@ func TestOnboardHandler_GetOnboard_RedirectsWhenNotRequired(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -715,7 +714,7 @@ func TestOnboardHandler_PostLocal_MissingFields(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -725,7 +724,7 @@ func TestOnboardHandler_PostLocal_MissingFields(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, r)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Enter your email")
+	assert.Contains(t, rec.Body.String(), "onboard.error.email_required")
 }
 
 func TestOnboardHandler_PostLocal_HappyPath(t *testing.T) {
@@ -733,7 +732,8 @@ func TestOnboardHandler_PostLocal_HappyPath(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	var completed atomic.Int32
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, func(context.Context) { completed.Add(1) }, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 
@@ -744,7 +744,51 @@ func TestOnboardHandler_PostLocal_HappyPath(t *testing.T) {
 	mux.ServeHTTP(rec, r)
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.Equal(t, "/", rec.Header().Get("Location"))
-	assert.False(t, req.b.Load(), "required flag should be flipped off")
+	assert.Equal(t, int32(1), completed.Load(), "completion must go through OnComplete exactly once")
+	assert.True(t, req.b.Load(), "the handler must leave Required to OnComplete")
+}
+
+func TestOnboardHandler_PostLocal_SessionWriteFailureStillCompletes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	req := &atomicBoolWrapper{}
+	req.b.Store(true)
+	deps := f.Deps
+	deps.Sessions = &fakes.Sessions{Store: f.Sessions, SaveErr: errors.New("session store down")}
+	var completed atomic.Int32
+	h := handlers.NewOnboardHandler(deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, func(context.Context) { completed.Add(1) }, "")
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	body := "email=admin@example.com&name=Admin&password=secret12&org_slug=acme&org_name=Acme"
+	r := httptest.NewRequest(http.MethodPost, "/onboard/local", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "sign-in failed")
+	assert.Equal(t, int32(1), completed.Load(), "a failed session write must still close onboarding exactly once")
+}
+
+func TestOnboardHandler_PostOIDCComplete_SessionWriteFailureStillCompletes(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+	u, err := f.Users.Create(ctx, user.CreateRequest{Email: "a@b.co", Name: "A", Source: user.SourceOIDC})
+	require.NoError(t, err)
+	req := &atomicBoolWrapper{}
+	req.b.Store(true)
+	r := f.authedRequest(t, http.MethodPost, "/onboard/complete", "org_slug=acme&org_name=Acme", session.Principal{UserID: u.ID, Email: u.Email})
+	deps := f.Deps
+	deps.Sessions = &fakes.Sessions{Store: f.Sessions, SaveErr: errors.New("session store down")}
+	var completed atomic.Int32
+	h := handlers.NewOnboardHandler(deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, func(context.Context) { completed.Add(1) }, "")
+	mux := http.NewServeMux()
+	h.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, int32(1), completed.Load(), "a failed session refresh must still close onboarding exactly once")
 }
 
 func TestOnboardHandler_GetOIDCStart_RedirectsToOIDC(t *testing.T) {
@@ -752,7 +796,7 @@ func TestOnboardHandler_GetOIDCStart_RedirectsToOIDC(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -766,7 +810,7 @@ func TestOnboardHandler_GetOIDCComplete_RedirectsUnauth(t *testing.T) {
 	f := newFixture(t)
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -784,7 +828,7 @@ func TestOnboardHandler_GetOIDCComplete_RendersFinalizeForm(t *testing.T) {
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
 
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
@@ -803,14 +847,16 @@ func TestOnboardHandler_PostOIDCComplete_PromotesAndClears(t *testing.T) {
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
 
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, "")
+	var completed atomic.Int32
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, func(context.Context) { completed.Add(1) }, "")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
 	body := "org_slug=acme&org_name=Acme&project_slug=default&project_name=Default+Project"
 	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/onboard/complete", body, session.Principal{UserID: u.ID, Email: u.Email}))
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.False(t, req.b.Load(), "POST must close onboarding")
+	assert.Equal(t, int32(1), completed.Load(), "POST must close onboarding through OnComplete exactly once")
+	assert.True(t, req.b.Load(), "the handler must leave Required to OnComplete")
 
 	after, err := f.UserStore.ByID(ctx, u.ID)
 	require.NoError(t, err)
@@ -1208,7 +1254,6 @@ type atomicBoolWrapper struct {
 	b atomic.Bool
 }
 
-// seedOrg creates an org and its owner membership, so path-scoped handlers can resolve it.
 func (f *handlerFixture) seedOrg(t *testing.T, slug string, owner uuid.UUID) *org.Org {
 	t.Helper()
 	o, err := f.Orgs.Create(context.Background(), org.CreateRequest{Slug: slug, Name: strings.ToUpper(slug), OwnerID: owner})
@@ -1224,8 +1269,7 @@ func setTenantProject(ctx context.Context, orgID, projectID, userID uuid.UUID) c
 	return tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID, UserID: userID})
 }
 
-// NOTE: a fragment rendered with Deps.Base instead of Deps.fragment loses ActiveOrg, so
-// ProjectPath collapses to /orgs and every swapped form posts there.
+// NOTE: a fragment rendered with Deps.Base instead of Deps.fragment loses ActiveOrg, so ProjectPath collapses to /orgs.
 func TestTodoHandler_FragmentLinksStayProjectScoped(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

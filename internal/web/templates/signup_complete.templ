@@ -16,7 +16,7 @@ type SignupCompleteView struct {
 	ProjectSlug    string
 	FieldErrors    map[string]string
 	Error          string
-	ErrorCode      string
+	ErrorCode string
 }
 
 templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
@@ -55,7 +55,7 @@ templ SignupCompletePage(d web.LayoutData, v SignupCompleteView) {
 				</div>
 				<div>
 					<label for="signup-org-slug" class="block text-sm font-medium text-foreground/90">{ d.Tr("common.slug") }</label>
-					<input id="signup-org-slug" name="org_slug" type="text" required value={ v.OrgSlug } placeholder={ d.Tr("org_new.slug_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					<input id="signup-org-slug" name="org_slug" type="text" value={ v.OrgSlug } placeholder={ d.Tr("org_new.slug_placeholder") } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
 					<p class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("common.slug_hint") }</p>
 					if msg, ok := v.FieldErrors["org_slug"]; ok {
 						<p class="mt-1 text-xs text-red-700">{ msg }</p>

@@ -69,8 +69,6 @@ func TestReadWorkflow_RowByID_UnknownIDIsNotFound(t *testing.T) {
 	}
 }
 
-// TestReadWorkflow_RowByID_DriftFoundByTheRefreshIsAContractViolation is the case a pre-refresh contract
-// read gets wrong: the aggregate still says the contract holds, and only the refresh discovers otherwise.
 func TestReadWorkflow_RowByID_DriftFoundByTheRefreshIsAContractViolation(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
@@ -123,8 +121,6 @@ func TestReadWorkflow_RowByID_FreshSnapshotCostsNoGoogleCall(t *testing.T) {
 	}
 }
 
-// TestReadWorkflow_RowByID_UnnamedTabResolvesFromTheProjection covers an empty sheets.tab, whose real
-// name only Google knows: the busiest projected tab stands in, as Stats resolves it.
 func TestReadWorkflow_RowByID_UnnamedTabResolvesFromTheProjection(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "", sheet.VisibilityKey, 0)
@@ -141,8 +137,6 @@ func TestReadWorkflow_RowByID_UnnamedTabResolvesFromTheProjection(t *testing.T) 
 	}
 }
 
-// TestReadWorkflow_RowByID_ProjectionFailureIsAnIncident keeps a broken store off the not-found path: a
-// 404 would tell the caller the row is gone.
 func TestReadWorkflow_RowByID_ProjectionFailureIsAnIncident(t *testing.T) {
 	for _, tc := range []struct {
 		name string

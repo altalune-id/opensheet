@@ -12,8 +12,9 @@ import (
 )
 
 type sessionFile struct {
-	Principal session.Principal `json:"principal"`
-	IssuedAt  time.Time         `json:"issuedAt"`
+	Principal session.Principal  `json:"principal"`
+	IssuedAt  time.Time          `json:"issuedAt"`
+	Profiles  map[string]profile `json:"profiles,omitempty"`
 }
 
 func loadSessionFile(path string) (*sessionFile, error) {

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+service PlainService {
+  rpc Plain(PlainRequest) returns (PlainResponse);
+}
+
+message PlainRequest {}
+
+message PlainResponse {}

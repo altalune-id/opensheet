@@ -672,7 +672,6 @@ func TestSQLiteRowStore_UpsertRow_ClearsTheDigestSoOutstandingCursorsAreRefused(
 	assert.Greater(t, after.Generation, settled.Generation, "a write always bumps")
 }
 
-// queryFixtureRows is the shared filter fixture both drivers seed: interior row_index gaps, one tombstone, an empty cell, a missing key, and values that become wildcards if a LIKE pattern is not escaped.
 func queryFixtureRows(deletedAt *time.Time) []sheet.ProjectedRow {
 	return []sheet.ProjectedRow{
 		{RowID: "r1", RowIndex: 0, Data: gsheet.Row{
@@ -730,7 +729,6 @@ type queryCase struct {
 	want  []string
 }
 
-// queryCases is every operator against queryFixtureRows, asserted by row id in row_index order.
 func queryCases() []queryCase {
 	return []queryCase{
 		{"eq", []string{"status:eq:open"}, []string{"r1", "r4", "r6", "r7"}},
@@ -915,7 +913,6 @@ func TestSQLiteRowStore_Query_IsScopedToOneTab(t *testing.T) {
 	assert.False(t, page.More)
 }
 
-// typedFixtureRows is the shared typed-filter fixture both drivers seed: in-grammar numbers, out-of-grammar numbers, a NaN, date shapes the grammar admits and shapes it refuses, an empty cell and a missing key.
 func typedFixtureRows() []sheet.ProjectedRow {
 	return []sheet.ProjectedRow{
 		{RowID: "t1", RowIndex: 0, Data: gsheet.Row{"id": "t1", "qty": "10", "net.qty": "12", "when": "2026-01-02"}},
@@ -937,7 +934,6 @@ func typedFixtureColumns() []string {
 	return []string{"id", "net.qty", "qty", "when"}
 }
 
-// typedQueryCases is every hintable operator under both hints against typedFixtureRows, asserted by row id in row_index order.
 func typedQueryCases() []queryCase {
 	return []queryCase{
 		{"num gt", []string{"qty:num.gt:9"}, []string{"t1", "t7"}},
@@ -970,7 +966,6 @@ func typedQueryCases() []queryCase {
 	}
 }
 
-// numBoundaryFixtureRows lays every case in the num grammar table out as one row, so what a num comparison returns is exactly the set the grammar admits.
 func numBoundaryFixtureRows() []sheet.ProjectedRow {
 	cases := numGrammarCases()
 	out := make([]sheet.ProjectedRow, 0, len(cases))
@@ -987,7 +982,6 @@ func numFixtureColumns() []string {
 	return []string{"id", "qty"}
 }
 
-// numBoundaryCases asserts all six hinted operators against the grammar table, deriving the wanted ids from ParseNum so a driver that admits one value more or one fewer than the Go grammar fails.
 func numBoundaryCases(t *testing.T, operand string) []queryCase {
 	t.Helper()
 	pivot, ok := sheet.ParseNum(operand)
@@ -1024,7 +1018,6 @@ func numBoundaryCases(t *testing.T, operand string) []queryCase {
 	return out
 }
 
-// nonFiniteFixtureRows holds the values Postgres calls valid numerics and the grammar refuses: 'NaN'::numeric outranks every finite value, so one such cell would dominate under a pg_input_is_valid guard.
 func nonFiniteFixtureRows() []sheet.ProjectedRow {
 	return []sheet.ProjectedRow{
 		{RowID: "n1", RowIndex: 0, Data: gsheet.Row{"id": "n1", "qty": "NaN"}},
@@ -1045,7 +1038,6 @@ func nonFiniteCases() []queryCase {
 	}
 }
 
-// significancePairRows holds the pair spec section 2 measures: both match NumPattern, Postgres calls them distinct and float64 calls them equal, so only the significance half of the guard keeps the drivers from disagreeing.
 func significancePairRows() []sheet.ProjectedRow {
 	return []sheet.ProjectedRow{
 		{RowID: "s1", RowIndex: 0, Data: gsheet.Row{"id": "s1", "qty": "123456789012345.1"}},
@@ -1161,7 +1153,6 @@ func (f sortedWalkFixture) query(t *testing.T, dir string) sheet.RowQuery {
 	return q
 }
 
-// sortedWalkFixtures covers the fixture spec section 9 assertion 2 names — two nulls, three rows sharing a sort value, a row_index gap and a tombstone — under all three hints, then repeats it with numerically equal but textually distinct values, with a blank cell against a missing key, and over an all-null column.
 func sortedWalkFixtures() []sortedWalkFixture {
 	shared := [][]string{{"1", "4"}, {"6", "0"}, {"7", "2"}, {"5"}}
 	sharedDesc := [][]string{{"7", "0"}, {"1", "4"}, {"6", "2"}, {"5"}}
@@ -1217,7 +1208,6 @@ func sortedWalkFixtures() []sortedWalkFixture {
 	}
 }
 
-// sortedFixtureRows ranks identically under all three hints: rows 1, 4 and 6 share a sort value, row 0 is above them and row 7 above that, rows 2 and 5 are null in every domain, row_index skips 3 and 7, and the tombstoned row would sort first in every direction if the tombstone leaked.
 func sortedFixtureRows() []sheet.ProjectedRow {
 	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
 	return []sheet.ProjectedRow{
@@ -1243,7 +1233,6 @@ func sortedFixtureColumns() []string {
 	return []string{"id", "name", "qty", "when"}
 }
 
-// equalNumSortedFixtureRows is the same ranking spelled so the tie is numeric and not textual: a cursor compared as text repeats row 1 on the second page.
 func equalNumSortedFixtureRows() []sheet.ProjectedRow {
 	deletedAt := time.Date(2026, 9, 11, 4, 5, 6, 0, time.UTC)
 	return []sheet.ProjectedRow{
@@ -1258,7 +1247,6 @@ func equalNumSortedFixtureRows() []sheet.ProjectedRow {
 	}
 }
 
-// blankSortedFixtureRows pins the consequence spec section 4.1 documents: under a text sort a blank cell ranks 0 and sorts first, a missing key ranks null and sorts last, so empty cells appear at both ends.
 func blankSortedFixtureRows() []sheet.ProjectedRow {
 	return []sheet.ProjectedRow{
 		{RowID: "b0", RowIndex: 0, Data: gsheet.Row{"id": "b0", "name": ""}},
@@ -1286,7 +1274,6 @@ func allNullSortedFixtureRows() []sheet.ProjectedRow {
 
 type rowPager func(sheet.RowQuery) (sheet.RowPage, error)
 
-// walkSortedPages pages a sorted read to exhaustion through the production cursor derivation and the real v2 envelope, and refuses a repeat as it happens.
 func walkSortedPages(t *testing.T, pager rowPager, base sheet.RowQuery) [][]string {
 	t.Helper()
 	require.NotNil(t, base.Sort, "an unsorted walk is 3a's and has its own test")
@@ -1425,4 +1412,137 @@ func TestSQLiteRowStore_Query_AForgedSortedCursorIsRefused(t *testing.T) {
 				"a hand-edited cursor is the caller's mistake, not a 500: %v", err)
 		})
 	}
+}
+
+func seedSQLiteSheetWith(t *testing.T, f *fixture, edit func(*sheet.Sheet)) *sheet.Sheet {
+	t.Helper()
+	sh, err := sheet.New(sheet.NewParams{
+		OrgID: f.orgID, ProjectID: f.projectID, SpreadsheetID: f.spreadsheetID,
+		Tab: "Rates", Slug: "prices", Visibility: sheet.VisibilityKey,
+	})
+	require.NoError(t, err)
+	edit(sh)
+	require.NoError(t, f.store.Save(f.ctx(), sh))
+	return sh
+}
+
+func TestSQLiteRowStore_RefreshAndDriftPersistTheHeaderColumns(t *testing.T) {
+	f := newSQLiteFixture(t)
+	store := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	k := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+
+	ok, err := store.Replace(f.ctx(), k, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name", "email"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name", "email"}, got.HeaderColumns, "a refresh of a header-only tab must keep its header row")
+	state, err := store.StateOf(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name", "email"}, state.Contract.HeaderColumns)
+
+	ok, err = store.MarkContract(f.ctx(), sh.ID, got.Generation,
+		sheet.ContractState{Reason: "no id column", HeaderColumns: []string{"name", "email"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	drifted, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"name", "email"}, drifted.HeaderColumns, "drift must persist the header row the refresh read")
+}
+
+func TestSQLiteStore_SaveRoundTripsTheHeaderColumns(t *testing.T) {
+	for name, cols := range map[string][]string{
+		"never read":         nil,
+		"read and empty":     {},
+		"read with a header": {"id", "name", "email"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newSQLiteFixture(t)
+			sh := seedSQLiteSheetWith(t, f, func(sh *sheet.Sheet) { sh.HeaderColumns = cols })
+
+			got, err := f.store.ByID(f.ctx(), sh.ID)
+			require.NoError(t, err)
+			assert.Equal(t, cols, got.HeaderColumns, "nil means never read and must not read back as an empty header row")
+		})
+	}
+}
+
+func TestSQLiteStore_HeaderColumnsSurviveAnUpsertOnTheSameTab(t *testing.T) {
+	f := newSQLiteFixture(t)
+	rows := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	ok, err := rows.Replace(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	sh.SetWritable(true)
+	sh.Retab("Rates")
+	require.NoError(t, f.store.Save(f.ctx(), sh))
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id", "name"}, got.HeaderColumns,
+		"a metadata edit must not write back the header row it loaded before a refresh")
+}
+
+func TestSQLiteStore_RetabForgetsTheHeaderColumns(t *testing.T) {
+	f := newSQLiteFixture(t)
+	rows := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	ok, err := rows.Replace(f.ctx(), sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}, 0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "name"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(f.ctx(), sh))
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.HeaderColumns, "the old tab's header row must not describe the new tab")
+}
+
+func TestSQLiteStore_UpsertOnTheSameTabLeavesTheGenerationAlone(t *testing.T) {
+	f := newSQLiteFixture(t)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	bumpSQLiteGeneration(t, f, sh.ID)
+
+	sh.SetWritable(true)
+	sh.Retab("Rates")
+	require.NoError(t, f.store.Save(f.ctx(), sh))
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, got.Generation, "only a tab change moves the generation")
+}
+
+func TestSQLiteRowStore_ARefreshOfTheOldTabIsDiscardedAfterARetab(t *testing.T) {
+	f := newSQLiteFixture(t)
+	rows := newSQLiteRowStore(t, f)
+	sh := seedSQLiteSheet(t, f, "prices", "Rates")
+	old := sheet.SnapshotKey{SheetID: sh.ID, Tab: "Rates"}
+	gen0, err := rows.LockSheet(f.ctx(), sh.ID)
+	require.NoError(t, err)
+
+	sh.Retab("Harga")
+	require.NoError(t, f.store.Save(f.ctx(), sh))
+
+	ok, err := rows.Replace(f.ctx(), old, gen0, nil,
+		sheet.ContractState{OK: true, HeaderColumns: []string{"id", "old"}})
+	require.NoError(t, err)
+	assert.False(t, ok, "a refresh that read the old tab must not commit after a retab")
+	ok, err = rows.MarkContract(f.ctx(), sh.ID, gen0,
+		sheet.ContractState{Reason: "no id column", HeaderColumns: []string{"old"}})
+	require.NoError(t, err)
+	assert.False(t, ok, "a drift finding about the old tab must not commit after a retab")
+
+	got, err := f.store.ByID(f.ctx(), sh.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.HeaderColumns)
+	assert.True(t, got.ContractOK)
 }

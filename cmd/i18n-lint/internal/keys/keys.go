@@ -18,7 +18,9 @@ import (
 type Options struct {
 	TemplatesDir string
 	LocalesDir   string
-	Fix          bool
+	// SourceDirs are scanned for .go callsites and //i18n:use directives. Empty skips the Go scan.
+	SourceDirs []string
+	Fix        bool
 }
 
 // Usage records where a callsite lives.
@@ -27,6 +29,21 @@ type Usage struct {
 	Line   int
 	Key    string
 	Plural bool
+}
+
+// Claim records an //i18n:use directive naming a key a handler resolves at runtime.
+type Claim struct {
+	Path   string
+	Line   int
+	Value  string
+	Prefix bool
+}
+
+func (c Claim) matches(key string) bool {
+	if c.Prefix {
+		return strings.HasPrefix(key, c.Value)
+	}
+	return key == c.Value
 }
 
 // LocaleFile is a parsed locale YAML with its message tree.
@@ -40,6 +57,8 @@ type LocaleFile struct {
 // Report bundles the outcome of a scan.
 type Report struct {
 	Templates         []string
+	Sources           []string
+	Claims            []Claim
 	Locales           []*LocaleFile
 	Usages            []Usage
 	Used              map[string]bool
@@ -55,6 +74,22 @@ func Run(opts Options) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan templates: %w", err)
 	}
+	tmplPaths := uniquePaths(usages)
+	sort.Strings(tmplPaths)
+
+	goUsages, claims, err := scanGo(opts.SourceDirs)
+	if err != nil {
+		return nil, fmt.Errorf("scan go sources: %w", err)
+	}
+	usages = append(usages, goUsages...)
+	sourcePaths := uniquePaths(goUsages)
+	for _, c := range claims {
+		if !slices.Contains(sourcePaths, c.Path) {
+			sourcePaths = append(sourcePaths, c.Path)
+		}
+	}
+	sort.Strings(sourcePaths)
+
 	locales, err := loadLocales(opts.LocalesDir)
 	if err != nil {
 		return nil, fmt.Errorf("load locales: %w", err)
@@ -66,6 +101,12 @@ func Run(opts Options) (*Report, error) {
 		used[u.Key] = true
 		if u.Plural {
 			pluralKeys[u.Key] = true
+		}
+	}
+	// NOTE: only an exact claim asserts the key exists; a prefix claim just suppresses dead keys.
+	for _, c := range claims {
+		if !c.Prefix {
+			used[c.Value] = true
 		}
 	}
 
@@ -88,7 +129,7 @@ func Run(opts Options) (*Report, error) {
 		sort.Strings(incomplete[l.Locale])
 	}
 
-	dead := deadKeys(locales, used)
+	dead := deadKeys(locales, used, claims)
 
 	if opts.Fix {
 		if err := applyFix(locales, missing); err != nil {
@@ -96,11 +137,10 @@ func Run(opts Options) (*Report, error) {
 		}
 	}
 
-	templatesList := uniquePaths(usages)
-	sort.Strings(templatesList)
-
 	return &Report{
-		Templates:         templatesList,
+		Templates:         tmplPaths,
+		Sources:           sourcePaths,
+		Claims:            claims,
 		Locales:           locales,
 		Usages:            usages,
 		Used:              used,
@@ -114,6 +154,7 @@ func Run(opts Options) (*Report, error) {
 // Print writes a human-readable summary to w.
 func (r *Report) Print(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "templates: %d files, %d callsites, %d unique keys\n", len(r.Templates), len(r.Usages), len(r.Used))
+	_, _ = fmt.Fprintf(w, "go files:  %d files, %d //i18n:use claims\n", len(r.Sources), len(r.Claims))
 	_, _ = fmt.Fprintf(w, "locales:   %d files\n", len(r.Locales))
 	if len(r.Missing) > 0 {
 		_, _ = fmt.Fprintln(w, "\nmissing keys per locale:")
@@ -142,7 +183,7 @@ func (r *Report) Print(w io.Writer) {
 		}
 	}
 	if len(r.Dead) > 0 {
-		_, _ = fmt.Fprintln(w, "\ndead keys (present in some locale but never used in templates):")
+		_, _ = fmt.Fprintln(w, "\ndead keys (in a locale, referenced by no template, Go callsite or //i18n:use claim):")
 		for _, k := range r.Dead {
 			_, _ = fmt.Fprintf(w, "  - %s\n", k)
 		}
@@ -291,19 +332,29 @@ func requiredPluralForms(locale string) []string {
 	}
 }
 
-func deadKeys(locales []*LocaleFile, used map[string]bool) []string {
+func deadKeys(locales []*LocaleFile, used map[string]bool, claims []Claim) []string {
 	seen := map[string]bool{}
 	for _, l := range locales {
 		collectLeafKeys(l.Values, "", seen)
 	}
 	var dead []string
 	for k := range seen {
-		if !used[k] {
-			dead = append(dead, k)
+		if used[k] || claimed(claims, k) {
+			continue
 		}
+		dead = append(dead, k)
 	}
 	sort.Strings(dead)
 	return dead
+}
+
+func claimed(claims []Claim, key string) bool {
+	for _, c := range claims {
+		if c.matches(key) {
+			return true
+		}
+	}
+	return false
 }
 
 func collectLeafKeys(values map[string]any, prefix string, out map[string]bool) {

@@ -6,38 +6,40 @@ import (
 	stdlog "log"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 
-	"altalune.id/opensheet/internal/api"
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/auth"
-	"altalune.id/opensheet/internal/data"
+	"altalune.id/opensheet/internal/controlplane"
+	"altalune.id/opensheet/internal/dataplane"
 	i18npkg "altalune.id/opensheet/internal/i18n"
-	"altalune.id/opensheet/internal/invite"
-	"altalune.id/opensheet/internal/onboard"
-	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/ingest"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
-	"altalune.id/opensheet/internal/project"
-	"altalune.id/opensheet/internal/todo"
-	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/web"
 	webhandlers "altalune.id/opensheet/internal/web/handlers"
 	webmw "altalune.id/opensheet/internal/web/middleware"
 )
 
-func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.Server, http.Handler) {
-	srv := api.New(api.Deps{
-		Cfg: cfg, Kernel: k, Authn: s.Authn,
-		Auths: s.Auth, Users: s.Users, Orgs: s.Orgs, Projects: s.Projects,
-		Todos: s.Todos, Invites: s.Invites, Credentials: s.Credentials,
-		Spreadsheets: s.Spreadsheets, Sheets: s.Sheets, APIKeys: s.APIKeys,
+func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*controlplane.Server, http.Handler) {
+	srv := controlplane.New(cfg, k, controlplane.Deps{
+		Auths:    s.Auth,
+		Users:    s.Users,
+		Orgs:     s.Orgs,
+		Projects: s.Projects,
+		Invites:  s.Invites,
+
+		Credentials:       s.Credentials,
 		CredentialConnect: s.Connect,
-		TodoStore:         s.TodoStore,
+		Spreadsheets:      s.Spreadsheets,
+		Sheets:            s.Sheets,
 	})
+	srv.Authn = s.Authn
+	srv.KeyPrefix = s.KeyAuthn.Scheme().Prefix()
+	srv.APIKeys = s.APIKeys
 	if !cfg.API.Enabled {
 		return srv, nil
 	}
@@ -45,12 +47,14 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services) (*api.
 	return srv, h
 }
 
-// NOTE: the data plane is built regardless of api.enabled — that flag gates only the RPC surface.
-func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *slog.Logger, s *Services) http.Handler {
-	return data.NewHandler(data.HandlerParams{
+func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, slogger *slog.Logger, s *Services) http.Handler {
+	if !caps.DataPlaneEnabled {
+		return nil
+	}
+	return dataplane.NewSheetHandler(dataplane.SheetHandlerParams{
 		BasePath:   cfg.HTTP.BasePath,
-		Orgs:       orgsForData{svc: s.Orgs},
-		Projects:   projectsForData{svc: s.Projects},
+		Orgs:       orgServiceForDataplane{svc: s.Orgs},
+		Projects:   projectServiceForDataplane{svc: s.Projects},
 		Sheets:     sheetsForData{svc: s.Sheets},
 		Reader:     s.Read,
 		Inspector:  s.Read,
@@ -58,82 +62,124 @@ func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, log *s
 		Writer:     s.Write,
 		Tabs:       s.Spreadsheets,
 		Authz:      s.KeyAuthn,
-		Caps:       capsForSheet{caps: caps},
+		Caps:       caps,
 		DefaultTTL: cfg.Cache.DefaultTTL,
-		Log:        log,
+		Log:        slogger,
 	})
 }
 
-func buildWebHandler(
-	cfg *config.Config,
-	kernel *platform.Kernel,
-	caps capabilities.Capabilities,
-	slogger *slog.Logger,
-	reporter *apperror.Reporter,
-	healthOK func() bool,
-	auths *auth.Service,
-	users *user.Service,
-	orgs *org.Service,
-	projects *project.Service,
-	todos *todo.Service,
-	invites *invite.Service,
-	svcs *Services,
-	onboards *onboard.Service,
-	required *atomic.Bool,
-	setupToken string,
-	apiHandler http.Handler,
-	dataHandler http.Handler,
-	bundle *i18npkg.Bundle,
-	defaultLoc i18npkg.Locale,
-	stateSecret []byte,
-) (http.Handler, error) {
-	deps, err := newWebDeps(cfg, caps, kernel.Sessions, slogger, stateSecret)
-	if err != nil {
-		return nil, fmt.Errorf("boot: web deps: %w", err)
-	}
-	deps.Orgs = orgs
-	deps.Projects = projects
-	deps.I18n = bundle
+// NOTE: always mounted, so /hooks/ is reserved rather than reaching the console chain.
+func buildIngestHandler(cfg *config.Config, log *slog.Logger) http.Handler {
+	return ingest.NewHandler(ingest.HandlerParams{
+		BasePath: web.Path(cfg.HTTP.BasePath, "/hooks"),
+		Log:      log,
+	})
+}
 
-	authHandler := webhandlers.NewAuthHandler(deps, auths, users, orgs, projects, kernel.AltAuth, required)
-	onboardingHandler := webhandlers.NewOnboardingHandler(deps, users)
-	onboardHandler := webhandlers.NewOnboardHandler(deps, users, orgs, projects, onboards, required, setupToken)
-	homeHandler := webhandlers.NewHomeHandler(deps, orgs, projects)
-	orgHandler := webhandlers.NewOrgHandler(deps, orgs)
-	projectHandler := webhandlers.NewProjectHandler(deps, projects)
-	todoHandler := webhandlers.NewTodoHandler(deps, projects, todos)
-	credentialHandler := webhandlers.NewCredentialHandler(deps, projects, svcs.Credentials, svcs.Connect)
-	spreadsheetHandler := webhandlers.NewSpreadsheetHandler(deps, projects, svcs.Spreadsheets, svcs.Credentials)
-	sheetHandler := webhandlers.NewSheetHandler(deps, projects, svcs.Sheets, svcs.Spreadsheets, svcs.Read, svcs.Fix)
-	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, projects, svcs.APIKeys, svcs.Sheets)
-	googleHandler := webhandlers.NewGoogleConnectHandler(deps, projects, svcs.Credentials, svcs.Connect)
-	inviteHandler := webhandlers.NewInviteHandler(deps, orgs, invites)
-	localeHandler := webhandlers.NewLocaleHandler(deps, users)
-	welcomeHandler := webhandlers.NewWelcomeHandler(deps, users)
-	signupHandler := webhandlers.NewSignupHandler(deps, users, orgs, projects)
+type webHandlerDeps struct {
+	Cfg         *config.Config
+	Kernel      *platform.Kernel
+	Caps        capabilities.Capabilities
+	Log         *slog.Logger
+	Reporter    *apperror.Reporter
+	HealthOK    func() bool
+	Services    *Services
+	Required    *atomic.Bool
+	OnComplete  func(ctx context.Context)
+	SetupToken  string
+	StateSecret []byte
+	APIHandler  http.Handler
+	DataHandler http.Handler
+	MCP         mcpSurface
+	Bundle      *i18npkg.Bundle
+	DefaultLoc  i18npkg.Locale
+}
+
+func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, err error) { //nolint:nonamedreturns // three return values differ in role
+	cfg, kernel, slogger, svcs := d.Cfg, d.Kernel, d.Log, d.Services
+	deps, err := newWebDeps(cfg, d.Caps, kernel.Sessions, slogger, d.StateSecret)
+	if err != nil {
+		return nil, nil, err
+	}
+	deps.Orgs = svcs.Orgs
+	deps.Projects = svcs.Projects
+	deps.I18n = d.Bundle
+
+	authHandler := webhandlers.NewAuthHandler(deps, svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, kernel.AltAuth, d.Required)
+	onboardingHandler := webhandlers.NewOnboardingHandler(deps, svcs.Users)
+	onboardHandler := webhandlers.NewOnboardHandler(deps, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Onboards, d.Required, d.OnComplete, d.SetupToken)
+	homeHandler := webhandlers.NewHomeHandler(deps, svcs.Orgs, svcs.Projects)
+	orgHandler := webhandlers.NewOrgHandler(deps, svcs.Orgs)
+	projectHandler := webhandlers.NewProjectHandler(deps, svcs.Projects)
+	todoHandler := webhandlers.NewTodoHandler(deps, svcs.Projects, svcs.Todos)
+	apiKeyHandler := webhandlers.NewAPIKeyHandler(deps, svcs.Projects, svcs.APIKeys).WithResources(webhandlers.SheetResources(svcs.Sheets))
+	webhookHandler := webhandlers.NewWebhookHandler(deps, svcs.Projects, svcs.Webhooks)
+	inviteHandler := webhandlers.NewInviteHandler(deps, svcs.Orgs, svcs.Invites)
+	localeHandler := webhandlers.NewLocaleHandler(deps, svcs.Users)
+	welcomeHandler := webhandlers.NewWelcomeHandler(deps, svcs.Users)
+	signupHandler := webhandlers.NewSignupHandler(deps, svcs.Users, svcs.Orgs, svcs.Projects)
 	legalHandler := webhandlers.NewLegalHandler(deps)
 
 	errTmpl := webmw.LogError{Log: slogger}
 
-	return web.NewServer(web.ServerOpts{
+	handler, routes = web.NewServerWithRoutes(web.ServerOpts{
 		BasePath: cfg.HTTP.BasePath,
-		HealthOK: healthOK,
-		AppHandlers: []web.Register{
-			authHandler, onboardingHandler, onboardHandler, homeHandler, orgHandler, projectHandler, todoHandler,
-			credentialHandler, spreadsheetHandler, sheetHandler, apiKeyHandler, googleHandler,
-			inviteHandler, localeHandler, welcomeHandler, signupHandler, legalHandler,
-		},
-		APIHandler:  apiHandler,
-		DataHandler: dataHandler,
-		RobotsCfg:   &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
-		Middlewares: []web.Middleware{
-			webmw.RequestID,
-			webmw.RequestLog(slogger),
-			webmw.OTel,
+		HealthOK: d.HealthOK,
+		AppHandlers: publishedConsoleHandlers(append([]web.Register{
+			authHandler,
+			onboardingHandler,
+			onboardHandler,
+			homeHandler,
+			orgHandler,
+			projectHandler,
+			todoHandler,
+			apiKeyHandler,
+			webhookHandler,
+			inviteHandler,
+			localeHandler,
+			welcomeHandler,
+			signupHandler,
+			legalHandler,
+		}, opensheetConsoleHandlers(deps, svcs)...)),
+		APIHandler:         d.APIHandler,
+		DataHandler:        d.DataHandler,
+		IngestHandler:      buildIngestHandler(cfg, slogger),
+		MCPHandler:         d.MCP.Handler,
+		MCPMetadataHandler: d.MCP.Metadata,
+		MCPMetadataPath:    d.MCP.MetadataPath,
+		MCPChallengeRoutes: d.MCP.ChallengeRoutes,
+		RobotsCfg:          &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
+		Chains:             surfaceChains(cfg, kernel, slogger, d.Reporter, errTmpl, d.Bundle, d.DefaultLoc, d.Required, deps.SecretBytes()),
+	})
+	return handler, routes, nil
+}
+
+func surfaceChains(
+	cfg *config.Config,
+	kernel *platform.Kernel,
+	slogger *slog.Logger,
+	reporter *apperror.Reporter,
+	errTmpl webmw.ErrorTemplate,
+	bundle *i18npkg.Bundle,
+	defaultLoc i18npkg.Locale,
+	required *atomic.Bool,
+	secret []byte,
+) web.SurfaceChains {
+	edge := []web.Middleware{
+		webmw.RequestID,
+		webmw.RequestLog(slogger),
+		webmw.OTel,
+	}
+	return web.SurfaceChains{
+		Probes: slices.Concat(edge, []web.Middleware{
+			webmw.Recover(reporter.Unexpected, nil),
+		}),
+		Console: slices.Concat(edge, []web.Middleware{
+			webmw.CSP(cspOptions(cfg.HTTP.CSP)),
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
-				Secret: deps.SecretBytes(),
+				Secret: secret,
 			}),
 			webmw.Tenant,
 			i18npkg.Middleware(i18npkg.MiddlewareOpts{
@@ -143,8 +189,18 @@ func buildWebHandler(
 			}),
 			webhandlers.OnboardingGate(cfg.HTTP.BasePath, required),
 			webhandlers.WelcomeGate(cfg.HTTP.BasePath, cfg.Compliance.RequireAcceptance),
-		},
-	}), nil
+		}),
+		Control: edge,
+		Data: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+		Ingest: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+		MCP: slices.Concat(edge, []web.Middleware{
+			webmw.RecoverJSON(reporter.Unexpected),
+		}),
+	}
 }
 
 func healthOnlyHandler(cfg *config.Config, healthOK func() bool) http.Handler {
@@ -172,8 +228,7 @@ func sessionLocaleLookup(ctx context.Context) string {
 	return session.PrincipalFrom(ctx).Locale
 }
 
-func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store,
-	slogger *slog.Logger, stateSecret []byte) (webhandlers.Deps, error) {
+func newWebDeps(cfg *config.Config, caps capabilities.Capabilities, sessions session.Store, slogger *slog.Logger, stateSecret []byte) (webhandlers.Deps, error) {
 	return webhandlers.NewDeps(webhandlers.Deps{
 		Cfg:      cfg,
 		Caps:     caps,
@@ -189,4 +244,12 @@ func (w logSlogWriter) Write(p []byte) (int, error) {
 		w.log.Info(strings.TrimRight(string(p), "\n"))
 	}
 	return len(p), nil
+}
+
+func cspOptions(cfg config.CSPConfig) webmw.CSPOptions {
+	return webmw.CSPOptions{
+		Enabled:    cfg.Enabled,
+		ReportOnly: cfg.ReportOnly,
+		ReportURI:  cfg.ReportURI,
+	}
 }

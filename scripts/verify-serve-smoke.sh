@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# verify-serve-smoke.sh
-# Boots `opensheet serve` against an ephemeral SQLite DB on a random port,
-# curls /healthz, sends SIGTERM, and asserts clean shutdown within 10s.
+# Boots `opensheet serve` on ephemeral SQLite, curls /healthz, then asserts a clean SIGTERM shutdown.
 set -uo pipefail
 
 cd "$(dirname -- "$0")/.."
 
 tmpdir=$(mktemp -d -t opensheet-smoke.XXXXXX)
 
-# Always build fresh -- `./bin/opensheet` is committed and can be stale relative
-# to the current tree (e.g. missing RequestLog middleware). Build once here.
+# NOTE: build fresh -- the committed ./bin/opensheet can be stale relative to the tree.
 BIN="${tmpdir}/opensheet"
 if ! go build -o "$BIN" ./cmd/opensheet; then
     echo "go build ./cmd/opensheet failed" >&2
@@ -24,8 +21,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Random loopback port. 0 lets the kernel choose but opensheet only reads a fixed
-# addr, so pick from the ephemeral range with a small collision retry.
+# opensheet only reads a fixed addr, so pick from the ephemeral range with a collision retry.
 pick_port() {
     for _ in 1 2 3 4 5; do
         p=$(( (RANDOM % 20000) + 40000 ))
@@ -55,7 +51,6 @@ logfile="${tmpdir}/serve.log"
 "$BIN" serve >"$logfile" 2>&1 &
 SERVE_PID=$!
 
-# Wait up to 15s for /healthz.
 ready=0
 for _ in $(seq 1 60); do
     if ! kill -0 "$SERVE_PID" 2>/dev/null; then
@@ -76,13 +71,51 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
-# Fire one more request that will produce a log line for /healthz inspection.
 curl -sf -o /dev/null "http://${ADDR}/healthz" || true
 
-# Let the middleware flush its request log before we terminate.
+# NOTE: d.Static only builds a URL, so an unvendored build serves a 200 page whose assets all 404.
+check_asset() {
+    local asset floor result code size
+    asset="$1"
+    floor="$2"
+    result=$(curl -s -o "${tmpdir}/${asset}" -w "%{http_code} %{size_download}" "http://${ADDR}/static/${asset}")
+    code="${result%% *}"
+    size="${result##* }"
+    if [ "$code" != "200" ]; then
+        echo "GET /static/${asset} returned ${code}, want 200 -- was \`make ui-vendor\` run before the build?" >&2
+        cat "$logfile" >&2
+        exit 1
+    fi
+    case "$size" in
+        ''|*[!0-9]*)
+            echo "GET /static/${asset} reported a non-numeric size ${size}" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$size" -lt "$floor" ]; then
+        echo "GET /static/${asset} returned ${size} bytes, want >= ${floor}" >&2
+        exit 1
+    fi
+}
+
+check_asset app.css          5000
+check_asset basecoat.css   100000
+check_asset htmx.min.js     20000
+check_asset hx-csp.min.js     500
+check_asset easymde.min.js 300000
+check_asset easymde.min.css 10000
+
+# A relative @import resolves against /static/ at render time and 404s silently.
+for css in app.css basecoat.css; do
+    if grep -q '@import' "${tmpdir}/${css}"; then
+        echo "/static/${css} contains an @import -- vendored CSS must be self-contained" >&2
+        grep -n '@import' "${tmpdir}/${css}" >&2
+        exit 1
+    fi
+done
+
 sleep 0.5
 
-# SIGTERM and time the shutdown window.
 kill -TERM "$SERVE_PID"
 shutdown_start=$(date +%s)
 for _ in $(seq 1 40); do
@@ -118,7 +151,12 @@ if [ "$elapsed" -gt 10 ]; then
     exit 1
 fi
 
-# Persist the log location for follow-on checks.
+if grep -E '"level":"ERROR"| ERROR ' "$logfile" >/dev/null; then
+    echo "a clean shutdown logged at ERROR; log:" >&2
+    cat "$logfile" >&2
+    exit 1
+fi
+
 mkdir -p .cache
 cp "$logfile" .cache/verify-serve.log 2>/dev/null || true
 

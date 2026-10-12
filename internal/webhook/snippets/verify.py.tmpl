@@ -1,0 +1,40 @@
+import hashlib
+import hmac
+import os
+import re
+import time
+
+from flask import Flask, abort, request
+
+TOLERANCE_SECONDS = 300
+
+app = Flask(__name__)
+
+
+def verify_webhook(secret, headers, body, now=None):
+    ts = headers.get("{{.Timestamp}}", "")
+    if not re.fullmatch(r"[0-9]+", ts):
+        return False
+    now = time.time() if now is None else now
+    if abs(now - int(ts)) > TOLERANCE_SECONDS:
+        return False
+    mac = hmac.new(secret.encode("utf-8"), ts.encode("ascii") + b"." + body, hashlib.sha256)
+    want = ("{{.Scheme}}" + mac.hexdigest()).encode("ascii")
+    return any(
+        hmac.compare_digest(sig.encode("utf-8"), want)
+        for sig in headers.get("{{.Signature}}", "").split()
+    )
+
+
+@app.post("/webhooks")
+def receive_webhook():
+    if not verify_webhook(os.environ["OPENSHEET_WEBHOOK_SECRET"], request.headers, request.get_data()):
+        abort(401)
+    delivery_id = request.headers.get("{{.DeliveryID}}")
+    app.logger.info("webhook %s %s", request.headers.get("{{.EventType}}"), delivery_id)
+    # TODO: skip delivery_id if already processed, then queue the body for your worker.
+    return "", 204
+
+
+if __name__ == "__main__":
+    app.run(port=8080)

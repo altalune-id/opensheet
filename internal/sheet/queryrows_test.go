@@ -18,7 +18,6 @@ func projectedRows() []sheet.ProjectedRow {
 	}
 }
 
-// seedFreshProjection leaves the fake holding rows, a digest and a contract, and sh looking freshly validated.
 func seedFreshProjection(t *testing.T, h *readHarness, sh *sheet.Sheet, rows []sheet.ProjectedRow) {
 	t.Helper()
 	key := sheet.SnapshotKey{SheetID: sh.ID, Tab: sh.Tab}

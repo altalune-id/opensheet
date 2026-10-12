@@ -57,6 +57,7 @@ type pgSheetStateRow struct {
 	SoftDelete    bool   `alias:"sheets.soft_delete"`
 	ContentDigest string `alias:"sheets.content_digest"`
 	Generation    int64  `alias:"sheets.generation"`
+	HeaderColumns string `alias:"sheets.header_columns"`
 }
 
 // NOTE: FOR UPDATE outlives this call only when the caller already has a transaction enrolled; standalone it degrades to a read of the current generation.
@@ -157,15 +158,24 @@ func (s *postgresRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row Pro
 			pgNullableTime(row.DeletedAt), tc.OrgID, tc.ProjectID,
 		).
 		ON_CONFLICT(s.rows.SheetID, s.rows.Tab, s.rows.RowID).
+		// SECURITY: the conflict clause carries the tenant predicate; without it another org's sheet id rewrites that org's row.
 		DO_UPDATE(
 			postgres.SET(
 				s.rows.RowIndex.SET(postgres.Int(int64(row.RowIndex))),
 				s.rows.Data.SET(pgJSONB(data)),
 				s.rows.DeletedAt.SET(pgNullableTimestampz(row.DeletedAt)),
-			),
+			).WHERE(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
-	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
+	res, execErr := stmt.ExecContext(ctx, tx)
+	if execErr != nil {
 		return s.endTx(tx, owned, fmt.Errorf("sheet.rows.postgres.UpsertRow: %w", execErr))
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return s.endTx(tx, owned, fmt.Errorf("sheet.rows.postgres.UpsertRow: rows affected: %w", raErr))
+	}
+	if n == 0 {
+		return s.endTx(tx, owned, &NotFoundError{ID: k.SheetID.String()})
 	}
 	if err := s.bumpGeneration(ctx, tx, tc, k.SheetID); err != nil {
 		return s.endTx(tx, owned, err)
@@ -226,7 +236,7 @@ func (s *postgresRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (Shee
 	}
 	stmt := postgres.SELECT(
 		s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
-		s.sheets.ContentDigest, s.sheets.Generation,
+		s.sheets.ContentDigest, s.sheets.Generation, s.sheets.HeaderColumns,
 	).
 		FROM(s.sheets).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
@@ -239,8 +249,14 @@ func (s *postgresRowStore) StateOf(ctx context.Context, sheetID uuid.UUID) (Shee
 		}
 		return SheetState{}, fmt.Errorf("sheet.rows.postgres.StateOf: %w", qErr)
 	}
+	headerColumns, err := decodeHeaderColumns(scanned.HeaderColumns)
+	if err != nil {
+		return SheetState{}, err
+	}
 	return SheetState{
-		Contract:   ContractState{OK: scanned.OK, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete},
+		Contract: ContractState{
+			OK: scanned.OK, Reason: scanned.Reason, SoftDelete: scanned.SoftDelete, HeaderColumns: headerColumns,
+		},
 		Digest:     scanned.ContentDigest,
 		Generation: scanned.Generation,
 	}, nil
@@ -679,12 +695,17 @@ func (s *postgresRowStore) commitRefresh(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID,
 	contract ContractState, digest string, bump bool,
 ) error {
+	headerColumns, err := encodeHeaderColumns(contract.HeaderColumns)
+	if err != nil {
+		return err
+	}
 	sets := []any{
 		s.sheets.ValidatedAt.SET(postgres.TimestampzT(time.Now().UTC())),
 		s.sheets.ContractOK.SET(postgres.Bool(contract.OK)),
 		s.sheets.ContractReason.SET(postgres.String(contract.Reason)),
 		s.sheets.SoftDelete.SET(postgres.Bool(contract.SoftDelete)),
 		s.sheets.ContentDigest.SET(postgres.String(digest)),
+		s.sheets.HeaderColumns.SET(postgres.String(headerColumns)),
 	}
 	if bump {
 		sets = append(sets, s.sheets.Generation.SET(s.sheets.Generation.ADD(postgres.Int(1))))
@@ -703,14 +724,20 @@ func (s *postgresRowStore) commitRefresh(
 func (s *postgresRowStore) markContract(
 	ctx context.Context, tx *sql.Tx, tc tenant.Context, sheetID uuid.UUID, contract ContractState,
 ) error {
+	headerColumns, err := encodeHeaderColumns(contract.HeaderColumns)
+	if err != nil {
+		return err
+	}
 	stmt := s.sheets.UPDATE(
 		s.sheets.ValidatedAt, s.sheets.ContractOK, s.sheets.ContractReason, s.sheets.SoftDelete,
+		s.sheets.HeaderColumns,
 	).
 		SET(
 			postgres.TimestampzT(time.Now().UTC()),
 			postgres.Bool(contract.OK),
 			postgres.String(contract.Reason),
 			postgres.Bool(contract.SoftDelete),
+			postgres.String(headerColumns),
 		).
 		WHERE(s.sheets.ID.EQ(postgres.UUID(sheetID)).
 			AND(s.sheets.OrgID.EQ(postgres.UUID(tc.OrgID))))

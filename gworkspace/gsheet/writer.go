@@ -16,14 +16,12 @@ import (
 // ScopeReadWrite is the OAuth2 scope a credential needs for every method on Writer.
 const ScopeReadWrite = sheetsapi.SpreadsheetsScope
 
-// SECURITY: every write is RAW, with no override — under USER_ENTERED a caller could write =Payroll!A1 and read
-// the evaluated value back through the read path, or =IMPORTXML to exfiltrate through Google's servers.
+// SECURITY: every write is RAW, with no override — under USER_ENTERED a caller could write =Payroll!A1 and read the evaluated value back through the read path, or =IMPORTXML to exfiltrate through Google's servers.
 const valueInputRaw = "RAW"
 
 const insertDataRows = "INSERT_ROWS"
 
-// MaxTabTitleRunes is Google's limit on the length of a tab title.
-// https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/sheets#SheetProperties
+// MaxTabTitleRunes is Google's limit on the length of a tab title. https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/sheets#SheetProperties
 const MaxTabTitleRunes = 100
 
 var a1Span = regexp.MustCompile(`^[A-Z]{1,3}[1-9]\d{0,6}(:[A-Z]{1,3}[1-9]\d{0,6})?$`)
@@ -31,8 +29,7 @@ var a1Span = regexp.MustCompile(`^[A-Z]{1,3}[1-9]\d{0,6}(:[A-Z]{1,3}[1-9]\d{0,6}
 // WriterFactory builds a Writer for one credential.
 type WriterFactory func(ctx context.Context, ts oauth2.TokenSource) (*Writer, error)
 
-// Writer mutates spreadsheets on behalf of one credential.
-// NOTE: the embedded *Client is method-set separation — a plain *Client carries no write methods — not proof of the token's scope.
+// Writer mutates spreadsheets on behalf of one credential. NOTE: the embedded *Client is method-set separation — a plain *Client carries no write methods — not proof of the token's scope.
 type Writer struct {
 	*Client
 }

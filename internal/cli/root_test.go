@@ -79,7 +79,7 @@ func TestRoot_KnownSubcommandsRegistered(t *testing.T) {
 	root := NewRootCmd(stubServerBoot, stubClientBoot)
 	want := map[string]bool{
 		"version": false, "serve": false, "init": false, "migrate": false, "auth": false,
-		"org": false, "project": false, "todo": false, "invite": false,
+		"org": false, "project": false, "invite": false,
 		"completion": false,
 	}
 	for _, c := range root.Commands() {

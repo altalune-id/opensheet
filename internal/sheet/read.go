@@ -256,7 +256,6 @@ func (w *ReadWorkflow) load(
 	return w.serve(ctx, sh, key, got.values, got.warnings, got.fetchedAt)
 }
 
-// reprojected is what one refresh committed, and the live picture a snapshot would hold.
 type reprojected struct {
 	values    []gsheet.Row
 	warnings  []string

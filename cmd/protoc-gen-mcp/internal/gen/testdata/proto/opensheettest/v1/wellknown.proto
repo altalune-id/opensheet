@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+// WellKnownService pins the JSON shape protojson accepts for every well-known type.
+service WellKnownService {
+  rpc Absorb(AbsorbRequest) returns (AbsorbResponse) {
+    option (mcp.v1.tool) = {
+      name: "absorb_well_known"
+      description: "Absorb one of every well-known type."
+      required: [
+        "at",
+        "big_unsigned"
+      ]
+    };
+  }
+}
+
+message AbsorbRequest {
+  google.protobuf.Timestamp at = 1;
+  google.protobuf.Duration how_long = 2;
+  google.protobuf.FieldMask mask = 3;
+  google.protobuf.DoubleValue ratio = 4;
+  google.protobuf.FloatValue small_ratio = 5;
+  google.protobuf.Int32Value count = 6;
+  google.protobuf.UInt32Value unsigned_count = 7;
+  google.protobuf.Int64Value big = 8;
+  google.protobuf.UInt64Value big_unsigned = 9;
+  google.protobuf.BoolValue loud = 10;
+  google.protobuf.StringValue label = 11;
+  google.protobuf.BytesValue blob = 12;
+  google.protobuf.Struct payload = 13;
+  google.protobuf.Value anything = 14;
+  google.protobuf.ListValue items = 15;
+  google.protobuf.Any boxed = 16;
+  uint64 raw_unsigned = 17;
+  uint32 raw_small_unsigned = 18;
+  repeated google.protobuf.Duration windows = 19;
+  map<string, google.protobuf.Value> attributes = 20;
+}
+
+message AbsorbResponse {
+  string result = 1;
+}

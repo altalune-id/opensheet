@@ -20,8 +20,7 @@ type Users struct {
 	CreatedAt       postgres.ColumnTimestampz
 	UpdatedAt       postgres.ColumnTimestampz
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewUsers builds the users binding.
@@ -43,7 +42,6 @@ func NewUsers(schema, tablePrefix string) *Users {
 		createdAt       = postgres.TimestampzColumn("created_at")
 		updatedAt       = postgres.TimestampzColumn("updated_at")
 		all             = postgres.ColumnList{id, idpIssuer, idpSubject, email, name, avatarURL, passwordHash, isAdmin, locale, termsAcceptedAt, createdAt, updatedAt}
-		mutable         = postgres.ColumnList{idpIssuer, idpSubject, email, name, avatarURL, passwordHash, isAdmin, locale, termsAcceptedAt, updatedAt}
 	)
 	return &Users{
 		Table:           postgres.NewTable(schema, tablePrefix+"users", "users", all...),
@@ -60,6 +58,5 @@ func NewUsers(schema, tablePrefix string) *Users {
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		AllColumns:      all,
-		MutableColumns:  mutable,
 	}
 }

@@ -1,5 +1,4 @@
-// Command i18n-lint verifies that every d.Tr / d.TrN callsite in .templ files
-// is covered by every locale file under internal/i18n/locales/.
+// Command i18n-lint verifies every Tr/TrN callsite in .templ and .go files has a translation in every locale.
 package main
 
 import (
@@ -7,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"altalune.id/opensheet/cmd/i18n-lint/internal/keys"
 )
@@ -20,6 +20,7 @@ func run(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("i18n-lint", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	templatesDir := fs.String("templates", "internal/web/templates", "directory scanned for .templ files")
+	sources := fs.String("sources", ".", "comma-separated directories scanned for .go callsites and //i18n:use claims; empty disables")
 	localesDir := fs.String("locales", "internal/i18n/locales", "directory holding active.*.yaml files")
 	check := fs.Bool("check", false, "exit non-zero when keys are missing or plurals are incomplete")
 	fix := fs.Bool("fix", false, "write empty placeholders for missing keys into each locale file")
@@ -31,6 +32,7 @@ func run(stdout, stderr io.Writer, args []string) int {
 	report, err := keys.Run(keys.Options{
 		TemplatesDir: *templatesDir,
 		LocalesDir:   *localesDir,
+		SourceDirs:   splitDirs(*sources),
 		Fix:          *fix,
 	})
 	if err != nil {
@@ -45,4 +47,14 @@ func run(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func splitDirs(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

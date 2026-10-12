@@ -1,0 +1,12 @@
+[
+  {
+    "uri": "ui://opensheet/app",
+    "mimeType": "text/html;profile=mcp-app",
+    "text": "\u003c!doctype html\u003e\u003chtml\u003e\u003chead\u003e\u003ctitle\u003et\u003c/title\u003e\u003c/head\u003e\u003cbody\u003e\u003cdiv id=\"root\"\u003e\u003c/div\u003e\u003c/body\u003e\u003c/html\u003e",
+    "_meta": {
+      "ui": {
+        "prefersBorder": false
+      }
+    }
+  }
+]

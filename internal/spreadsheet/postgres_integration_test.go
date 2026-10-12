@@ -28,7 +28,6 @@ type pgTenant struct {
 	credentialID uuid.UUID
 }
 
-// pgFixture binds a Store to a NOBYPASSRLS app role, so every assertion below tests RLS and not just the WHERE clause.
 type pgFixture struct {
 	store  spreadsheet.Store
 	owner  *sql.DB
@@ -326,8 +325,7 @@ func TestPostgres_Spreadsheet_DeleteCascadesSheets(t *testing.T) {
 	assert.Zero(t, n, "the FK must cascade published sheets away with the spreadsheet")
 }
 
-// TestPostgres_Spreadsheet_RLSHidesAnotherOrg asserts a NOBYPASSRLS role sees zero rows outside its own org,
-// even when it asks for another org's ids by name.
+// TestPostgres_Spreadsheet_RLSHidesAnotherOrg asserts a NOBYPASSRLS role sees zero rows outside its own org, even when it asks for another org's ids by name.
 func TestPostgres_Spreadsheet_RLSHidesAnotherOrg(t *testing.T) {
 	f := newPgFixture(t)
 	spB := f.save(t, f.ctxB(), f.b, "1AbC-_dEf", "B's prices")
@@ -384,4 +382,21 @@ func TestPostgres_Spreadsheet_TenantMissing(t *testing.T) {
 
 	assert.True(t, tenant.IsMissingError(f.store.Delete(bare, uuid.New())),
 		"Delete: want tenant.MissingError")
+}
+
+// TestPostgres_Spreadsheet_SaveOfAnotherOrgsIDIsNotFound pins the conflict clause's org predicate: org B carrying org A's row id must not take the UPDATE branch.
+func TestPostgres_Spreadsheet_SaveOfAnotherOrgsIDIsNotFound(t *testing.T) {
+	f := newPgFixture(t)
+	victim := f.save(t, f.ctxA(), f.a, "VICTIM", "Prices")
+
+	attack, err := spreadsheet.New(f.b.tc.OrgID, f.b.tc.ProjectID, f.b.credentialID, "VICTIM", "Hijacked")
+	require.NoError(t, err)
+	attack.ID = victim.ID
+
+	err = f.store.Save(f.ctxB(), attack)
+	require.True(t, spreadsheet.IsNotFoundError(err), "want *NotFoundError, got %T: %v", err, err)
+
+	still, err := f.store.ByID(f.ctxA(), victim.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Prices", still.Title, "org B rewrote org A's row across the tenant boundary")
 }

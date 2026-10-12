@@ -14,8 +14,7 @@ type Orgs struct {
 	UpdatedAt postgres.ColumnTimestampz
 	System    postgres.ColumnBool
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewOrgs builds the orgs binding.
@@ -32,18 +31,16 @@ func NewOrgs(schema, tablePrefix string) *Orgs {
 		updatedAt = postgres.TimestampzColumn("updated_at")
 		system    = postgres.BoolColumn("system")
 		all       = postgres.ColumnList{id, slug, name, createdBy, createdAt, updatedAt, system}
-		mutable   = postgres.ColumnList{slug, name, createdBy, updatedAt, system}
 	)
 	return &Orgs{
-		Table:          postgres.NewTable(schema, tablePrefix+"orgs", "orgs", all...),
-		ID:             id,
-		Slug:           slug,
-		Name:           name,
-		CreatedBy:      createdBy,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		System:         system,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"orgs", "orgs", all...),
+		ID:         id,
+		Slug:       slug,
+		Name:       name,
+		CreatedBy:  createdBy,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
+		System:     system,
+		AllColumns: all,
 	}
 }

@@ -77,7 +77,8 @@ func (r *sqliteSpreadsheetRow) toSpreadsheet() (*Spreadsheet, error) {
 }
 
 func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
-	if _, err := tenant.From(ctx); err != nil {
+	tc, err := tenant.From(ctx)
+	if err != nil {
 		return err
 	}
 	writable := boolToInt(sp.Writable)
@@ -95,6 +96,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 			updatedAt,
 		).
 		ON_CONFLICT(s.table.ID).
+		// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping an attacker-supplied row id from updating another org's row.
 		DO_UPDATE(
 			sqlite.SET(
 				s.table.CredentialID.SET(sqlite.String(sp.CredentialID.String())),
@@ -102,9 +104,10 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 				s.table.Title.SET(sqlite.String(sp.Title)),
 				s.table.Writable.SET(sqlite.Int(writable)),
 				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
-			),
+			).WHERE(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
 		)
-	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+	res, err := stmt.ExecContext(ctx, s.db)
+	if err != nil {
 		if isSQLiteUniqueViolation(err) {
 			return &AlreadyExistsError{
 				ProjectID:    sp.ProjectID.String(),
@@ -112,6 +115,13 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 			}
 		}
 		return fmt.Errorf("spreadsheet.sqlite.Save: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("spreadsheet.sqlite.Save: rows affected: %w", err)
+	}
+	if n == 0 {
+		return &NotFoundError{ID: sp.ID.String()}
 	}
 	return nil
 }

@@ -315,9 +315,11 @@ components:
         projectId:
           type: string
           title: project_id
+          description: UUID of the project the todo belongs to
         title:
           type: string
           title: title
+          description: Title of the todo
       title: CreateRequest
       additionalProperties: false
     todo.v1.CreateResponse:

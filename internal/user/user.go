@@ -21,6 +21,8 @@ type User struct {
 	Email           string
 	Name            string
 	Source          string
+	IDPIssuer       string
+	IDPSubject      string
 	PasswordHash    string
 	IsAdmin         bool
 	Locale          string
@@ -61,6 +63,16 @@ func (u *User) Rename(name string) error {
 	return nil
 }
 
+// ChangeEmail updates the address; the same invariants New applies.
+func (u *User) ChangeEmail(email string) error {
+	e, err := normalizeEmail(email)
+	if err != nil {
+		return err
+	}
+	u.Email = e
+	return nil
+}
+
 // AcceptTerms records the moment the user accepted the ToS.
 func (u *User) AcceptTerms(now time.Time) {
 	t := now.UTC()
@@ -87,7 +99,6 @@ func normalizeName(s string) (string, error) {
 	return n, nil
 }
 
-// defaultNameFromEmail derives a passable display name from the local part of an email address, for OIDC users whose IdP omits the `name` claim; falls back to the trimmed email if the local part is empty.
 func defaultNameFromEmail(email string) string {
 	e := strings.TrimSpace(email)
 	local, _, ok := strings.Cut(e, "@")

@@ -22,7 +22,6 @@ type numGrammarCase struct {
 	ok   bool
 }
 
-// numGrammarCases drives all three implementations of the num grammar: ParseNum, opensheet_num and the Postgres regex.
 func numGrammarCases() []numGrammarCase {
 	return []numGrammarCase{
 		{name: "leading zeros", in: "003", want: 3, ok: true},
@@ -82,7 +81,6 @@ type dateGrammarCase struct {
 	ok   bool
 }
 
-// dateGrammarCases drives all three implementations of the date grammar: MatchesDateShape, opensheet_date and the Postgres regex.
 func dateGrammarCases() []dateGrammarCase {
 	return []dateGrammarCase{
 		{name: "day", in: "2026-01-02", ok: true},

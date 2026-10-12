@@ -666,8 +666,7 @@ func TestRetryEngineConformance_StopsBeforeUnaffordableBackoff(t *testing.T) {
 	require.Equal(t, int64(1), cs.hits.Load(), "a 30s Retry-After cannot fit the budget")
 }
 
-// Pins the divergence rather than hiding it: with resty's engine the caller's context is the
-// only thing that can bound the whole ladder, because Client.Timeout applies per attempt.
+// TestRestyRetry_TimeoutIsPerAttemptNotTotal pins the divergence: with resty's engine only the caller's context bounds the whole ladder, because Client.Timeout applies per attempt.
 func TestRestyRetry_TimeoutIsPerAttemptNotTotal(t *testing.T) {
 	cs := newCountingServer(t, http.StatusTooManyRequests)
 	cs.retryAfter = "1"
@@ -814,9 +813,7 @@ func TestRestyRetry_TransportErrorStillRetries(t *testing.T) {
 	require.Positive(t, attempts.Load(), "a refused connection is still worth retrying")
 }
 
-// TestRetryPolicy_WaitForSpansItsJitterWindow asserts the jitter deterministically, on the computation
-// rather than on wall-clock round-trips: an eight-sample spread of real delays clusters often enough to
-// flake, while two thousand samples of waitFor cover the window every time.
+// TestRetryPolicy_WaitForSpansItsJitterWindow asserts the jitter on the computation rather than on wall-clock round-trips, which flake at small sample counts.
 func TestRetryPolicy_WaitForSpansItsJitterWindow(t *testing.T) {
 	t.Parallel()
 	const base = 120 * time.Millisecond

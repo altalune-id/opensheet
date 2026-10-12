@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+service BadUIService {
+  rpc BadUI(BadUIRequest) returns (BadUIResponse) {
+    option (mcp.v1.tool) = {
+      name: "bad_ui"
+      ui: "App_1"
+    };
+  }
+}
+
+message BadUIRequest {}
+
+message BadUIResponse {}

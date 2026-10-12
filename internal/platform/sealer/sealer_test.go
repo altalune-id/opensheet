@@ -222,8 +222,6 @@ func TestAsAppError_ThroughSealerErrors(t *testing.T) {
 	}
 }
 
-// A wrong key and a tampered row must be distinguishable from an absent key, so
-// credential can tell "re-upload this" from "configure encryption".
 func TestOpen_WrongKeyIsOpenFailedNotUnavailable(t *testing.T) {
 	a, _ := New(testKey(t))
 	other, err := hex.DecodeString(strings.Repeat("cd", 32))

@@ -30,7 +30,7 @@ func (s *postgresStore) ByID(ctx context.Context, id uuid.UUID) (*Sheet, error) 
 		}
 		return nil, fmt.Errorf("sheet.postgres.ByID: %w", qErr)
 	}
-	return row.toSheet(), nil
+	return row.toSheet()
 }
 
 func (s *postgresStore) BySlug(ctx context.Context, orgID, projectID uuid.UUID, slug string) (*Sheet, error) {
@@ -54,7 +54,7 @@ func (s *postgresStore) BySlug(ctx context.Context, orgID, projectID uuid.UUID, 
 		}
 		return nil, fmt.Errorf("sheet.postgres.BySlug: %w", qErr)
 	}
-	return row.toSheet(), nil
+	return row.toSheet()
 }
 
 func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*Sheet, error) {
@@ -76,7 +76,11 @@ func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([
 	}
 	out := make([]*Sheet, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toSheet())
+		sh, cErr := rows[i].toSheet()
+		if cErr != nil {
+			return nil, cErr
+		}
+		out = append(out, sh)
 	}
 	return out, nil
 }

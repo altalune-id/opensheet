@@ -23,7 +23,7 @@ func TestBoot_Bootstrap_UnclaimedGenesisSeedsNothing(t *testing.T) {
 	if !srv.Caps.OnboardingRequired {
 		t.Error("caps.OnboardingRequired must stay true until someone onboards")
 	}
-	assertNoSeededOrg(t, srv, cfg.Tenant.SingletonOrg.Slug)
+	assertNoSeededOrg(t, srv)
 	assertNoSeededUser(t, srv)
 	if srv.SetupToken == "" {
 		t.Error("a deployment that still needs onboarding must hold a setup token")
@@ -50,21 +50,21 @@ func TestBoot_Bootstrap_Idempotent(t *testing.T) {
 	if srv2.Onboarded {
 		t.Error("a second boot must not onboard the deployment either")
 	}
-	assertNoSeededOrg(t, srv2, cfg.Tenant.SingletonOrg.Slug)
+	assertNoSeededOrg(t, srv2)
 	assertNoSeededUser(t, srv2)
 	if srv2.SetupToken == firstToken {
 		t.Error("each boot must mint a fresh setup token")
 	}
 }
 
-func assertNoSeededOrg(t *testing.T, srv *boot.Server, slug string) {
+func assertNoSeededOrg(t *testing.T, srv *boot.Server) {
 	t.Helper()
-	o, err := srv.Orgs.BySlug(context.Background(), slug)
+	o, err := srv.Orgs.SystemOrg(context.Background())
 	if err == nil {
 		t.Fatalf("boot must not create an org, got %q", o.Slug)
 	}
 	if !org.IsNotFoundError(err) {
-		t.Fatalf("orgs.BySlug: %v", err)
+		t.Fatalf("orgs.SystemOrg: %v", err)
 	}
 }
 

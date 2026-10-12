@@ -597,8 +597,8 @@ func TestSQLiteStore_UpdateDoesNotResetGeneration(t *testing.T) {
 	if got.Tab != "Harga" {
 		t.Errorf("Tab = %q, want %q: the upsert must still apply the metadata edit", got.Tab, "Harga")
 	}
-	if got.Generation != 7 {
-		t.Errorf("Generation = %d, want 7: generation must not be in MutableColumns", got.Generation)
+	if got.Generation != 8 {
+		t.Errorf("Generation = %d, want 8: a retab bumps the stored generation and never resets it to the loaded one", got.Generation)
 	}
 	if got.ContentDigest != "settled" {
 		t.Errorf("ContentDigest = %q, want %q: a metadata edit must not write back the digest it loaded", got.ContentDigest, "settled")

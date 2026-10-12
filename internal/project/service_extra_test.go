@@ -52,7 +52,7 @@ func TestService_BootstrapSystem_InvalidSlug(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestService(t)
 	ctx := tenantCtx(uuid.New(), uuid.New())
-	_, err := svc.BootstrapSystem(ctx, uuid.New(), "", "X")
+	_, err := svc.BootstrapSystem(ctx, uuid.New(), "Not A Slug!", "X")
 	require.Error(t, err)
 }
 

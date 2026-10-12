@@ -32,7 +32,6 @@ import (
 
 var updateRowRange = regexp.MustCompile(`!A(\d+):`)
 
-// liveSheet is a Google stub that actually holds the tab, so a second patch reads whatever the first wrote. A static body could not tell a serialized pair of writes from a lost one.
 type liveSheet struct {
 	mu     sync.Mutex
 	values [][]string
@@ -282,9 +281,7 @@ func TestWriteWorkflow_PatchRow_ReadYourWriteOnTheRealProjection(t *testing.T) {
 	assert.Zero(t, h.unex.Load())
 }
 
-// The comparison must happen inside the per-sheet lock: Google has no conditional write, so two writers
-// holding the same tag would both pass an unserialized check and both write, losing one effect. On its
-// own pool — appDB caps at one connection, which would serialize the pair at the pool and pass vacuously.
+// NOTE: own pool because appDB caps at one connection, which would serialize the pair and pass vacuously.
 func TestWriteWorkflow_PatchRow_IfMatchRefusesTheLoserUnderRealConcurrency(t *testing.T) {
 	f := newPgFixture(t)
 	ctx := f.a.ctx(t)

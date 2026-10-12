@@ -23,6 +23,7 @@ type Sheets struct {
 	ContractReason sqlite.ColumnString
 	SoftDelete     sqlite.ColumnInteger
 	ContentDigest  sqlite.ColumnString
+	HeaderColumns  sqlite.ColumnString
 
 	AllColumns     sqlite.ColumnList
 	MutableColumns sqlite.ColumnList
@@ -48,11 +49,12 @@ func NewSheets(tablePrefix string) *Sheets {
 		contractReason = sqlite.StringColumn("contract_reason")
 		softDelete     = sqlite.IntegerColumn("soft_delete")
 		contentDigest  = sqlite.StringColumn("content_digest")
+		headerColumns  = sqlite.StringColumn("header_columns")
 		all            = sqlite.ColumnList{
 			id, orgID, projectID, spreadsheetID, tab, slug,
 			visibility, cacheTTLSecs, writable, createdAt, updatedAt,
 			generation, validatedAt, contractOK, contractReason, softDelete,
-			contentDigest,
+			contentDigest, headerColumns,
 		}
 		// NOTE: generation is deliberately absent — an upsert must never reset the staleness guard or the write lock.
 		mutable = sqlite.ColumnList{
@@ -80,6 +82,7 @@ func NewSheets(tablePrefix string) *Sheets {
 		ContractReason: contractReason,
 		SoftDelete:     softDelete,
 		ContentDigest:  contentDigest,
+		HeaderColumns:  headerColumns,
 		AllColumns:     all,
 		MutableColumns: mutable,
 	}

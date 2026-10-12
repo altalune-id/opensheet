@@ -1,0 +1,29 @@
+{
+  "posts": [
+    {
+      "id": "0193f2a0-0000-7000-8000-000000000001",
+      "projectId": "0193f2a0-0000-7000-8000-0000000000aa",
+      "title": "Shipping the MCP surface",
+      "slug": "shipping-the-mcp-surface",
+      "status": "published",
+      "category": { "id": "c1", "name": "Engineering", "slug": "engineering" },
+      "tags": [
+        { "id": "t1", "name": "mcp", "slug": "mcp" },
+        { "id": "t2", "name": "release", "slug": "release" }
+      ],
+      "firstPublishedAt": "2026-09-01T08:30:00Z",
+      "createdAt": "2026-08-28T10:00:00Z",
+      "updatedAt": "2026-09-01T08:30:00Z"
+    },
+    {
+      "id": "0193f2a0-0000-7000-8000-000000000002",
+      "projectId": "0193f2a0-0000-7000-8000-0000000000aa",
+      "title": "Draft: tenant scoping notes",
+      "slug": "tenant-scoping-notes",
+      "status": "draft",
+      "tags": [],
+      "createdAt": "2026-09-10T04:00:00Z",
+      "updatedAt": "2026-09-10T04:00:00Z"
+    }
+  ]
+}

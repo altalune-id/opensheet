@@ -21,7 +21,7 @@ func newTokenGatedOnboardMux(t *testing.T, f *handlerFixture, token string) *htt
 	t.Helper()
 	req := &atomicBoolWrapper{}
 	req.b.Store(true)
-	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, token)
+	h := handlers.NewOnboardHandler(f.Deps, f.Users, f.Orgs, f.Projects, f.Onboards, &req.b, nil, token)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return mux

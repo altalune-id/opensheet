@@ -33,8 +33,7 @@ type SnapshotStore interface {
 	PurgeSheet(ctx context.Context, sheetID uuid.UUID) error
 }
 
-// NewSnapshotStore dispatches to the driver that cache.Resolve picks for the configured database.
-// NOTE: there is deliberately no sqlite driver — cache.driver=auto resolves to memory on sqlite, so the sheet_snapshots table in schema/migrations/sqlite/004_opensheet.sql exists only to keep the two schemas symmetrical.
+// NewSnapshotStore dispatches to the driver that cache.Resolve picks for the configured database. NOTE: there is no sqlite driver; the sqlite sheet_snapshots table exists only to keep the two schemas symmetrical.
 func NewSnapshotStore(
 	cache config.CacheConfig,
 	dbCfg db.DBConfig,

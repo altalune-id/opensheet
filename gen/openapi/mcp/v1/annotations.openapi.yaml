@@ -1,0 +1,40 @@
+openapi: 3.1.0
+info:
+  title: mcp.v1
+paths: {}
+components:
+  schemas:
+    mcp.v1.Tool:
+      type: object
+      properties:
+        name:
+          type: string
+          title: name
+        description:
+          type: string
+          title: description
+        required:
+          type: array
+          items:
+            type: string
+          title: required
+        mutation:
+          type: boolean
+          title: mutation
+        ui:
+          type: string
+          title: ui
+        destructive:
+          type: boolean
+          title: destructive
+          description: 'NOTE: destructiveHint defaults to true when absent, so the server always sends it; an inaccurate value desensitizes the host''s confirmation prompt.'
+        title:
+          type: string
+          title: title
+          description: Title overrides the title derived from the tool name, which mangles acronyms.
+      title: Tool
+      additionalProperties: false
+      description: |-
+        SECURITY: Tool carries no scope. A tool's scope is declared once, in internal/mcp's catalog, and
+         registration resolves it from there; never add an authorization field to this message.
+security: []

@@ -29,6 +29,7 @@ const (
 func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
 	var (
 		configPath    string
+		url           string
 		token         string
 		tokenFile     string
 		output        string
@@ -41,8 +42,8 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 
 	root := &cobra.Command{
 		Use:           "opensheet",
-		Short:         "opensheet — multitenant SSR + Connect-RPC starter",
-		Long:          "opensheet is the altalune template — a multitenant Go template combining Templ + HTMX SSR and Connect-RPC over a single HTTP listener.",
+		Short:         "opensheet — Google Sheets as a multitenant REST datastore",
+		Long:          "opensheet publishes Google Sheets tabs as a project-scoped REST API with typed reads and row CRUD. It serves SSR pages, a Connect-RPC API and an MCP endpoint over a single HTTP listener.",
 		Version:       version.String(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -50,6 +51,7 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 
 	p := root.PersistentFlags()
 	p.StringVarP(&configPath, "config", "c", "", "config file (yaml). Env (OPENSHEET_*) still applies; -c makes yaml explicit.")
+	p.StringVar(&url, "url", "", "base URL of the opensheet instance to talk to (also: OPENSHEET_URL)")
 	p.StringVar(&token, "token", "", "bearer token (also: OPENSHEET_TOKEN)")
 	p.StringVar(&tokenFile, "token-file", "", "path to file containing the bearer token (0600) (also: OPENSHEET_TOKEN_FILE)")
 	p.StringVar(&output, "output", "", "output format: text|json|ndjson (also: OPENSHEET_OUTPUT)")
@@ -90,11 +92,12 @@ func NewRootCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command
 		newOrgCmd(bootServer, bootClient),
 		newProjectCmd(bootServer, bootClient),
 		newInviteCmd(bootServer, bootClient),
-		newTodoCmd(bootServer, bootClient),
 		newVersionCmd(),
 		newHealthzCmd(),
 		newCompletionCmd(),
 	)
+	root.AddCommand(publishedDomainCmds(bootServer, bootClient)...)
+	registerURLFlagCompletion(root)
 	return root
 }
 

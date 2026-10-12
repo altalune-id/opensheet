@@ -117,16 +117,24 @@ func (s *EmailSink) Close() error {
 
 func formatEmailBody(inc *apperror.Incident) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Code:       %s\n", inc.Code)
-	fmt.Fprintf(&b, "Message:    %s\n", inc.Message)
+	fmt.Fprintf(&b, "Code:       %s\n", oneLine(inc.Code))
+	fmt.Fprintf(&b, "Message:    %s\n", oneLine(inc.Message))
 	if inc.RequestID != "" {
-		fmt.Fprintf(&b, "Request ID: %s\n", inc.RequestID)
+		fmt.Fprintf(&b, "Request ID: %s\n", oneLine(inc.RequestID))
 	}
 	if inc.TraceID != "" {
-		fmt.Fprintf(&b, "Trace ID:   %s\n", inc.TraceID)
+		fmt.Fprintf(&b, "Trace ID:   %s\n", oneLine(inc.TraceID))
 	}
 	if inc.Cause != nil {
-		fmt.Fprintf(&b, "Cause:      %s\n", inc.Cause.Error())
+		fmt.Fprintf(&b, "Cause:      %s\n", oneLine(inc.Cause.Error()))
 	}
 	return b.String()
+}
+
+// SECURITY: collapses CR/LF so a user-controlled value carried in an error cannot forge extra report lines.
+func oneLine(v string) string {
+	if !strings.ContainsAny(v, "\r\n") {
+		return v
+	}
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(v)
 }

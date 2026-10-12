@@ -89,8 +89,7 @@ func (w *ConnectWorkflow) Start(
 	return w.connector.AuthCodeURL(signed), nil
 }
 
-// Complete verifies the signed state, exchanges the code and stores the refresh token sealed against its credential row.
-// SECURITY: the refresh token never reaches a return value, an error message, a log field or a span attribute.
+// Complete verifies the signed state, exchanges the code and stores the refresh token sealed against its credential row. SECURITY: the refresh token never reaches a return value, an error message, a log field or a span attribute.
 func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (*Credential, error) {
 	ctx, span := tracer.Start(ctx, "credential.Connect.Complete")
 	defer span.End()

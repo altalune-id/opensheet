@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 
@@ -36,13 +37,18 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.log.Info("worker starting", slog.String("worker", w.Name()))
 		g.Go(func() error {
 			err := w.Run(gctx)
-			if err != nil {
+			if err != nil && !shutdown(gctx, err) {
 				s.log.Error("worker exited", slog.String("worker", w.Name()), slog.Any("err", err))
-			} else {
-				s.log.Info("worker exited", slog.String("worker", w.Name()))
+				return err
 			}
-			return err
+			s.log.Info("worker exited", slog.String("worker", w.Name()))
+			return nil
 		})
 	}
 	return g.Wait()
+}
+
+// NOTE: a child-context Canceled during shutdown is indistinguishable from the shutdown and is treated as clean.
+func shutdown(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) && ctx.Err() != nil
 }

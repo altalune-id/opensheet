@@ -9,10 +9,10 @@ import (
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
 )
 
-// maxKeyUpload bounds a service-account key upload; a real key is a few kilobytes.
 const maxKeyUpload = 64 << 10
 
 // CredentialHandler owns the project-scoped credential pages.
@@ -30,7 +30,7 @@ func NewCredentialHandler(d Deps, projects *project.Service, credentials *creden
 
 // GetList renders the credentials page.
 func (h *CredentialHandler) GetList(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -47,7 +47,7 @@ func (h *CredentialHandler) GetList(w http.ResponseWriter, r *http.Request) {
 
 // PostUpload stores an uploaded service-account key and returns the refreshed section.
 func (h *CredentialHandler) PostUpload(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -66,7 +66,7 @@ func (h *CredentialHandler) PostUpload(w http.ResponseWriter, r *http.Request) {
 
 // PostDelete removes a credential and returns the refreshed section.
 func (h *CredentialHandler) PostDelete(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -84,7 +84,7 @@ func (h *CredentialHandler) PostDelete(w http.ResponseWriter, r *http.Request) {
 
 // PostGoogleStart redirects the browser into Google's consent screen.
 func (h *CredentialHandler) PostGoogleStart(w http.ResponseWriter, r *http.Request) {
-	sc, ok := h.requireProject(w, r)
+	sc, ok := h.RequireProject(w, r)
 	if !ok {
 		return
 	}
@@ -104,26 +104,26 @@ func (h *CredentialHandler) PostGoogleStart(w http.ResponseWriter, r *http.Reque
 }
 
 // Register wires the credential routes onto mux.
-func (h *CredentialHandler) Register(mux *http.ServeMux) {
+func (h *CredentialHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/credentials", h.GetList)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/credentials", h.PostUpload)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/credentials/google/start", h.PostGoogleStart)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/credentials/{id}/delete", h.PostDelete)
 }
 
-func (h *CredentialHandler) writeSection(w http.ResponseWriter, sc projectScope, view templates.CredentialsView) {
+func (h *CredentialHandler) writeSection(w http.ResponseWriter, sc ProjectScope, view templates.CredentialsView) {
 	filled, ok := h.fill(w, sc, view)
 	if !ok {
 		return
 	}
-	Render(w, sc.req, templates.CredentialSection(h.fragment(sc), filled))
+	Render(w, sc.req, templates.CredentialSection(h.ProjectFragmentBase(sc), filled))
 }
 
-func (h *CredentialHandler) view(w http.ResponseWriter, sc projectScope) (templates.CredentialsView, bool) {
+func (h *CredentialHandler) view(w http.ResponseWriter, sc ProjectScope) (templates.CredentialsView, bool) {
 	return h.fill(w, sc, templates.CredentialsView{})
 }
 
-func (h *CredentialHandler) fill(w http.ResponseWriter, sc projectScope, view templates.CredentialsView) (templates.CredentialsView, bool) {
+func (h *CredentialHandler) fill(w http.ResponseWriter, sc ProjectScope, view templates.CredentialsView) (templates.CredentialsView, bool) {
 	items, err := h.Credentials.List(sc.req.Context())
 	if err != nil {
 		h.LogErr("web credential: list", err)
@@ -153,7 +153,6 @@ func kindLabel(k credential.Kind) string {
 	return "Service account"
 }
 
-// keyUpload reads the key from the file part, falling back to the pasted textarea.
 // SECURITY: the payload is a private key, so it is never logged and never echoed into a message.
 func keyUpload(r *http.Request) (name string, key []byte, failure string) {
 	if err := r.ParseMultipartForm(maxKeyUpload); err != nil && !errors.Is(err, http.ErrNotMultipart) {

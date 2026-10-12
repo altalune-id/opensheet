@@ -60,8 +60,7 @@ func NewService(
 	return s
 }
 
-// UploadServiceAccount seals an uploaded Google service-account key into a new credential.
-// SECURITY: raw never reaches a return value, a log field or a span attribute.
+// UploadServiceAccount seals an uploaded Google service-account key into a new credential. SECURITY: raw never reaches a return value, a log field or a span attribute.
 func (s *Service) UploadServiceAccount(ctx context.Context, name string, raw []byte) (*Credential, error) {
 	ctx, span := tracer.Start(ctx, "credential.UploadServiceAccount")
 	defer span.End()
@@ -176,8 +175,7 @@ func (s *Service) MarkReauthNeeded(ctx context.Context, id uuid.UUID) (*Credenti
 	return c, nil
 }
 
-// TokenSourceFor unseals the credential and returns a Google token source minted at scope.
-// SECURITY: plaintext never leaves this method — not in a return value, an error, a log field or a span attribute.
+// TokenSourceFor unseals the credential and returns a Google token source minted at scope. SECURITY: plaintext never leaves this method — not in a return value, an error, a log field or a span attribute.
 func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID, scope string) (oauth2.TokenSource, error) {
 	ctx, span := tracer.Start(ctx, "credential.TokenSourceFor",
 		trace.WithAttributes(attribute.String("credential.id", id.String())))
@@ -208,9 +206,7 @@ func (s *Service) TokenSourceFor(ctx context.Context, id uuid.UUID, scope string
 	return serviceAccountTokenSource(ctx, plain, scope)
 }
 
-// NOTE: scope does not reach here — a refresh grant posts only grant_type and refresh_token (RFC 6749 Section 6),
-// so Google returns the consented set, which already includes the read-write drive.file.
-// SECURITY: plain holds a Google refresh token; it is handed straight to oauth2 and never returned, logged or recorded on a span.
+// NOTE: scope does not reach here — a refresh grant posts only grant_type and refresh_token (RFC 6749 Section 6), so Google returns the consented set, which already includes the read-write drive.file. SECURITY: plain holds a Google refresh token; it is handed straight to oauth2 and never returned, logged or recorded on a span.
 func (s *Service) refreshTokenSource(ctx context.Context, plain []byte) (oauth2.TokenSource, error) {
 	if s.oauth == nil {
 		return nil, &NotConfiguredError{}
@@ -251,8 +247,7 @@ func (s *Service) scoped(ctx context.Context, span trace.Span, id uuid.UUID, op 
 	return c, nil
 }
 
-// googleTokenHost is the only host a service-account key may be told to mint tokens against.
-// SECURITY: an attacker-supplied token_uri would turn an upload into a server-side request to their host.
+// googleTokenHost is the only host a service-account key may be told to mint tokens against. SECURITY: an attacker-supplied token_uri would turn an upload into a server-side request to their host.
 const googleTokenHost = "oauth2.googleapis.com" //nolint:gosec // a hostname, not a credential.
 
 type serviceAccountFile struct {
@@ -262,8 +257,7 @@ type serviceAccountFile struct {
 	TokenURI    string `json:"token_uri"`
 }
 
-// SECURITY: the credential type is pinned to service_account. An inferred type would accept an
-// external_account config pointing at an attacker-controlled token URL.
+// SECURITY: the credential type is pinned to service_account. An inferred type would accept an external_account config pointing at an attacker-controlled token URL.
 func serviceAccountEmail(raw []byte) (string, error) {
 	var f serviceAccountFile
 	if err := json.Unmarshal(raw, &f); err != nil {

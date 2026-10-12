@@ -7,19 +7,19 @@ import (
 )
 
 type OnboardView struct {
-	Error        string
-	ErrorCode    string
-	FieldErrors  map[string]string
-	LocalAuth    bool
-	OIDCAuth     bool
-	OIDCFinalize bool
-	Email        string
-	Name         string
-	OrgSlug      string
-	OrgName      string
-	ProjectSlug  string
-	ProjectName  string
-	SetupToken   string
+	Error         string
+	ErrorCode string
+	FieldErrors   map[string]string
+	LocalAuth     bool
+	OIDCAuth      bool
+	OIDCFinalize  bool
+	Email         string
+	Name          string
+	OrgSlug       string
+	OrgName       string
+	ProjectSlug   string
+	ProjectName   string
+	SetupToken    string
 }
 
 func fieldErr(m map[string]string, key string) string {
@@ -50,15 +50,15 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.org_section") }</h2>
 						</div>
-						@onboardField("org_slug", d.Tr("onboard.slug"), "text", "off", "acme", v.OrgSlug, v.FieldErrors, true)
-						@onboardField("org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
+						@onboardSlugField(d, "org_slug", "acme", v.OrgSlug, v.FieldErrors)
+						@onboardField(d, "org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
 					</div>
 					<div class="space-y-4">
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.project_section") }</h2>
 						</div>
-						@onboardField("project_slug", d.Tr("onboard.slug"), "text", "off", "default", cmpOr(v.ProjectSlug, "default"), v.FieldErrors, false)
-						@onboardField("project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", cmpOr(v.ProjectName, "Default Project"), v.FieldErrors, false)
+						@onboardSlugField(d, "project_slug", "web", v.ProjectSlug, v.FieldErrors)
+						@onboardField(d, "project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", v.ProjectName, v.FieldErrors, false)
 					</div>
 					<button
 						type="submit"
@@ -89,23 +89,23 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.admin_section") }</h2>
 						</div>
-						@onboardField("email", d.Tr("login.email"), "email", "email", "you@example.com", v.Email, v.FieldErrors, true)
-						@onboardField("name", d.Tr("onboard.display_name"), "text", "name", "Your name", v.Name, v.FieldErrors, true)
+						@onboardField(d, "email", d.Tr("login.email"), "email", "email", "you@example.com", v.Email, v.FieldErrors, true)
+						@onboardField(d, "name", d.Tr("onboard.display_name"), "text", "name", "Your name", v.Name, v.FieldErrors, true)
 						@onboardPasswordField(d, v.FieldErrors)
 					</div>
 					<div class="space-y-4">
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.org_section") }</h2>
 						</div>
-						@onboardField("org_slug", d.Tr("onboard.slug"), "text", "off", "acme", v.OrgSlug, v.FieldErrors, true)
-						@onboardField("org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
+						@onboardSlugField(d, "org_slug", "acme", v.OrgSlug, v.FieldErrors)
+						@onboardField(d, "org_name", d.Tr("onboard.display_name"), "text", "organization", "Acme, Inc.", v.OrgName, v.FieldErrors, true)
 					</div>
 					<div class="space-y-4">
 						<div class="border-b border-border/50 pb-2">
 							<h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{ d.Tr("onboard.project_section") }</h2>
 						</div>
-						@onboardField("project_slug", d.Tr("onboard.slug"), "text", "off", "default", cmpOr(v.ProjectSlug, "default"), v.FieldErrors, false)
-						@onboardField("project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", cmpOr(v.ProjectName, "Default Project"), v.FieldErrors, false)
+						@onboardSlugField(d, "project_slug", "web", v.ProjectSlug, v.FieldErrors)
+						@onboardField(d, "project_name", d.Tr("onboard.display_name"), "text", "off", "Default Project", v.ProjectName, v.FieldErrors, false)
 					</div>
 					<button
 						type="submit"
@@ -119,6 +119,9 @@ templ OnboardPage(d web.LayoutData, v OnboardView) {
 				<p class="text-sm text-muted-foreground">{ d.Tr("onboard.no_method") }</p>
 			}
 		</div>
+		if v.OIDCFinalize || v.LocalAuth {
+			@slugEditScript(d.Nonce)
+		}
 	</section>
 }
 
@@ -135,7 +138,7 @@ func onboardTokenQuery(token string) string {
 	return "?token=" + url.QueryEscape(token)
 }
 
-templ onboardField(id, label, kind, autocomplete, placeholder, value string, errs map[string]string, required bool) {
+templ onboardField(d web.LayoutData, id, label, kind, autocomplete, placeholder, value string, errs map[string]string, required bool) {
 	<div>
 		<label for={ "onb-" + id } class="block text-sm font-medium text-foreground/90">{ label }</label>
 		<input
@@ -149,9 +152,81 @@ templ onboardField(id, label, kind, autocomplete, placeholder, value string, err
 			class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
 		/>
 		if e := fieldErr(errs, id); e != "" {
-			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ e }</p>
+			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ d.Tr(e) }</p>
 		}
 	</div>
+}
+
+templ onboardSlugField(d web.LayoutData, id, placeholder, value string, errs map[string]string) {
+	<div>
+		<label for={ "onb-" + id } class="block text-sm font-medium text-foreground/90">{ d.Tr("onboard.slug") }</label>
+		<div class="mt-1.5 flex items-center gap-2">
+			<input
+				id={ "onb-" + id }
+				name={ id }
+				type="text"
+				autocomplete="off"
+				placeholder={ placeholder }
+				value={ value }
+				if slugLocked(value, errs, id) {
+					readonly
+					aria-describedby={ "onb-" + id + "-hint" }
+				}
+				class={ "block w-full min-w-0 flex-1 rounded-md border border-border px-3 py-2 font-mono text-sm placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1", slugInputTone(slugLocked(value, errs, id)) }
+			/>
+			if slugLocked(value, errs, id) {
+				<button
+					type="button"
+					data-slug-edit={ "onb-" + id }
+					aria-controls={ "onb-" + id }
+					class="shrink-0 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/90 shadow-sm hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+				>
+					{ d.Tr("onboard.slug_edit") }
+				</button>
+			}
+		</div>
+		if slugLocked(value, errs, id) {
+			<p id={ "onb-" + id + "-hint" } class="mt-1.5 text-xs text-muted-foreground">{ d.Tr("onboard.slug_hint") }</p>
+		}
+		if e := fieldErr(errs, id); e != "" {
+			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ d.Tr(e) }</p>
+		}
+	</div>
+}
+
+func slugLocked(value string, errs map[string]string, id string) bool {
+	return value != "" && fieldErr(errs, id) == ""
+}
+
+func slugInputTone(locked bool) string {
+	if locked {
+		return "bg-muted/50 text-muted-foreground"
+	}
+	return "bg-card text-foreground"
+}
+
+templ slugEditScript(nonce string) {
+	<script nonce={ nonce }>
+	if (!window.opensheetSlugEditBound) {
+	window.opensheetSlugEditBound = true;
+	document.addEventListener('click', function(e) {
+		if (!e.target || !e.target.closest) return;
+		var btn = e.target.closest('[data-slug-edit]');
+		if (!btn) return;
+		var input = document.getElementById(btn.getAttribute('data-slug-edit'));
+		if (!input) return;
+		input.readOnly = false;
+		input.classList.remove('bg-muted/50', 'text-muted-foreground');
+		input.classList.add('bg-card', 'text-foreground');
+		btn.hidden = true;
+		var hint = document.getElementById(input.id + '-hint');
+		if (hint) hint.hidden = true;
+		input.removeAttribute('aria-describedby');
+		input.focus();
+		input.select();
+	});
+	}
+	</script>
 }
 
 templ onboardPasswordField(d web.LayoutData, errs map[string]string) {
@@ -168,16 +243,9 @@ templ onboardPasswordField(d web.LayoutData, errs map[string]string) {
 			class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
 		/>
 		if e := fieldErr(errs, "password"); e != "" {
-			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ e }</p>
+			<p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{ d.Tr(e) }</p>
 		}
 	</div>
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 templ OnboardLayout(d web.LayoutData, v OnboardView) {

@@ -1,35 +1,89 @@
-package sqlite
+package sqlite_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
+func mustParse(t *testing.T, s string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339Nano, s)
+	require.NoError(t, err)
+	return parsed
+}
+
 func TestSQLiteTime_TextOrderMatchesChronologicalOrder(t *testing.T) {
-	t.Parallel()
-	base := time.Date(2026, 9, 9, 2, 12, 19, 0, time.UTC)
-	times := []time.Time{
-		base,
-		base.Add(1 * time.Nanosecond),
-		base.Add(100 * time.Microsecond),
-		base.Add(236700 * time.Microsecond),
-		base.Add(236756 * time.Microsecond),
-		base.Add(1 * time.Second),
+	cases := []struct {
+		name     string
+		earlier  string
+		later    string
+		rfcAgree bool
+	}{
+		{
+			name:     "trimmed trailing zeros",
+			earlier:  "2026-09-09T02:12:19.2367Z",
+			later:    "2026-09-09T02:12:19.236756Z",
+			rfcAgree: false,
+		},
+		{
+			name:     "whole second against one nanosecond",
+			earlier:  "2026-09-09T02:12:19Z",
+			later:    "2026-09-09T02:12:19.000000001Z",
+			rfcAgree: false,
+		},
+		{
+			name:     "distinct seconds",
+			earlier:  "2026-09-09T02:12:19.500000000Z",
+			later:    "2026-09-09T02:12:20.100000000Z",
+			rfcAgree: true,
+		},
 	}
-	for i := 1; i < len(times); i++ {
-		prev, cur := SQLiteTime(times[i-1]), SQLiteTime(times[i])
-		if prev >= cur {
-			t.Errorf("text order disagrees with time order: %q !< %q", prev, cur)
-		}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := mustParse(t, tc.earlier)
+			b := mustParse(t, tc.later)
+			require.True(t, a.Before(b), "fixture must be chronologically ordered")
+
+			assert.Less(t, sqliteent.SQLiteTime(a), sqliteent.SQLiteTime(b),
+				"padded text order must match chronological order")
+
+			rfcOrdered := a.UTC().Format(time.RFC3339Nano) < b.UTC().Format(time.RFC3339Nano)
+			assert.Equal(t, tc.rfcAgree, rfcOrdered,
+				"RFC3339Nano text order for %q vs %q", tc.earlier, tc.later)
+		})
 	}
 }
 
-// The invariant is structural: a non-UTC input must not produce an offset that breaks ordering.
-func TestSQLiteTime_NormalisesToUTC(t *testing.T) {
-	t.Parallel()
-	zone := time.FixedZone("X", -8*3600)
-	utc := time.Date(2026, 9, 9, 2, 0, 0, 0, time.UTC)
-	if got, want := SQLiteTime(utc.In(zone)), SQLiteTime(utc); got != want {
-		t.Errorf("SQLiteTime(non-UTC) = %q, want %q", got, want)
+func TestSQLiteTime_RoundTripsThroughRFC3339Nano(t *testing.T) {
+	cases := []time.Time{
+		mustParse(t, "2026-09-09T02:12:19Z"),
+		mustParse(t, "2026-09-09T02:12:19.000000001Z"),
+		mustParse(t, "2026-09-09T02:12:19.2367Z"),
+		mustParse(t, "2026-09-09T02:12:19.236756Z"),
+		mustParse(t, "2026-09-09T09:12:19.5+07:00"),
+		time.Unix(0, 0).UTC(),
 	}
+
+	for _, want := range cases {
+		rendered := sqliteent.SQLiteTime(want)
+		got, err := time.Parse(time.RFC3339Nano, rendered)
+		require.NoError(t, err, "rendered %q", rendered)
+		assert.True(t, want.Equal(got), "round trip of %q via %q gave %q", want, rendered, got)
+		assert.Equal(t, time.UTC, got.Location())
+	}
+}
+
+func TestSQLiteTime_RendersFixedWidthUTC(t *testing.T) {
+	utc := sqliteent.SQLiteTime(mustParse(t, "2026-09-09T02:12:19.2367Z"))
+	offset := sqliteent.SQLiteTime(mustParse(t, "2026-09-09T09:12:19.2367+07:00"))
+
+	assert.Equal(t, "2026-09-09T02:12:19.236700000Z", utc)
+	assert.Equal(t, utc, offset, "an offset input must normalize to the same UTC text")
+	assert.Len(t, utc, len("2006-01-02T15:04:05.000000000Z"))
 }

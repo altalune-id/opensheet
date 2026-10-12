@@ -311,7 +311,7 @@ This recipe is the whole justification for the core/subpackage split.
    Add a local error type only for something genuinely service-specific, the way
    `gsheet.TabNotFoundError` exists because a tab is a Sheets concept.
 5. Map any new local error type to a wire code in `internal/gwerr`, and add its
-   code to `internal/apperror` and `docs/ERROR_CODES.md`. Reusing the root's
+   code to `internal/apperror` and `docs/errors/opensheet.md`. Reusing the root's
    five types needs no change there.
 6. Widen the connect scope set by passing the wider slice to
    `gworkspace.NewConnector(cfg, scopes)`. Keep `gworkspace.Scopes()` as the

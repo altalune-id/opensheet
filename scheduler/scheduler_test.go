@@ -821,3 +821,101 @@ func TestRunOnce_PanicIsTyped(t *testing.T) {
 	err := r.RunOnce(t.Context(), "panicky")
 	require.True(t, scheduler.IsPanicError(err), "got %v", err)
 }
+
+// NOTE: the Runner's ctx descends from the process root, so reusing its request id would stamp every job line since boot with one id.
+func TestRun_SystemScope_RequestIDIsNotInheritedFromTheBaseContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const baseID = "process-wide-id"
+		var mu sync.Mutex
+		var ids []string
+
+		r := newTestRunner(t, nil)
+		require.NoError(t, r.Register(scheduler.Job{
+			Name:     "tick",
+			Scope:    scheduler.ScopeSystem,
+			Schedule: scheduler.MustEveryInterval(time.Minute, 0),
+			Run: func(ctx context.Context) error {
+				mu.Lock()
+				ids = append(ids, reqid.FromContext(ctx))
+				mu.Unlock()
+				return nil
+			},
+		}))
+
+		ctx, cancel := context.WithCancel(reqid.WithContext(t.Context(), baseID))
+		go func() { _ = r.Run(ctx) }()
+		time.Sleep(2*time.Minute + time.Second)
+		cancel()
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, ids, 2)
+		for _, id := range ids {
+			require.NotEmpty(t, id)
+			require.NotEqual(t, baseID, id, "a run must not inherit the process-wide id")
+		}
+		require.NotEqual(t, ids[0], ids[1], "each run must be independently traceable")
+	})
+}
+
+func TestRun_TenantScope_RequestIDIsNotInheritedFromTheBaseContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const baseID = "process-wide-id"
+		var mu sync.Mutex
+		var ids []string
+
+		r := newTestRunner(t, func(o *scheduler.Options) { o.Tenants = &fakeTenants{ids: []string{"a", "b"}} })
+		require.NoError(t, r.Register(scheduler.Job{
+			Name:     "sweep",
+			Scope:    scheduler.ScopeTenant,
+			Schedule: scheduler.MustEveryInterval(time.Minute, 0),
+			Run: func(ctx context.Context) error {
+				mu.Lock()
+				ids = append(ids, reqid.FromContext(ctx))
+				mu.Unlock()
+				return nil
+			},
+		}))
+
+		ctx, cancel := context.WithCancel(reqid.WithContext(t.Context(), baseID))
+		go func() { _ = r.Run(ctx) }()
+		time.Sleep(time.Minute + time.Second)
+		cancel()
+
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, ids, 2)
+		for _, id := range ids {
+			require.NotEmpty(t, id)
+			require.NotEqual(t, baseID, id, "a tenant run must not inherit the process-wide id")
+		}
+		require.NotEqual(t, ids[0], ids[1])
+	})
+}
+
+func TestRun_OverlapLineDoesNotInheritTheBaseContextID(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const baseID = "process-wide-id"
+		release := make(chan struct{})
+		log, logs := capturingLogger()
+		r := newTestRunner(t, func(o *scheduler.Options) { o.Logger = log })
+		require.NoError(t, r.Register(scheduler.Job{
+			Name:     "slow",
+			Scope:    scheduler.ScopeSystem,
+			Schedule: scheduler.MustEveryInterval(time.Minute, 0),
+			Run:      func(context.Context) error { <-release; return nil },
+		}))
+
+		ctx, cancel := context.WithCancel(reqid.WithContext(t.Context(), baseID))
+		go func() { _ = r.Run(ctx) }()
+		time.Sleep(time.Minute + time.Second)
+		require.True(t, scheduler.IsBusyError(r.RunOnce(ctx, "slow")))
+
+		got := logs.last(t, "scheduler.job_overlap").reqID
+		require.NotEmpty(t, got)
+		require.NotEqual(t, baseID, got, "a dropped tick must be correlatable on its own")
+
+		close(release)
+		cancel()
+	})
+}

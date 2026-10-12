@@ -35,8 +35,7 @@ type Service struct {
 	writers     gsheet.WriterFactory
 }
 
-// NewService binds the service to its dependencies.
-// NOTE: tokens and writeTokens are separate so a read stays read-scoped; only writeTokens is pinned to gsheet.ScopeReadWrite.
+// NewService binds the service to its dependencies. NOTE: tokens and writeTokens are separate so a read stays read-scoped; only writeTokens is pinned to gsheet.ScopeReadWrite.
 func NewService(
 	store Store,
 	log *slog.Logger,

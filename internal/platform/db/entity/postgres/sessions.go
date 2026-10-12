@@ -12,8 +12,7 @@ type Sessions struct {
 	ExpiresAt postgres.ColumnTimestampz
 	CreatedAt postgres.ColumnTimestampz
 
-	AllColumns     postgres.ColumnList
-	MutableColumns postgres.ColumnList
+	AllColumns postgres.ColumnList
 }
 
 // NewSessions builds the sessions binding.
@@ -28,16 +27,14 @@ func NewSessions(schema, tablePrefix string) *Sessions {
 		expiresAt = postgres.TimestampzColumn("expires_at")
 		createdAt = postgres.TimestampzColumn("created_at")
 		all       = postgres.ColumnList{sid, userID, payload, expiresAt, createdAt}
-		mutable   = postgres.ColumnList{userID, payload, expiresAt}
 	)
 	return &Sessions{
-		Table:          postgres.NewTable(schema, tablePrefix+"sessions", "sessions", all...),
-		SID:            sid,
-		UserID:         userID,
-		Payload:        payload,
-		ExpiresAt:      expiresAt,
-		CreatedAt:      createdAt,
-		AllColumns:     all,
-		MutableColumns: mutable,
+		Table:      postgres.NewTable(schema, tablePrefix+"sessions", "sessions", all...),
+		SID:        sid,
+		UserID:     userID,
+		Payload:    payload,
+		ExpiresAt:  expiresAt,
+		CreatedAt:  createdAt,
+		AllColumns: all,
 	}
 }

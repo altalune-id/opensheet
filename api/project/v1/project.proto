@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package project.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/gen/go/project/v1;projectv1";
+
+service ProjectService {
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option (mcp.v1.tool) = {
+      name: "project_list"
+      description: "List the projects the calling credential can reach, with each project's id, slug and name. Call this first to obtain the projectId the other tools take."
+    };
+  }
+}
+
+message Project {
+  string id = 1;
+  string org_id = 2;
+  string slug = 3;
+  string name = 4;
+  // System marks a bootstrap-owned project that cannot be renamed or deleted
+  bool system = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}

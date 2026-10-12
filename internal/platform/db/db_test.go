@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -60,6 +61,50 @@ func TestOpen_SQLiteAppliesPoolTuning(t *testing.T) {
 	if got := sqlDB.Stats().MaxOpenConnections; got != 3 {
 		t.Fatalf("MaxOpenConnections = %d, want 3", got)
 	}
+}
+
+func TestOpenSQLite_EnforcesForeignKeysForEveryDSNShape(t *testing.T) {
+	dir := t.TempDir()
+	for _, dsn := range []string{
+		filepath.Join(dir, "bare.db"),
+		"file:" + filepath.Join(dir, "prefixed.db"),
+		"file:" + filepath.Join(dir, "withparams.db") + "?_pragma=busy_timeout(5000)",
+	} {
+		t.Run(dsn, func(t *testing.T) {
+			sqlDB, err := db.Open(t.Context(), db.DBConfig{Driver: db.DriverSQLite, DSN: dsn}, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = sqlDB.Close() })
+
+			var on int
+			require.NoError(t, sqlDB.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&on))
+			require.Equal(t, 1, on, "foreign keys must be enforced; ON DELETE RESTRICT silently no-ops otherwise")
+		})
+	}
+}
+
+func TestOpenSQLite_EnforcesForeignKeysOnEveryPooledConnection(t *testing.T) {
+	dir := t.TempDir()
+	dsn := "file:" + filepath.Join(dir, "pooled.db")
+
+	sqlDB, err := db.Open(t.Context(), db.DBConfig{Driver: db.DriverSQLite, DSN: dsn}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	conn1, err := sqlDB.Conn(t.Context())
+	require.NoError(t, err)
+	defer conn1.Close()
+
+	var on1 int
+	require.NoError(t, conn1.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&on1))
+	require.Equal(t, 1, on1, "first pooled connection must enforce foreign keys")
+
+	conn2, err := sqlDB.Conn(t.Context())
+	require.NoError(t, err)
+	defer conn2.Close()
+
+	var on2 int
+	require.NoError(t, conn2.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&on2))
+	require.Equal(t, 1, on2, "a second, freshly-opened pooled connection must also enforce foreign keys since the pragma lives in the DSN, not a per-session PRAGMA call")
 }
 
 func TestDBConfig_Validate(t *testing.T) {

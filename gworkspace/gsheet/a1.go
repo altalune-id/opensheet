@@ -22,7 +22,6 @@ func ColumnLabel(n int) string {
 
 var a1Cell = regexp.MustCompile(`^[A-Z]{1,3}([1-9]\d{0,6})$`)
 
-// spanStartRow returns the 1-based row an A1 range starts at, such as 7 for "'My Sheet'!A7:C9".
 func spanStartRow(a1 string) (int, error) {
 	span := a1
 	if i := strings.LastIndex(span, "!"); i >= 0 {

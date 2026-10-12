@@ -1,0 +1,24 @@
+{
+  "id": "evt_0199c1f0-0000-7000-8000-000000000001",
+  "type": "blog.post.published",
+  "api_version": "v1",
+  "created_at": "2026-09-27T04:11:00Z",
+  "tenant": {
+    "org_id": "0199c1f0-0000-7000-8000-00000000000a",
+    "project_id": "0199c1f0-0000-7000-8000-00000000000b",
+    "project_slug": "altalune"
+  },
+  "data": {
+    "id": "0199c1f0-0000-7000-8000-00000000000c",
+    "slug": "hello-world",
+    "title": "Hello, world",
+    "body_markdown": "# Hello",
+    "category_id": "0199c1f0-0000-7000-8000-00000000000d",
+    "tag_ids": [
+      "0199c1f0-0000-7000-8000-00000000000e"
+    ],
+    "first_published_at": "2026-09-27T04:00:00Z",
+    "updated_at": "2026-09-27T04:10:00Z",
+    "version": 3
+  }
+}

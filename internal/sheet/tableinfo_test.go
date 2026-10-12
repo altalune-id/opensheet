@@ -2,6 +2,7 @@ package sheet_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
@@ -51,8 +52,6 @@ func TestReadWorkflow_TableInfo_AnswersFromTheProjectionWithoutCallingGoogle(t *
 	}
 }
 
-// TestReadWorkflow_TableInfo_ReportsDriftWithoutCallingGoogle is why this route exists: a client must be
-// able to learn that a tab no longer satisfies the contract without paying for a Google read.
 func TestReadWorkflow_TableInfo_ReportsDriftWithoutCallingGoogle(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
@@ -122,8 +121,6 @@ func TestReadWorkflow_TableInfo_CountsOnlyTheSheetsOwnTab(t *testing.T) {
 	}
 }
 
-// A tab carrying the column but no deletions is the case the inferred flag got wrong: it reported
-// softDelete false, so a client concluded delete was unsupported and never tried.
 func TestReadWorkflow_TableInfo_NamesDeletedAtFromThePersistedFlag(t *testing.T) {
 	deletedAt := time.Now().UTC()
 	for name, tt := range map[string]struct {
@@ -238,5 +235,126 @@ func TestReadWorkflow_TableInfo_StoreFailureIsReportedAsAnIncident(t *testing.T)
 	}
 	if h.unex.Load() != 1 {
 		t.Errorf("unexpected was reported %d times, want 1", h.unex.Load())
+	}
+}
+
+func TestReadWorkflow_TableInfo_PrefersThePersistedHeaderRowOverTheProjection(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	sh.HeaderColumns = []string{"id", "name", "email", "note"}
+	h.rows.Seed(sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}, []sheet.ProjectedRow{
+		liveRow("a", 0, gsheet.Row{"id": "a", "name": "ada"}),
+	})
+
+	got, err := h.wf.TableInfo(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("TableInfo err = %v", err)
+	}
+
+	if want := []string{"email", "id", "name", "note"}; !reflect.DeepEqual(got.Columns, want) {
+		t.Errorf("Columns = %v, want %v: the header row is the column set, not the first row's keys", got.Columns, want)
+	}
+	if got.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", got.RowCount)
+	}
+}
+
+func TestReadWorkflow_TableInfo_AKnownEmptyHeaderRowIsNotAFallback(t *testing.T) {
+	h := newReadHarness(t, harnessOpts{})
+	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)
+	sh.HeaderColumns = []string{}
+	h.rows.Seed(sheet.SnapshotKey{SheetID: sh.ID, Tab: "Q1"}, []sheet.ProjectedRow{
+		liveRow("a", 0, gsheet.Row{"id": "a"}),
+	})
+
+	got, err := h.wf.TableInfo(t.Context(), sh)
+	if err != nil {
+		t.Fatalf("TableInfo err = %v", err)
+	}
+
+	if len(got.Columns) != 0 || got.Columns == nil {
+		t.Errorf("Columns = %#v, want an empty list: a read header row with no columns is authoritative", got.Columns)
+	}
+}
+
+func TestTableInfo_ReportsTheHeaderRowAfterARead(t *testing.T) {
+	for name, tt := range map[string]struct {
+		body       string
+		wantCols   []string
+		wantRows   int64
+		softDelete bool
+	}{
+		"a header-only tab": {
+			body:     `{"values":[["id","name","email"]]}`,
+			wantCols: []string{"email", "id", "name"},
+		},
+		"a header-only tab with the soft-delete column": {
+			body:       `{"values":[["id","name","Deleted At"]]}`,
+			wantCols:   []string{"deleted_at", "id", "name"},
+			softDelete: true,
+		},
+		"a first row whose trailing cells are blank": {
+			body:     `{"values":[["id","name","email","note"],["a","ada"]]}`,
+			wantCols: []string{"email", "id", "name", "note"},
+			wantRows: 1,
+		},
+		"an all-tombstoned tab": {
+			body:       `{"values":[["id","name","deleted_at"],["a","ada","2026-01-02"]]}`,
+			wantCols:   []string{"deleted_at", "id", "name"},
+			softDelete: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			q := newQueryFixtureOf(t, tt.body, harnessOpts{})
+			if _, err := q.h.wf.Rows(q.f.ctx(), q.sh); err != nil {
+				t.Fatalf("Rows err = %v", err)
+			}
+			q.resolve(t)
+
+			got, err := q.h.wf.TableInfo(q.f.ctx(), q.sh)
+			if err != nil {
+				t.Fatalf("TableInfo err = %v", err)
+			}
+
+			if !reflect.DeepEqual(got.Columns, tt.wantCols) {
+				t.Errorf("Columns = %v, want %v", got.Columns, tt.wantCols)
+			}
+			if !got.IDColumn {
+				t.Error("IDColumn = false, want true: the header row names an id column")
+			}
+			if got.SoftDelete != tt.softDelete {
+				t.Errorf("SoftDelete = %v, want %v", got.SoftDelete, tt.softDelete)
+			}
+			if got.RowCount != tt.wantRows {
+				t.Errorf("RowCount = %d, want %d", got.RowCount, tt.wantRows)
+			}
+		})
+	}
+}
+
+func TestTableInfo_ReportsTheDriftedHeaderRow(t *testing.T) {
+	q := newQueryFixtureOf(t, `{"values":[["id","name"],["a","ada"]]}`, harnessOpts{})
+	if _, err := q.h.wf.Rows(q.f.ctx(), q.sh); err != nil {
+		t.Fatalf("Rows err = %v", err)
+	}
+	q.resolve(t)
+	q.h.google.setRows(http.StatusOK, `{"values":[["name","email"],["ada","ada@example.com"]]}`)
+	if err := q.h.snaps.PurgeSheet(q.f.ctx(), q.sh.ID); err != nil {
+		t.Fatalf("PurgeSheet err = %v", err)
+	}
+	_, _ = q.h.wf.Rows(q.f.ctx(), q.sh)
+	q.resolve(t)
+
+	got, err := q.h.wf.TableInfo(q.f.ctx(), q.sh)
+	if err != nil {
+		t.Fatalf("TableInfo err = %v", err)
+	}
+
+	if want := []string{"email", "name"}; !reflect.DeepEqual(got.Columns, want) {
+		t.Errorf("Columns = %v, want %v: drift persists the header row the refresh read", got.Columns, want)
+	}
+	if got.IDColumn || got.SatisfiesContract {
+		t.Errorf("IDColumn/SatisfiesContract = %v/%v, want false/false for a tab that lost its id column",
+			got.IDColumn, got.SatisfiesContract)
 	}
 }

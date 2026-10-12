@@ -17,7 +17,6 @@ import (
 	"altalune.id/opensheet/nanoid"
 )
 
-// idLength is the nanoid length opensheet generates a row id at.
 const idLength = 21
 
 // FixOutcome reports what AddIDColumn changed in the user's spreadsheet.
@@ -28,8 +27,7 @@ type FixOutcome struct {
 	RowsFilled    int
 }
 
-// FixWorkflow adds a missing id column to a tab and backfills its values.
-// NOTE: this is the only opensheet operation that writes to a spreadsheet the user did not ask it to write to, so it runs from an explicit request and never as part of publishing.
+// FixWorkflow adds a missing id column to a tab and backfills its values. NOTE: the only operation that writes to a spreadsheet unasked, so it runs from an explicit request and never during publishing.
 type FixWorkflow struct {
 	sources    Sources
 	tokens     TokenSources
@@ -209,5 +207,4 @@ func planCell(tbl gsheet.Table, col, row int) (string, error) {
 	return nanoid.New(idLength)
 }
 
-// spreadsheetRowOf turns a zero-based data-row index into the 1-based spreadsheet row, past the header row.
 func spreadsheetRowOf(rowIndex int) int { return rowIndex + 2 }

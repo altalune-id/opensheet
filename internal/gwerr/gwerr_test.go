@@ -136,8 +136,7 @@ func TestAppError_NilIsANoOp(t *testing.T) {
 	}
 }
 
-// SECURITY: the data plane returns messages verbatim, so a caller holding only sheets:write must not
-// learn the Google file id backing a sheet from a refusal.
+// SECURITY: the data plane returns messages verbatim, so a caller holding only sheets:write must not learn the Google file id backing a sheet from a refusal.
 func TestAppError_PermissionDeniedNamesNoGoogleFileID(t *testing.T) {
 	ae, ok := apperror.AsAppError(gwerr.AppError(&gworkspace.PermissionDeniedError{FileID: "1SecretFileID"}))
 	if !ok {
@@ -161,8 +160,7 @@ func TestAppError_PermissionDeniedNamesNoGoogleFileID(t *testing.T) {
 	}
 }
 
-// SECURITY: the data plane returns code and message only, so an id in the message reaches
-// an API-key holder who supplied our UUID and never knew the Google id.
+// SECURITY: the data plane returns code and message only, so an id in the message reaches an API-key holder who supplied our UUID and never knew the Google id.
 func TestAppError_NotFoundNamesNoGoogleFileID(t *testing.T) {
 	ae, ok := apperror.AsAppError(gwerr.AppError(&gworkspace.NotFoundError{FileID: "1SecretFileID"}))
 	if !ok {

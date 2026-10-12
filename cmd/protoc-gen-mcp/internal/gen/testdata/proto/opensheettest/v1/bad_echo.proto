@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+service BadEchoService {
+  // EchoTwice claims a tool name another file already claims.
+  rpc EchoTwice(BadEchoRequest) returns (BadEchoResponse) {
+    option (mcp.v1.tool) = {name: "poke_target"};
+  }
+}
+
+message BadEchoRequest {}
+
+message BadEchoResponse {}

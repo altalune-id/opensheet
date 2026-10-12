@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"os"
 	"strings"
@@ -72,10 +73,13 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 				return err
 			}
 
-			if cfg.Mode == config.ModeSelfhosted && orgSlug != "" {
-				if _, err := srv.Orgs.BootstrapSingleton(cmd.Context(), orgSlug, orgName, u.ID); err != nil {
+			orgSlug = cmp.Or(strings.TrimSpace(orgSlug), strings.TrimSpace(cfg.Tenant.SingletonOrg.Slug))
+			if cfg.Mode == config.ModeSelfhosted {
+				o, err := srv.Orgs.BootstrapSingleton(cmd.Context(), orgSlug, orgName, u.ID)
+				if err != nil {
 					return err
 				}
+				orgSlug = o.Slug
 			}
 
 			if _, err := srv.Onboards.Complete(cmd.Context(), u.ID, onboard.MethodCLIInit); err != nil {
@@ -84,16 +88,19 @@ func newInitCmd(bootServer ServerBootFn) *cobra.Command {
 				}
 				return err
 			}
+			if srv.CompleteOnboarding != nil {
+				srv.CompleteOnboarding(cmd.Context())
+			}
 
-			cmd.Printf("opensheet: onboarded admin=%s (org=%s, project=%s)\n", u.Email, orgSlug, projectSlug)
+			cmd.Printf("opensheet: onboarded admin=%s (org=%s, project=%s)\n", u.Email, orgSlug, cmp.Or(projectSlug, "none"))
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "admin email")
 	cmd.Flags().StringVar(&name, "name", "", "admin display name (defaults to email when empty)")
-	cmd.Flags().StringVar(&orgSlug, "org-slug", "default", "first org slug")
+	cmd.Flags().StringVar(&orgSlug, "org-slug", "", "first org slug (empty: tenant.singletonOrg.slug, else generated)")
 	cmd.Flags().StringVar(&orgName, "org-name", "Default Organization", "first org name")
-	cmd.Flags().StringVar(&projectSlug, "project-slug", "default", "first project slug")
+	cmd.Flags().StringVar(&projectSlug, "project-slug", "", "first project slug")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "prompt for missing values on stdin")
 	return cmd
 }

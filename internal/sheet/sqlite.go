@@ -45,6 +45,7 @@ type sqliteSheetRow struct {
 	ContractReason string  `alias:"sheets.contract_reason"`
 	SoftDelete     int64   `alias:"sheets.soft_delete"`
 	ContentDigest  string  `alias:"sheets.content_digest"`
+	HeaderColumns  string  `alias:"sheets.header_columns"`
 }
 
 func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
@@ -76,6 +77,10 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 	if err != nil {
 		return nil, err
 	}
+	headerColumns, err := decodeHeaderColumns(r.HeaderColumns)
+	if err != nil {
+		return nil, err
+	}
 	return &Sheet{
 		ID:            id,
 		OrgID:         oid,
@@ -95,6 +100,7 @@ func (r *sqliteSheetRow) toSheet() (*Sheet, error) {
 		ContractReason: r.ContractReason,
 		SoftDelete:     r.SoftDelete != 0,
 		ContentDigest:  r.ContentDigest,
+		HeaderColumns:  headerColumns,
 	}, nil
 }
 
@@ -111,7 +117,8 @@ func parseSQLiteTimePtr(raw *string) (*time.Time, error) {
 }
 
 func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
-	if _, err := tenant.From(ctx); err != nil {
+	tc, err := tenant.From(ctx)
+	if err != nil {
 		return err
 	}
 	secs := secsFromTTL(sh.CacheTTL)
@@ -119,6 +126,10 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 	updatedAt := sqliteent.SQLiteTime(sh.UpdatedAt)
 	contractOK := boolToInt(sh.ContractOK)
 	softDelete := boolToInt(sh.SoftDelete)
+	headerColumns, err := encodeHeaderColumns(sh.HeaderColumns)
+	if err != nil {
+		return err
+	}
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sh.ID.String(),
@@ -138,8 +149,10 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 			sh.ContractReason,
 			softDelete,
 			sh.ContentDigest,
+			headerColumns,
 		).
 		ON_CONFLICT(s.table.ID).
+		// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping an attacker-supplied row id from updating another org's row.
 		DO_UPDATE(
 			sqlite.SET(
 				s.table.Tab.SET(sqlite.String(sh.Tab)),
@@ -149,13 +162,32 @@ func (s *sqliteStore) Save(ctx context.Context, sh *Sheet) error {
 				s.table.Writable.SET(sqlite.Int(writable)),
 				s.table.UpdatedAt.SET(sqlite.String(updatedAt)),
 				s.table.SoftDelete.SET(sqlite.Int(softDelete)),
-			),
+				s.table.HeaderColumns.SET(sqlite.StringExp(
+					sqlite.CASE().
+						WHEN(s.table.Tab.EQ(sqlite.String(sh.Tab))).THEN(s.table.HeaderColumns).
+						ELSE(sqlite.String("")),
+				)),
+				// NOTE: a retab moves the stored generation, never the loaded one, so a refresh of the old tab fails its guard.
+				s.table.Generation.SET(sqlite.IntExp(
+					sqlite.CASE().
+						WHEN(s.table.Tab.EQ(sqlite.String(sh.Tab))).THEN(s.table.Generation).
+						ELSE(s.table.Generation.ADD(sqlite.Int(1))),
+				)),
+			).WHERE(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
 		)
-	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+	res, err := stmt.ExecContext(ctx, s.db)
+	if err != nil {
 		if isSQLiteUniqueViolation(err) {
 			return &AlreadyExistsError{Field: "slug", Value: sh.Slug}
 		}
 		return fmt.Errorf("sheet.sqlite.Save: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sheet.sqlite.Save: rows affected: %w", err)
+	}
+	if n == 0 {
+		return &NotFoundError{ID: sh.ID.String()}
 	}
 	return nil
 }

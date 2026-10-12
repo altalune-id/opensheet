@@ -1,0 +1,157 @@
+{
+  "api_key_create": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "object",
+        "properties": {
+          "org": {
+            "type": "string",
+            "description": "Org is the organization slug."
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "additionalProperties": false
+  },
+  "ping": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "object",
+        "properties": {
+          "org": {
+            "type": "string",
+            "description": "Org is the organization slug."
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "echo": {
+        "type": "string",
+        "description": "Echo is the text sent back verbatim."
+      },
+      "big": {
+        "type": "string",
+        "pattern": "^-?[0-9]+$"
+      },
+      "small": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "ratio": {
+        "type": "number"
+      },
+      "loud": {
+        "type": "boolean"
+      },
+      "blob": {
+        "type": "string",
+        "format": "byte"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "labels": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "scoped": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "org": {
+              "type": "string",
+              "description": "Org is the organization slug."
+            },
+            "project": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "KIND_UNSPECIFIED",
+          "KIND_FAST",
+          "KIND_SLOW"
+        ]
+      },
+      "at": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "node": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "child": {
+            "type": "object"
+          },
+          "siblings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "note": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "echo"
+    ],
+    "additionalProperties": false
+  },
+  "poke_target": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "type": "object",
+        "properties": {
+          "org": {
+            "type": "string",
+            "description": "Org is the organization slug."
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "confirm": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "additionalProperties": false
+  }
+}

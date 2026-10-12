@@ -51,9 +51,14 @@ type pgSheetRow struct {
 	ContractReason string     `alias:"sheets.contract_reason"`
 	SoftDelete     bool       `alias:"sheets.soft_delete"`
 	ContentDigest  string     `alias:"sheets.content_digest"`
+	HeaderColumns  string     `alias:"sheets.header_columns"`
 }
 
-func (r *pgSheetRow) toSheet() *Sheet {
+func (r *pgSheetRow) toSheet() (*Sheet, error) {
+	headerColumns, err := decodeHeaderColumns(r.HeaderColumns)
+	if err != nil {
+		return nil, err
+	}
 	return &Sheet{
 		ID:            r.ID,
 		OrgID:         r.OrgID,
@@ -73,7 +78,8 @@ func (r *pgSheetRow) toSheet() *Sheet {
 		ContractReason: r.ContractReason,
 		SoftDelete:     r.SoftDelete,
 		ContentDigest:  r.ContentDigest,
-	}
+		HeaderColumns:  headerColumns,
+	}, nil
 }
 
 func utcOrNil(t *time.Time) *time.Time {

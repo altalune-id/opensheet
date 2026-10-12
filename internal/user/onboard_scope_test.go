@@ -13,8 +13,6 @@ import (
 	"altalune.id/opensheet/internal/user"
 )
 
-// scopeSpyProjects records the tenant scope ListByOrg is called with. The postgres store derives
-// its transaction from that scope, so an unscoped call fails at runtime with tenant: missing context.
 type scopeSpyProjects struct {
 	*fakeProjects
 	sawOrgID uuid.UUID
@@ -36,14 +34,14 @@ func TestOnboard_ScopesProjectReadsToTheJoinedOrg(t *testing.T) {
 	invites := newFakeInvites()
 	users := fakes.NewUser()
 
-	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	singleton := &user.OrgRef{ID: uuid.New(), Slug: "primary", Name: "Primary", OwnerID: uuid.New(), CreatedAt: time.Now().UTC(), System: true}
 	require.NoError(t, orgs.Save(context.Background(), singleton))
 	require.NoError(t, invites.Save(context.Background(), &user.InviteRef{
 		ID: uuid.New(), OrgID: singleton.ID, Email: "alice@example.com", Role: "member",
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}))
 
-	policy := user.Policy{Mode: user.PolicyModeSelfhosted, SingletonOrgSlug: "primary"}
+	policy := user.Policy{Mode: user.PolicyModeSelfhosted}
 	wf := user.NewOnboardWorkflow(users, orgs, projects, invites, policy, newTestLogger(), noopUnexpected())
 
 	// A user logging in carries no tenant scope — the workflow discovers the org and must bind to it.

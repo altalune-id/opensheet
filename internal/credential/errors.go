@@ -271,7 +271,6 @@ func (*NotConfiguredError) Error() string {
 }
 
 // ToAppError converts the typed error into the wire envelope.
-// CodeCredentialGoogleNotConfigured once internal/apperror and docs/ERROR_CODES.md carry it.
 func (*NotConfiguredError) ToAppError() *apperror.AppError {
 	return apperror.New(
 		apperror.CodeCredentialGoogleNotConfigured,

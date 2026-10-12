@@ -45,8 +45,7 @@ type Credential struct {
 	UpdatedAt          time.Time
 }
 
-// SealAAD composes the additional authenticated data binding a ciphertext to one tenant and one row.
-// SECURITY: this is the only composer; seal and open must both go through it or a stolen ciphertext replays.
+// SealAAD composes the additional authenticated data binding a ciphertext to one tenant and one row. SECURITY: this is the only composer; seal and open must both go through it or a stolen ciphertext replays.
 func SealAAD(orgID, projectID, credentialID uuid.UUID) []byte {
 	return []byte(orgID.String() + "|" + projectID.String() + "|" + credentialID.String())
 }

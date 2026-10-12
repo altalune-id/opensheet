@@ -90,8 +90,6 @@ func TestParseRowClauses_NoClausesIsNotAnError(t *testing.T) {
 	}
 }
 
-// The projection keys its rows with the tab's own header spelling, so the clause
-// must carry that spelling and not the caller's, or the bound field name misses.
 func TestParseRowClauses_CarriesTheKnownColumnSpelling(t *testing.T) {
 	got, err := ParseRowClauses([]string{"status:eq:open"}, testColumns(), "Sheet1")
 	if err != nil {
@@ -176,8 +174,6 @@ func TestParseRowClauses_RefusesAnUnknownColumn(t *testing.T) {
 	}
 }
 
-// capabilities advertises deleted_at whenever soft delete is on, but projectRows
-// strips it from data, so a caller that believes capabilities must be refused.
 func TestParseRowClauses_RefusesDeletedAtInEitherSpelling(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -206,8 +202,6 @@ func TestParseRowClauses_RefusesADuplicateDeletedAtColumn(t *testing.T) {
 	}
 }
 
-// IN () is a syntax error on Postgres and matches nothing on SQLite, so an empty
-// list can never reach a driver.
 func TestParseRowClauses_InList(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -242,8 +236,6 @@ func TestParseRowClauses_InList(t *testing.T) {
 	}
 }
 
-// A value must reach LIKE as literal text: an unescaped % is a wildcard and an
-// unescaped _ matches any single character.
 func TestParseRowClauses_ContainsTreatsMetacharactersLiterally(t *testing.T) {
 	esc := RowLikeEscape
 	tests := []struct {
@@ -351,8 +343,6 @@ func TestParseRowWindow_LimitRefusalNamesTheCap(t *testing.T) {
 	}
 }
 
-// A filtered read can never be unbounded, so an unset cap falls back rather than
-// meaning "no limit" the way sheets.maxPayloadBytes does.
 func TestParseRowWindow_UnsetCapFallsBackToTheDefault(t *testing.T) {
 	for _, maxRows := range []int{0, -1} {
 		got, err := ParseRowWindow("", "", maxRows)
@@ -450,8 +440,6 @@ func TestDecodeRowCursor_Malformed(t *testing.T) {
 	}
 }
 
-// The digest match is the route's 409, not the codec's business, so decoding
-// must not care which digest the cursor names.
 func TestDecodeRowCursor_DoesNotJudgeTheDigest(t *testing.T) {
 	raw, err := EncodeRowCursor(RowCursor{Digest: "stale", RowIndex: 7})
 	if err != nil {
@@ -525,9 +513,6 @@ func TestParseRowClauses_RefusesAHintOnANonHintableOperator(t *testing.T) {
 	}
 }
 
-// The operator token splits on the first "." and the prefix is checked against
-// the known hints FIRST: a known hint on a text-only operator is SHT037, while
-// an unknown prefix stays 3a's SHT031 and never becomes a hint error.
 func TestParseRowClauses_HintCheckPrecedesTheOperatorLookup(t *testing.T) {
 	t.Run("known hint, non-hintable operator", func(t *testing.T) {
 		_, err := ParseRowClauses([]string{"note:num.contains:x"}, testColumns(), "Sheet1")
@@ -588,8 +573,6 @@ func TestParseRowClauses_RefusesANumOperandTheGrammarDoesNotAdmit(t *testing.T) 
 	}
 }
 
-// 15 significant digits is the bound both engines agree on; 16 is not, so the
-// pair either side of it is the case that matters.
 func TestParseRowClauses_NumOperandAtTheSignificanceBoundary(t *testing.T) {
 	accepted := []string{"123456789012345", "0.123456789012345", "-123456789012345", "000000000000001"}
 	for _, value := range accepted {
@@ -637,8 +620,6 @@ func TestParseRowClauses_RefusesADateOperandTheGrammarDoesNotAdmit(t *testing.T)
 	}
 }
 
-// A hinted value keeps 3a's right to contain colons, so SplitN(clause, ":", 3)
-// must stay exactly as it is.
 func TestParseRowClauses_AHintedValueMayContainColons(t *testing.T) {
 	const want = "2026-09-11T00:00:00Z"
 	got, err := ParseRowClauses([]string{"created_at:date.gte:" + want}, testColumns(), "Sheet1")
@@ -671,8 +652,6 @@ func TestParseRowClauses_UnhintedClausesCarryNoHint(t *testing.T) {
 	}
 }
 
-// 3a refuses an unreadable operator before it resolves the column; the hint
-// refusals join that grammar phase rather than sitting behind it.
 func TestParseRowClauses_HintRefusalsPrecedeColumnResolution(t *testing.T) {
 	_, err := ParseRowClauses([]string{"statuz:num.contains:x"}, testColumns(), "Sheet1")
 	if !IsHintNotApplicableError(err) {
@@ -691,9 +670,6 @@ func truncateForName(v string) string {
 	return v[:24] + "…(" + strconv.Itoa(len(v)) + " chars)"
 }
 
-// The float ParseNum yields is deliberately not carried on the clause: a second
-// representation beside Value can drift from it, and a driver calls
-// ParseNum(c.Value) at bind time instead.
 func TestRowClause_CarriesNoSecondRepresentationOfTheValue(t *testing.T) {
 	want := []string{"Column", "Op", "Hint", "Value", "Values", "Pattern"}
 	rt := reflect.TypeFor[RowClause]()
@@ -727,6 +703,7 @@ func TestParseRowSort_EveryDirectionAndHint(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatalf("ParseRowSort(%q) = nil, want %+v", tt.spec, tt.want)
+				return
 			}
 			if *got != tt.want {
 				t.Errorf("ParseRowSort(%q) = %+v, want %+v", tt.spec, *got, tt.want)
@@ -755,8 +732,6 @@ func TestParseRowSort_AbsentOrBlankIsUnsorted(t *testing.T) {
 	}
 }
 
-// query.Get silently takes the first value, which is the silent-typo class the
-// parameter allow-list exists to prevent, so a repeat is refused outright.
 func TestParseRowSort_RefusesARepeatedParameter(t *testing.T) {
 	for _, raw := range [][]string{
 		{"qty:asc", "name:desc"},
@@ -819,8 +794,6 @@ func TestParseRowSort_RefusesAMalformedSpec(t *testing.T) {
 	}
 }
 
-// splitRowHint returns the token unchanged on an unknown prefix, so an unknown
-// hint must land on the direction refusal rather than on a hint error.
 func TestParseRowSort_AnUnknownHintPrefixIsADirectionRefusal(t *testing.T) {
 	_, err := ParseRowSort([]string{"qty:foo.asc"})
 	if !IsInvalidSortError(err) {
@@ -831,8 +804,6 @@ func TestParseRowSort_AnUnknownHintPrefixIsADirectionRefusal(t *testing.T) {
 	}
 }
 
-// ?sort= splits on the first colon only, so a header holding a colon is
-// unsortable exactly as it is already unfilterable.
 func TestParseRowSort_SplitsOnTheFirstColonOnly(t *testing.T) {
 	got, err := ParseRowSort([]string{"a:b:asc"})
 	if got != nil {
@@ -858,8 +829,6 @@ func TestParseRowSort_DirectionsAreCaseSensitive(t *testing.T) {
 	}
 }
 
-// The column is deliberately not resolved here: the tab's column list does not
-// exist until the projection has been written, so SHT041 is the route's refusal.
 func TestParseRowSort_DoesNotValidateTheColumn(t *testing.T) {
 	got, err := ParseRowSort([]string{"nosuchcolumn:asc"})
 	if err != nil {
@@ -870,8 +839,6 @@ func TestParseRowSort_DoesNotValidateTheColumn(t *testing.T) {
 	}
 }
 
-// An optional parsed value is carried as a pointer, mirroring RowWindow.Cursor,
-// so "is this a sorted read?" is one nil check at every later site.
 func TestRowSort_IsCarriedAsAnOptionalPointer(t *testing.T) {
 	field, ok := reflect.TypeFor[RowQuery]().FieldByName("Sort")
 	if !ok {
@@ -889,8 +856,6 @@ func TestRowSort_IsCarriedAsAnOptionalPointer(t *testing.T) {
 	}
 }
 
-// 0 falls back to the default rather than to an unbounded walk: a sorted walk is
-// never unbounded, the same reasoning sheets.maxQueryRows uses.
 func TestMaxSortPagesOf_ZeroAndNegativeFallBackToTheDefault(t *testing.T) {
 	tests := []struct {
 		configured int
@@ -946,8 +911,6 @@ func TestSortedRowCursor_RoundTripsEveryField(t *testing.T) {
 	}
 }
 
-// An absent sort value on the wire as "" collapses the tie-break arm of a text
-// or date walk, which drops every row after the first null.
 func TestEncodeSortedRowCursor_AbsentSortValueIsJSONNull(t *testing.T) {
 	raw, err := EncodeSortedRowCursor(RowCursor{Digest: "abc", RowIndex: 4, NullRank: 1, Page: 1})
 	if err != nil {
@@ -972,8 +935,6 @@ func TestEncodeSortedRowCursor_AbsentSortValueIsJSONNull(t *testing.T) {
 	}
 }
 
-// A blank cell is a real sort value under a text sort, so it must stay a
-// non-nil pointer and never merge with the absent case.
 func TestEncodeSortedRowCursor_EmptySortValueStaysNonNil(t *testing.T) {
 	blank := ""
 	raw, err := EncodeSortedRowCursor(RowCursor{Digest: "abc", RowIndex: 1, SortValue: &blank, Page: 1})

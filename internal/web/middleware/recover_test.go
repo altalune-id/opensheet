@@ -16,7 +16,6 @@ import (
 	"altalune.id/opensheet/internal/web/middleware"
 )
 
-// stubReporter counts calls and returns a fixed AppError.
 type stubReporter struct{ calls int }
 
 func (s *stubReporter) Unexpected(_ context.Context, message string, _ error, _ ...any) *apperror.AppError {
@@ -83,7 +82,7 @@ func TestErrorTemplate_HTMXFragment(t *testing.T) {
 		t.Errorf("status=%d, want 500", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, `class="alt-error"`) {
+	if !strings.Contains(body, `class="alt-error`) {
 		t.Errorf("body missing alt-error marker: %q", body)
 	}
 	if !strings.Contains(body, "kaboom") {

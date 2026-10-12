@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-module-shape.sh — verify each internal domain module carries its canonical file set per docs/MODULE_TEMPLATE.md.
+# check-module-shape.sh — verify each internal domain module carries its canonical file set per ../docs/modules/README.md.
 #
 # Canonical set for a store-backed module <name> under internal/<name>/:
 #   <name>.go     aggregate types + package doc
@@ -22,7 +22,7 @@ fail=0
 declare -a missing_notes
 
 # List of modules that follow the full store-backed shape.
-STORE_BACKED=(todo user org project invite credential spreadsheet sheet apikey)
+STORE_BACKED=(todo user org project invite credential spreadsheet sheet)
 
 # Modules exempt from store-backed conventions.
 STATELESS=(auth)

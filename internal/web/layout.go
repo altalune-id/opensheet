@@ -1,7 +1,7 @@
 package web
 
 import (
-	"os"
+	"net/http"
 	"strings"
 
 	"altalune.id/opensheet/internal/i18n"
@@ -11,23 +11,17 @@ import (
 	"github.com/a-h/templ"
 )
 
-// UIMode names the asset delivery strategy.
-type UIMode string
+// IsHTMXRequest reports whether r was issued by htmx rather than a browser navigation.
+func IsHTMXRequest(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
-const (
-	// UIModeCDN pulls Tailwind/Basecoat/HTMX from public CDNs.
-	UIModeCDN UIMode = "cdn"
-	// UIModeVendored serves them from the embedded /static/* mount.
-	UIModeVendored UIMode = "vendored"
-)
+// HeaderPushURL is the htmx response header that pushes a URL onto the browser history after the swap.
+const HeaderPushURL = "HX-Push-Url"
 
-// ResolveUIMode reads OPENSHEET_UI_MODE; "vendored" flips to vendored, otherwise CDN.
-func ResolveUIMode() UIMode {
-	if os.Getenv("OPENSHEET_UI_MODE") == string(UIModeVendored) {
-		return UIModeVendored
-	}
-	return UIModeCDN
-}
+// HeaderRetarget is the htmx response header that replaces the requesting element's swap target.
+const HeaderRetarget = "HX-Retarget"
+
+// HeaderReswap is the htmx response header that replaces the requesting element's swap style.
+const HeaderReswap = "HX-Reswap"
 
 // NavScope selects which sidebars the shell renders.
 type NavScope string
@@ -39,13 +33,16 @@ const (
 	NavScopeOrg NavScope = "org"
 	// NavScopeProject shows sidebar A and sidebar B.
 	NavScopeProject NavScope = "project"
+	// NavScopeSettings shows sidebar A and the personal settings sidebar in sidebar B's slot.
+	NavScopeSettings NavScope = "settings"
 )
 
 // ActiveNav tells the layout which sidebar item to mark selected.
 type ActiveNav struct {
-	Scope      NavScope
-	OrgKey     string
-	ProjectKey string
+	Scope       NavScope
+	OrgKey      string
+	ProjectKey  string
+	SettingsKey string
 }
 
 // ActiveOrg is what the org switcher pill and menu heading show.
@@ -69,7 +66,6 @@ type LayoutData struct {
 	BasePath      string
 	BaseURL       string
 	Version       string
-	UIMode        UIMode
 	Caps          capabilities.Capabilities
 	Principal     *session.Principal
 	Flash         *FlashMessage
@@ -88,6 +84,10 @@ type LayoutData struct {
 	ColorModes    []ColorMode
 	// RequestID is echoed on every user-visible error so a report can be matched to a log line.
 	RequestID string
+	// SECURITY: every <script> the layout renders must carry this, or the browser refuses to run it.
+	Nonce string
+	// SECURITY: gates the hx-csp nonce gate, which strips every htmx attribute when it cannot read the nonce back.
+	CSPEnforced bool
 }
 
 // LocaleOption is one row in the locale-selector dropdown.
@@ -97,7 +97,7 @@ type LocaleOption struct {
 	Active bool
 }
 
-// Tr returns the translation for key. Args are key/value pairs.
+// Tr returns the translation for key, with args as key/value pairs.
 func (d LayoutData) Tr(key string, args ...any) string {
 	if d.Translator == nil {
 		return key
@@ -105,7 +105,7 @@ func (d LayoutData) Tr(key string, args ...any) string {
 	return d.Translator.T(key, args...)
 }
 
-// TrN returns the pluralized translation with Count auto-injected. Extra args are key/value pairs.
+// TrN returns the pluralized translation with Count auto-injected, with extra args as key/value pairs.
 func (d LayoutData) TrN(key string, n int, args ...any) string {
 	if d.Translator == nil {
 		return key
@@ -143,10 +143,10 @@ type FlashMessage struct {
 // Static returns a basePath-aware URL for a vendored asset (e.g. static/htmx.min.js).
 func (d LayoutData) Static(sub string) string { return Path(d.BasePath, "static/"+sub) }
 
-// Href joins BasePath with a subpath. Templates use this so mounts under /app work.
+// Href joins BasePath with a subpath.
 func (d LayoutData) Href(sub string) string { return Path(d.BasePath, sub) }
 
-// OrgPath returns sub under the active org, so the nested URL shape lives in one place.
+// OrgPath returns sub under the active org.
 func (d LayoutData) OrgPath(sub string) string {
 	if d.ActiveOrg == nil {
 		return d.Href("/orgs")

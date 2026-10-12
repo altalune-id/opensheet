@@ -28,6 +28,7 @@ type pgUserRow struct {
 	Name            string     `alias:"users.name"`
 	IsAdmin         bool       `alias:"users.is_admin"`
 	IDPIssuer       *string    `alias:"users.idp_issuer"`
+	IDPSubject      *string    `alias:"users.idp_subject"`
 	PasswordHash    string     `alias:"users.password_hash"`
 	Locale          string     `alias:"users.locale"`
 	TermsAcceptedAt *time.Time `alias:"users.terms_accepted_at"`
@@ -42,10 +43,15 @@ func (r *pgUserRow) toUser() *User {
 		IsAdmin:      r.IsAdmin,
 		PasswordHash: r.PasswordHash,
 		Locale:       r.Locale,
-		CreatedAt:    r.CreatedAt,
+		CreatedAt:    r.CreatedAt.UTC(),
 	}
-	hasIDPIssuer := r.IDPIssuer != nil && *r.IDPIssuer != ""
-	u.Source = sourceFrom(r.IsAdmin, hasIDPIssuer, r.PasswordHash != "")
+	if r.IDPIssuer != nil {
+		u.IDPIssuer = *r.IDPIssuer
+	}
+	if r.IDPSubject != nil {
+		u.IDPSubject = *r.IDPSubject
+	}
+	u.Source = sourceFrom(r.IsAdmin, u.IDPIssuer != "", r.PasswordHash != "")
 	if r.TermsAcceptedAt != nil {
 		t := r.TermsAcceptedAt.UTC()
 		u.TermsAcceptedAt = &t
@@ -80,10 +86,10 @@ func sourceFrom(isAdmin, hasIDPIssuer, hasPassword bool) string {
 	return SourceGenesis
 }
 
-func isPGUniqueViolation(err error) bool {
+func isPGUniqueViolation(err error) (constraint string, ok bool) {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return pgErr.ConstraintName, true
 	}
-	return false
+	return "", false
 }

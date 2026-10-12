@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package opensheettest.v1;
+
+import "google/protobuf/timestamp.proto";
+import "mcp/v1/annotations.proto";
+
+option go_package = "altalune.id/opensheet/cmd/protoc-gen-mcp/internal/gen/testdata/gen/opensheettest/v1;opensheettestv1";
+
+// FixtureService exercises every schema shape the generator has to render.
+service FixtureService {
+  // Ping echoes the target back and reports the server clock.
+  rpc Ping(PingRequest) returns (PingResponse) {
+    option (mcp.v1.tool) = {
+      required: ["echo"]
+      ui: "app"
+    };
+  }
+  rpc Poke(PokeRequest) returns (PokeResponse) {
+    option (mcp.v1.tool) = {
+      name: "poke_target"
+      description: "Poke the target once."
+      mutation: true
+      destructive: true
+      required: ["target"]
+    };
+  }
+  rpc Rekey(RekeyRequest) returns (RekeyResponse) {
+    option (mcp.v1.tool) = {
+      name: "api_key_create"
+      title: "Create an API key"
+      description: "Mint a new API key for the target."
+      mutation: true
+      required: ["target"]
+    };
+  }
+  rpc Untouched(PingRequest) returns (PingResponse);
+}
+
+// Target names the org and project a request acts on.
+message Target {
+  // Org is the organization slug.
+  string org = 1;
+  string project = 2;
+}
+
+// Kind is the flavor of ping to send.
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_FAST = 1;
+  KIND_SLOW = 2;
+}
+
+// Node is self-referential so the schema builder has to break the cycle.
+message Node {
+  string id = 1;
+  Node child = 2;
+  repeated Node siblings = 3;
+}
+
+message PingRequest {
+  Target target = 1;
+  // Echo is the text sent back verbatim.
+  string echo = 2;
+  int64 big = 3;
+  uint32 small = 4;
+  double ratio = 5;
+  bool loud = 6;
+  bytes blob = 7;
+  repeated string tags = 8;
+  map<string, string> labels = 9;
+  map<string, Target> scoped = 10;
+  Kind kind = 11;
+  google.protobuf.Timestamp at = 12;
+  Node node = 13;
+  optional string note = 14;
+}
+
+message PingResponse {
+  string echo = 1;
+}
+
+message PokeRequest {
+  Target target = 1;
+  bool confirm = 2;
+}
+
+message PokeResponse {
+  string result = 1;
+}
+
+message RekeyRequest {
+  Target target = 1;
+  string label = 2;
+}
+
+message RekeyResponse {
+  string secret = 1;
+}

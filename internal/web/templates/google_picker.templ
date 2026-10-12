@@ -14,8 +14,8 @@ type GooglePickerView struct {
 // NOTE: setAppId is what records the drive.file grant for the picked document. Without it the Picker still
 // returns a file id, but every later Sheets read of that id fails with 404.
 // https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
-// NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so an
-// OPENSHEET_UI_MODE=vendored deployment keeps one external runtime dependency on this page alone.
+// NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so this page alone keeps an
+// external runtime dependency, and an enforcing CSP must admit Google's script and frame origins for it.
 // https://developers.google.com/drive/picker/guides/overview
 templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 	<div class="mx-auto max-w-xl">
@@ -37,8 +37,7 @@ templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 		<noscript>
 			<p class="mt-4 text-sm text-muted-foreground">{ d.Tr("picker.noscript") }</p>
 		</noscript>
-		<script src="https://apis.google.com/js/api.js" async defer onload="opensheetPickerReady()"></script>
-		<script>
+		<script nonce={ d.Nonce }>
 		function opensheetPickerReady() {
 			var host = document.getElementById('opensheet-picker');
 			if (!host || !window.gapi) return;
@@ -65,6 +64,8 @@ templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 			});
 		}
 		</script>
+		<script src="https://apis.google.com/js/api.js" nonce={ d.Nonce }></script>
+		<script nonce={ d.Nonce }>opensheetPickerReady();</script>
 	</div>
 }
 

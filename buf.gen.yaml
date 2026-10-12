@@ -14,3 +14,8 @@ plugins:
     out: gen/openapi
     opt:
       - format=yaml
+  - local: [go, tool, protoc-gen-mcp]
+    out: gen/go
+    opt:
+      - paths=source_relative
+      - ui_prefix=ui://opensheet

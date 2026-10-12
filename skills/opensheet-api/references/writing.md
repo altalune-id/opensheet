@@ -56,7 +56,7 @@ removed outright.
 ## Idempotency
 
 `Idempotency-Key` is keyed to the request body. Replaying the same key with the same body
-returns the first result instead of writing again; replaying it with a *different* body is
+returns the first result instead of writing again; replaying it with a _different_ body is
 rejected. Use a fresh UUID per logical write, and reuse it only when retrying that write.
 
 Without a key, a retry after a timeout appends a duplicate — the spreadsheet has no unique

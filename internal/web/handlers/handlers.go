@@ -23,6 +23,7 @@ import (
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/middleware"
 	"altalune.id/opensheet/internal/web/templates"
 	"altalune.id/opensheet/reqid"
 	"altalune.id/opensheet/version"
@@ -87,7 +88,6 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		BasePath:      d.Cfg.HTTP.BasePath,
 		BaseURL:       d.Cfg.HTTP.BaseURL,
 		Version:       version.Default(),
-		UIMode:        web.ResolveUIMode(),
 		Caps:          d.Caps,
 		Principal:     pp,
 		Locale:        loc,
@@ -98,6 +98,8 @@ func (d Deps) Base(r *http.Request, title string) web.LayoutData {
 		Themes:        web.Themes(),
 		ColorModes:    web.ColorModes(),
 		RequestID:     reqid.FromContext(r.Context()),
+		Nonce:         middleware.NonceFrom(r.Context()),
+		CSPEnforced:   d.Cfg.HTTP.CSP.Enabled && !d.Cfg.HTTP.CSP.ReportOnly,
 	}
 }
 
@@ -106,8 +108,6 @@ func (d Deps) Layout(r *http.Request, title string, nav web.ActiveNav) web.Layou
 	return d.layout(r, title, nav, uuid.Nil, uuid.Nil)
 }
 
-// layout builds a LayoutData for a signed-in page. Both switchers are keyed on pinnedOrg — the org named
-// by the path — falling back to the session's last-used org only on pages that name none.
 // NOTE: the pinned org must be known before the list is split, or it lands in both Current and Switch.
 func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg, pinnedProject uuid.UUID) web.LayoutData {
 	base := d.Base(r, title)
@@ -163,6 +163,25 @@ func (d Deps) orgIDForSlug(r *http.Request, slug string) uuid.UUID {
 	return o.ID
 }
 
+// ProjectFragmentBase builds the LayoutData for an htmx fragment of a project page. NOTE: Deps.Base alone leaves ActiveOrg nil, which collapses every project path to /orgs.
+func (d Deps) ProjectFragmentBase(sc ProjectScope) web.LayoutData {
+	return d.fragmentBase(sc.req, sc.org)
+}
+
+// OrgFragmentBase builds the LayoutData an org-scoped HTMX fragment renders with.
+func (d Deps) OrgFragmentBase(sc OrgScope) web.LayoutData { return d.fragmentBase(sc.req, sc.org) }
+
+func (d Deps) fragmentBase(r *http.Request, o *org.Org) web.LayoutData {
+	l := d.Base(r, "")
+	l.ActiveOrg = &web.ActiveOrg{ID: o.ID.String(), Slug: o.Slug, Name: o.Name}
+	return l
+}
+
+// ProjectURL returns the base-path-qualified URL of suffix under the scope's project.
+func (d Deps) ProjectURL(sc ProjectScope, suffix string) string {
+	return web.Path(d.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, suffix))
+}
+
 // LayoutForProject tags a page as project-scoped and pins both switchers to the org and project the path names.
 func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *project.Project, projectKey string) web.LayoutData {
 	nav := web.ActiveNav{Scope: web.NavScopeProject, ProjectKey: projectKey}
@@ -173,8 +192,7 @@ func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *pro
 	return l
 }
 
-// ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both.
-// SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
+// ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both. SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
 func (d Deps) ProjectScopeFor(w http.ResponseWriter, r *http.Request, orgID uuid.UUID, slug string) (*project.Project, *http.Request, bool) {
 	proj, err := d.Projects.BySlug(r.Context(), orgID, slug)
 	if err != nil {
@@ -275,11 +293,16 @@ func RenderStatus(w http.ResponseWriter, r *http.Request, status int, c templ.Co
 // ErrorPage renders the error.templ full page with the given status/title/message.
 func (d Deps) ErrorPage(w http.ResponseWriter, r *http.Request, status int, title, msg string, cause ...error) {
 	base := d.Base(r, title)
-	RenderStatus(w, r, status, templates.ErrorLayout(base, templates.ErrorView{
+	view := templates.ErrorView{
 		Status: status, Title: title, Message: msg,
 		RequestID: reqid.FromContext(r.Context()),
 		Code:      ErrorRef(cause...),
-	}))
+	}
+	if web.IsHTMXRequest(r) {
+		RenderStatus(w, r, status, templates.ErrorFragment(base, view))
+		return
+	}
+	RenderStatus(w, r, status, templates.ErrorLayout(base, view))
 }
 
 // ErrorRef returns the code carried by the first of errs that is an AppError, or "" when none is.
@@ -292,21 +315,19 @@ func ErrorRef(errs ...error) string {
 	return ""
 }
 
-// OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members.
-// SECURITY: the slug is attacker-supplied and the handler — not RLS — picks the org, so membership is verified here.
-// A non-member gets the same 404 as a bad slug so org slugs cannot be enumerated.
+// OrgScopeFor resolves the org named by slug and returns a context scoped to it, refusing callers who are not members. SECURITY: the handler, not RLS, picks the org, so membership is verified here and a non-member gets the same 404 as a bad slug.
 func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Principal, slug string) (*org.Org, *http.Request, bool) {
 	o, err := d.Orgs.BySlug(r.Context(), slug)
 	if err != nil {
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
-	if _, err := d.Orgs.MembershipOf(ctx, o.ID, p.UserID); err != nil {
+	scoped := orgScopedRequest(r, p, o)
+	if _, err := d.Orgs.MembershipOf(scoped.Context(), o.ID, p.UserID); err != nil {
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	return o, r.WithContext(ctx), true
+	return o, scoped, true
 }
 
 // LoadSession reads the sid cookie, verifies its HMAC, and loads the Principal from the store.

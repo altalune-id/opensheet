@@ -2,7 +2,7 @@ package templates
 
 import "altalune.id/opensheet/internal/web"
 
-// ErrorBanner renders an inline form error with its code and the request id, so a user report maps to a log line. Codes: docs/ERROR_CODES.md.
+// ErrorBanner renders an inline form error with its code and the request id, so a user report maps to a log line. Codes: ../../../docs/errors/README.md.
 templ ErrorBanner(d web.LayoutData, msg, code string) {
 	<div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
 		<p>{ msg }</p>

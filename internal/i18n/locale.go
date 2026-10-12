@@ -77,7 +77,6 @@ func IsInvalidLocaleError(err error) bool {
 	return errors.As(err, &target)
 }
 
-// rtlPrimarySubtags enumerates the BCP-47 primary language subtags rendered right-to-left.
 // NOTE: overridden per-file via `dir: rtl` in the locale YAML front-matter.
 var rtlPrimarySubtags = map[string]struct{}{ //nolint:gochecknoglobals // static lookup table
 	"ar": {},

@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -35,21 +34,21 @@ type probeRoute struct {
 	form   url.Values
 }
 
-// probeRoutes is every path the web stack registers, with a body for the mutating ones.
-// NOTE: asserted complete against the handler sources in TestRoutes_ListCoversEveryRegisteredRoute.
+// NOTE: asserted complete against the registered mux in TestRoutes_ListMatchesTheMux.
 func probeRoutes() []probeRoute {
 	const (
 		org   = "probe-org"
 		proj  = "probe-project"
 		base  = "/orgs/" + org
 		pbase = base + "/projects/" + proj
-		dbase = dataMount + pbase
 	)
 	id := uuid.NewString()
 	return []probeRoute{
 		{http.MethodGet, "/", nil},
 		{http.MethodGet, "/login", nil},
 		{http.MethodGet, "/admin-login", nil},
+		{http.MethodGet, "/login/oidc", nil},
+		{http.MethodGet, "/oauth/callback", nil},
 		{http.MethodGet, "/onboarding", nil},
 		{http.MethodGet, "/welcome", nil},
 		{http.MethodGet, "/terms", nil},
@@ -59,10 +58,10 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, base, nil},
 		{http.MethodGet, base + "/members", nil},
 		{http.MethodGet, base + "/invites", nil},
+		{http.MethodGet, base + "/apikeys", nil},
 		{http.MethodGet, base + "/projects", nil},
 		{http.MethodGet, base + "/projects/new", nil},
 		{http.MethodGet, pbase + "/overview", nil},
-		{http.MethodGet, pbase + "/todos", nil},
 		{http.MethodGet, pbase + "/credentials", nil},
 		{http.MethodGet, pbase + "/spreadsheets", nil},
 		{http.MethodGet, pbase + "/spreadsheets/" + id, nil},
@@ -71,35 +70,33 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/sheets", nil},
 		{http.MethodGet, pbase + "/sheets/" + id, nil},
 		{http.MethodGet, pbase + "/sheets/" + id + "/preview", nil},
-		{http.MethodGet, pbase + "/keys", nil},
-		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
-		{http.MethodGet, dbase + "/sheets/probe-sheet/capabilities", nil},
-		{http.MethodGet, dbase + "/sheets/probe-sheet/rows/" + id, nil},
-		{http.MethodGet, dbase + "/spreadsheets/" + id + "/tabs", nil},
-
-		// NOTE: these two are the only tenant-scoped pages not mounted under /orgs/{org}/projects/{project}.
-		// Google requires an exact-match redirect URI that cannot carry per-tenant path segments, so both
-		// derive their org and project from a signed state and re-check membership through OrgScopeFor.
+		// NOTE: the only tenant-scoped pages outside /orgs/{org}/projects/{project}: Google needs an exact redirect URI, so both read org and project from a signed state.
 		{http.MethodGet, "/credentials/google/callback", nil},
 		{http.MethodGet, "/credentials/google/picker", nil},
+		{http.MethodGet, pbase + "/apikeys", nil},
 		{http.MethodGet, "/signup/complete", nil},
 		{http.MethodGet, "/onboard", nil},
 		{http.MethodGet, "/onboard/oidc", nil},
 		{http.MethodGet, "/onboard/complete", nil},
 		{http.MethodGet, "/invites/accept", nil},
+		{http.MethodGet, "/settings/tokens", nil},
+		{http.MethodGet, "/settings/tokens/projects", nil},
 
 		{http.MethodPost, "/orgs", url.Values{"slug": {"probe-new-org"}, "name": {"Probe New Org"}}},
 		{http.MethodPost, base + "/rename", url.Values{"name": {"Renamed"}}},
 		{http.MethodPost, base + "/invites", url.Values{"email": {"probe@example.com"}, "role": {"member"}}},
 		{http.MethodPost, base + "/invites/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, base + "/apikeys", url.Values{"name": {"Probe Key"}, "grant": {"all"}}},
+		{http.MethodPost, base + "/apikeys/" + id + "/projects", url.Values{}},
+		{http.MethodPost, base + "/apikeys/" + id + "/all-projects", url.Values{}},
+		{http.MethodPost, base + "/apikeys/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, "/settings/tokens", url.Values{"org": {org}, "name": {"Probe Token"}, "grant": {"all"}, "expires_in": {"7"}}},
+		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/projects", url.Values{}},
+		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/all-projects", url.Values{}},
+		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, base + "/members/" + id + "/remove", url.Values{}},
 		{http.MethodPost, base + "/projects", url.Values{"slug": {"probe-new-project"}, "name": {"Probe New Project"}}},
 		{http.MethodPost, pbase + "/rename", url.Values{"name": {"Renamed"}}},
-		{http.MethodPost, pbase + "/todos", url.Values{"title": {"probe"}}},
-		{http.MethodPost, pbase + "/todos/clear", url.Values{}},
-		{http.MethodPost, pbase + "/todos/" + id + "/toggle", url.Values{}},
-		{http.MethodPost, pbase + "/todos/" + id + "/delete", url.Values{}},
-		{http.MethodDelete, pbase + "/todos/" + id, nil},
 		{http.MethodPost, pbase + "/credentials", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, pbase + "/credentials/google/start", url.Values{}},
 		{http.MethodPost, pbase + "/credentials/" + id + "/delete", url.Values{}},
@@ -112,17 +109,8 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, pbase + "/sheets/" + id, url.Values{"tab": {"Probe"}, "visibility": {"key"}}},
 		{http.MethodPost, pbase + "/sheets/" + id + "/purge", url.Values{}},
 		{http.MethodPost, pbase + "/sheets/" + id + "/delete", url.Values{}},
-		{http.MethodPost, pbase + "/keys", url.Values{"name": {"Probe"}, "scopes": {"sheets:read"}}},
-		{http.MethodPost, pbase + "/keys/" + id + "/revoke", url.Values{}},
-		{http.MethodPost, pbase + "/keys/" + id + "/delete", url.Values{}},
-		{http.MethodPost, dbase + "/sheets/probe-sheet", nil},
-		{http.MethodPost, dbase + "/sheets/probe-sheet/rows", nil},
-		{http.MethodPost, dbase + "/sheets/probe-sheet/rows/batch", nil},
-		{http.MethodPut, dbase + "/sheets/probe-sheet/rows/" + id, nil},
-		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
-		{http.MethodDelete, dbase + "/sheets/probe-sheet/rows/" + id, nil},
-		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
-		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
+		{http.MethodPost, pbase + "/apikeys", url.Values{"name": {"Probe Key"}, "scopes": {"sheets:read"}}},
+		{http.MethodPost, pbase + "/apikeys/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, "/onboarding", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/welcome", url.Values{"name": {"Probe"}}},
 		{http.MethodPost, "/signup/complete", url.Values{
@@ -142,15 +130,37 @@ func probeRoutes() []probeRoute {
 	}
 }
 
+const dataMount = "/api/v1"
+
+func dataProbeRoutes() []probeRoute {
+	const dbase = dataMount + "/orgs/probe-org/projects/probe-project"
+	id := uuid.NewString()
+	return []probeRoute{
+		{http.MethodGet, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet/capabilities", nil},
+		{http.MethodGet, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodGet, dbase + "/spreadsheets/" + id + "/tabs", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet/rows", nil},
+		{http.MethodPost, dbase + "/sheets/probe-sheet/rows/batch", nil},
+		{http.MethodPut, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodPatch, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/rows/" + id, nil},
+		{http.MethodPost, dbase + "/spreadsheets/" + id + "/tabs", nil},
+		{http.MethodDelete, dbase + "/sheets/probe-sheet/cache", nil},
+	}
+}
+
 func newScopeProbeServer(t *testing.T, mode config.Mode, tweak ...func(*config.Config)) (*boot.Server, *bytes.Buffer) {
 	t.Helper()
 	cfg := newSmokeCfg(t)
+	cfg.DataPlane.Enabled = true
 	cfg.Mode = mode
 	for _, fn := range tweak {
 		fn(cfg)
 	}
 	if mode == config.ModeCloud {
-		// NOTE: org creation and the signup flow are cloud-only capabilities — the paths every tenant-scope bug so far landed on.
+		// NOTE: org creation and the signup flow are cloud-only capabilities.
 		cfg.OIDC = config.OIDCConfig{
 			Issuer:       stubIssuer(t),
 			ClientID:     "probe-client",
@@ -160,8 +170,7 @@ func newScopeProbeServer(t *testing.T, mode config.Mode, tweak ...func(*config.C
 	var logBuf bytes.Buffer
 	log := boot.WithLogger(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	// NOTE: OnboardingGate 303s every route to /onboard until the deployment is onboarded, which would
-	// make the walk below prove nothing — so mark it onboarded on a first boot, then boot the server under test.
+	// NOTE: OnboardingGate 303s every route to /onboard until the deployment is onboarded, so mark it onboarded first.
 	seed, err := boot.BootServer(context.Background(), cfg, log)
 	require.NoError(t, err)
 	seedUser, err := seed.Users.Create(context.Background(), user.CreateRequest{
@@ -222,11 +231,10 @@ func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
 		"a cookie signed with the raw config string must not authenticate")
 }
 
-// walkRoutes drives every route as p and fails on any 5xx or any tenant-scope error.
 func walkRoutes(t *testing.T, srv *boot.Server, logBuf *bytes.Buffer, p session.Principal, label string) {
 	t.Helper()
 	cookie := probeCookie(t, srv, p)
-	for _, rt := range probeRoutes() {
+	for _, rt := range append(probeRoutes(), dataProbeRoutes()...) {
 		t.Run(label+" "+rt.method+" "+rt.path, func(t *testing.T) {
 			logBuf.Reset()
 			var req *http.Request
@@ -255,7 +263,12 @@ func walkRoutes(t *testing.T, srv *boot.Server, logBuf *bytes.Buffer, p session.
 func TestRoutes_FreshUserWithoutAnOrgNeverHitsATenantScopeError(t *testing.T) {
 	for _, mode := range []config.Mode{config.ModeSelfhosted, config.ModeCloud} {
 		srv, logBuf := newScopeProbeServer(t, mode)
-		walkRoutes(t, srv, logBuf, session.Principal{UserID: uuid.New()}, string(mode)+" no-org")
+		// NOTE: a real row, not a bare uuid — sessions.user_id has a foreign key to users.
+		fresh, err := srv.Users.Create(context.Background(), user.CreateRequest{
+			Email: "probe-fresh@example.com", Name: "Probe Fresh", Source: user.SourceOIDC,
+		})
+		require.NoError(t, err)
+		walkRoutes(t, srv, logBuf, session.Principal{UserID: fresh.ID}, string(mode)+" no-org")
 	}
 }
 
@@ -269,88 +282,130 @@ func TestRoutes_UserWithAnActiveOrgNeverHitsATenantScopeError(t *testing.T) {
 		Slug: "probe-org", Name: "Probe Org", OwnerID: owner.ID,
 	})
 	require.NoError(t, err, "org.Create must work with no ambient tenant scope — the signup case")
+
+	// NOTE: without the project, every project-scoped probe short-circuits on the handler's own 404 and reaches no handler code.
+	orgCtx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	_, err = srv.Projects.Create(orgCtx, o.ID, "probe-project", "Probe Project")
+	require.NoError(t, err)
+
 	walkRoutes(t, srv, logBuf, session.Principal{UserID: owner.ID, ActiveOrgID: o.ID}, "cloud with-org")
 }
 
-// TestRoutes_ListCoversEveryRegisteredRoute keeps the table above honest by deriving the truth from the handler sources.
-func TestRoutes_ListCoversEveryRegisteredRoute(t *testing.T) {
+// TestRoutes_ListMatchesTheMux asserts the probe table and the registered mux name the same routes, in both directions.
+func TestRoutes_ListMatchesTheMux(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+
 	walked := map[string]bool{}
 	for _, rt := range probeRoutes() {
 		walked[rt.method+" "+templatize(rt.path)] = true
 	}
-	for _, pat := range registeredRoutes(t) {
-		require.True(t, walked[pat],
-			"%q is registered but no probe walks it — add it to the routes table in %s", pat, "route_scope_test.go")
-	}
-}
-
-// dataMount is the prefix internal/data registers behind, stripped before its own mux sees a request.
-const dataMount = "/api/v1"
-
-// TestRoutes_EveryProbeMatchesARegisteredRoute is the reverse of the assertion above: a probe row no
-// handler registers walks nothing, so the walk would quietly stop proving anything about that route.
-func TestRoutes_EveryProbeMatchesARegisteredRoute(t *testing.T) {
 	registered := map[string]bool{}
-	for _, pat := range registeredRoutes(t) {
+	for _, pat := range srv.Routes {
 		registered[pat] = true
 	}
-	for _, rt := range probeRoutes() {
-		pat := rt.method + " " + templatize(rt.path)
+	require.NotEmpty(t, registered, "the server registered no app routes")
+
+	for pat := range registered {
+		require.True(t, walked[pat],
+			"%q is registered on the mux but no probe walks it — add it to probeRoutes in route_scope_test.go", pat)
+	}
+	for pat := range walked {
 		require.True(t, registered[pat],
-			"%q is walked by a probe but no handler registers it — drop the probe or fix its path", pat)
+			"%q is probed but the mux does not register it — the handler was dropped from AppHandlers, or the probe is stale", pat)
 	}
 }
 
-var (
-	reRegister = regexp.MustCompile(`\w+\.HandleFunc\("([A-Z]+) ([^"]+)"`)
-	reUUID     = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-)
+var reUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
-// templatize rewrites a concrete probe path back into the mux pattern it exercises.
 func templatize(path string) string {
 	path = reUUID.ReplaceAllString(path, "{id}")
 	path = strings.Replace(path, "/orgs/probe-org", "/orgs/{org}", 1)
+	path = strings.Replace(path, "/settings/tokens/probe-org/", "/settings/tokens/{org}/", 1)
 	path = strings.Replace(path, "/projects/probe-project", "/projects/{project}", 1)
-	path = strings.Replace(path, "/sheets/probe-sheet", "/sheets/{slug}", 1)
 	if strings.HasPrefix(path, "/orgs/{org}/members/{id}/") {
 		path = strings.Replace(path, "/members/{id}/", "/members/{user}/", 1)
 	}
+	path = strings.Replace(path, "/sheets/probe-sheet", "/sheets/{slug}", 1)
 	if path == "/" {
 		return "/{$}"
 	}
 	return path
 }
 
-// registeredRoutes scrapes every surface mounted on srv.Web, prefixing each surface's patterns with
-// the mount its own mux sits behind so the results are comparable with a concrete probe path.
-func registeredRoutes(t *testing.T) []string {
-	t.Helper()
-	surfaces := []struct{ glob, mount string }{
-		{"../web/handlers/*.go", ""},
-		{"../data/*.go", dataMount},
+var reRegister = regexp.MustCompile(`\w+\.HandleFunc\("([A-Z]+) ([^"]+)"`)
+
+// TestRoutes_DataProbesMatchTheDataPlane asserts the data probe table and the data plane's registered patterns name the same routes, in both directions.
+func TestRoutes_DataProbesMatchTheDataPlane(t *testing.T) {
+	b, err := os.ReadFile("../dataplane/sheets_opensheet.go")
+	require.NoError(t, err)
+	registered := map[string]bool{}
+	for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
+		registered[m[1]+" "+dataMount+m[2]] = true
 	}
-	var out []string
-	for _, s := range surfaces {
-		files, err := filepath.Glob(s.glob)
-		require.NoError(t, err)
-		found := 0
-		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") {
-				continue
-			}
-			b, rErr := os.ReadFile(f)
-			require.NoError(t, rErr)
-			for _, m := range reRegister.FindAllStringSubmatch(string(b), -1) {
-				out = append(out, m[1]+" "+s.mount+m[2])
-				found++
-			}
-		}
-		require.NotZero(t, found, "found no registered routes under %s — the scraper regex has gone stale", s.glob)
+	require.NotEmpty(t, registered, "found no registered data plane routes; the scraper regex has gone stale")
+
+	walked := map[string]bool{}
+	for _, rt := range dataProbeRoutes() {
+		walked[rt.method+" "+templatize(rt.path)] = true
 	}
-	return out
+	for pat := range registered {
+		require.True(t, walked[pat], "%q is registered on the data plane but no probe walks it; add it to dataProbeRoutes", pat)
+	}
+	for pat := range walked {
+		require.True(t, registered[pat], "%q is probed but the data plane does not register it; the probe is stale", pat)
+	}
 }
 
-// stubIssuer serves the discovery document boot needs so cloud mode can be exercised without network access.
+// TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface drives the booted server with api.enabled false: the data plane must still answer with its JSON envelope.
+func TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
+		cfg.API.Enabled = false
+	})
+
+	req := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+	require.JSONEq(t, `{"error":{"code":"`+apperror.CodeSheetNotFound+`","message":"Sheet not found"}}`, rec.Body.String())
+}
+
+// TestRoutes_DataPlaneDisabledIsUnmounted proves dataplane.enabled=false takes the sheet data plane off /api/v1/.
+func TestRoutes_DataPlaneDisabledIsUnmounted(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
+		cfg.API.Enabled = false
+		cfg.DataPlane.Enabled = false
+	})
+
+	req := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	rec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rec, req)
+
+	require.NotContains(t, rec.Body.String(), apperror.CodeSheetNotFound, "a disabled data plane still answered")
+}
+
+// TestRoutes_DataPlaneWinsTheAPISubtree locks the mount precedence with both surfaces mounted: /api/v1/ is more specific than /api/.
+func TestRoutes_DataPlaneWinsTheAPISubtree(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
+		cfg.API.Enabled = true
+	})
+
+	data := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
+	dataRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(dataRec, data)
+	require.Equal(t, http.StatusNotFound, dataRec.Code)
+	require.Contains(t, dataRec.Body.String(), apperror.CodeSheetNotFound,
+		"the data plane must own /api/v1/, not the Connect handler")
+
+	rpc := httptest.NewRequest(http.MethodPost, "/api/project.v1.ProjectService/ListProjects", strings.NewReader("{}"))
+	rpc.Header.Set("Content-Type", "application/json")
+	rpcRec := httptest.NewRecorder()
+	srv.Web.ServeHTTP(rpcRec, rpc)
+	require.NotContains(t, rpcRec.Body.String(), apperror.CodeSheetNotFound,
+		"the RPC subtree must not be swallowed by the data plane")
+}
+
 func stubIssuer(t *testing.T) string {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -374,44 +429,6 @@ func stubIssuer(t *testing.T) string {
 		_, _ = w.Write([]byte(`{"keys":[]}`))
 	})
 	return ts.URL
-}
-
-// TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface drives the booted server: api.enabled is false in
-// the probe config, so buildAPIHandler returns nil, and the data plane must still answer with its JSON envelope.
-func TestRoutes_DataPlaneIsMountedRegardlessOfTheRPCSurface(t *testing.T) {
-	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted)
-	require.False(t, srv.Cfg.API.Enabled, "the probe config must leave the RPC surface off for this test to mean anything")
-
-	req := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
-	rec := httptest.NewRecorder()
-	srv.Web.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
-	require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
-	require.JSONEq(t, `{"error":{"code":"`+apperror.CodeSheetNotFound+`","message":"Sheet not found"}}`, rec.Body.String())
-}
-
-// TestRoutes_DataPlaneWinsTheAPISubtree locks the mount precedence on the booted server with both
-// surfaces mounted: /api/v1/ is more specific than /api/, so ServeMux routes it to the data plane.
-func TestRoutes_DataPlaneWinsTheAPISubtree(t *testing.T) {
-	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(cfg *config.Config) {
-		cfg.API.Enabled = true
-	})
-	require.True(t, srv.Cfg.API.Enabled)
-
-	data := httptest.NewRequest(http.MethodGet, dataMount+"/orgs/nope/projects/nope/sheets/nope", http.NoBody)
-	dataRec := httptest.NewRecorder()
-	srv.Web.ServeHTTP(dataRec, data)
-	require.Equal(t, http.StatusNotFound, dataRec.Code)
-	require.Contains(t, dataRec.Body.String(), apperror.CodeSheetNotFound,
-		"the data plane must own /api/v1/, not the Connect handler")
-
-	rpc := httptest.NewRequest(http.MethodPost, "/api/todo.v1.TodoService/List", strings.NewReader("{}"))
-	rpc.Header.Set("Content-Type", "application/json")
-	rpcRec := httptest.NewRecorder()
-	srv.Web.ServeHTTP(rpcRec, rpc)
-	require.NotContains(t, rpcRec.Body.String(), apperror.CodeSheetNotFound,
-		"the RPC subtree must not be swallowed by the data plane")
 }
 
 // TestRoutes_NonMemberCannotReachAnotherOrg locks the membership gate: the slug is attacker-supplied and RLS cannot gate it.
@@ -476,8 +493,7 @@ func TestRoutes_InlineFormErrorCarriesTheRequestID(t *testing.T) {
 	require.Contains(t, body, rid, "the id in the page must be the one in the header and the log")
 }
 
-// TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo covers the Members/Invites pages, where the
-// switcher pins to the org in the URL rather than the session's active org.
+// TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo covers the pages that pin the switcher to the org in the URL.
 func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
 	srv, _ := newScopeProbeServer(t, config.ModeCloud)
 
@@ -510,8 +526,6 @@ func TestOrgSwitcher_PinnedOrgIsNotAlsoOfferedToSwitchTo(t *testing.T) {
 	}
 }
 
-// orgSwitcherPanel returns the org switcher's dropdown body, excluding the pill label that always
-// names the current org, so a count inside it reflects the Current and Switch entries alone.
 func orgSwitcherPanel(t *testing.T, body string) string {
 	t.Helper()
 	i := strings.Index(body, "data-switcher")
@@ -525,8 +539,7 @@ func orgSwitcherPanel(t *testing.T, body string) string {
 	return rest[:end]
 }
 
-// TestMembersPage_RemoveButtonMatchesTheServiceGate keeps the rendered button in step with org.RemovalRefusal:
-// a button the post would refuse is a dead end, and a missing button hides a legitimate action.
+// TestMembersPage_RemoveButtonMatchesTheServiceGate keeps the rendered button in step with org.RemovalRefusal.
 func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	srv, _ := newScopeProbeServer(t, config.ModeCloud)
 	ctx := context.Background()
@@ -567,7 +580,6 @@ func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 	require.NotContains(t, body, removeForm(viewer.ID), "the signed-in member must not offer to remove themselves")
 	require.Contains(t, body, removeForm(coOwner.ID), "an owner viewing the page may remove a co-owner")
 
-	// The rendered gate must agree with the service for every row on the page.
 	for _, u := range []uuid.UUID{viewer.ID, coOwner.ID, plain.ID} {
 		m, mErr := srv.Orgs.MembershipOf(scoped, o.ID, u)
 		require.NoError(t, mErr)

@@ -172,7 +172,7 @@ func validateRedirectURL(raw string) error {
 	}
 }
 
-// verifyAzp enforces OIDC Core Section 3.1.3.7: when aud has more than one entry, azp MUST equal the RP's ClientID.
+// NOTE: OIDC Core 3.1.3.7 — when aud has more than one entry, azp MUST equal the RP's ClientID.
 func verifyAzp(idToken *oidc.IDToken, clientID string) error {
 	if len(idToken.Audience) <= 1 {
 		return nil

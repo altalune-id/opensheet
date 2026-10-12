@@ -15,10 +15,12 @@ type User struct {
 	mu    sync.Mutex
 	byID  map[uuid.UUID]*user.User
 	byMap map[string]uuid.UUID
+	byIDP map[string]uuid.UUID
 	// SaveErr, if non-nil, is returned from Save (once, unless StickyError is true).
 	SaveErr     error
 	ByIDErr     error
 	ByEmailErr  error
+	ByIDPErr    error
 	StickyError bool
 }
 
@@ -29,6 +31,7 @@ func NewUser() *User {
 	return &User{
 		byID:  map[uuid.UUID]*user.User{},
 		byMap: map[string]uuid.UUID{},
+		byIDP: map[string]uuid.UUID{},
 	}
 }
 
@@ -50,10 +53,49 @@ func (f *User) Save(_ context.Context, u *user.User) error {
 	if existing, ok := f.byMap[email]; ok && existing != u.ID {
 		return &user.AlreadyExistsError{Field: "email", Value: u.Email}
 	}
+	idp := idpKey(u.IDPIssuer, u.IDPSubject)
+	if idp != "" {
+		if existing, ok := f.byIDP[idp]; ok && existing != u.ID {
+			return &user.AlreadyExistsError{Field: "idp_subject", Value: u.IDPSubject}
+		}
+	}
+	if prev, ok := f.byID[u.ID]; ok {
+		delete(f.byMap, strings.ToLower(strings.TrimSpace(prev.Email)))
+		delete(f.byIDP, idpKey(prev.IDPIssuer, prev.IDPSubject))
+	}
 	cp := *u
 	f.byID[u.ID] = &cp
 	f.byMap[email] = u.ID
+	if idp != "" {
+		f.byIDP[idp] = u.ID
+	}
 	return nil
+}
+
+// ByIDP returns a copy of the user linked to the issuer/subject pair, if present.
+func (f *User) ByIDP(_ context.Context, issuer, subject string) (*user.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ByIDPErr != nil {
+		err := f.ByIDPErr
+		if !f.StickyError {
+			f.ByIDPErr = nil
+		}
+		return nil, err
+	}
+	id, ok := f.byIDP[idpKey(issuer, subject)]
+	if !ok {
+		return nil, &user.NotFoundError{Subject: subject}
+	}
+	cp := *f.byID[id]
+	return &cp, nil
+}
+
+func idpKey(issuer, subject string) string {
+	if issuer == "" || subject == "" {
+		return ""
+	}
+	return issuer + "\x00" + subject
 }
 
 // ByID returns a copy of the user if present.

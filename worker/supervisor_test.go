@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -95,5 +97,68 @@ func TestSupervisor_WorkersReportsRegistrationOrder(t *testing.T) {
 	got[0] = stubWorker{name: "mutated", run: blockUntilDone}
 	if s.Workers()[0].Name() != "a" {
 		t.Fatal("Workers() must return a copy the caller cannot use to mutate the supervisor")
+	}
+}
+
+type levelRecorder struct {
+	mu     sync.Mutex
+	errors []string
+}
+
+func (r *levelRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (r *levelRecorder) Handle(_ context.Context, rec slog.Record) error {
+	if rec.Level < slog.LevelError {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.errors = append(r.errors, rec.Message)
+	return nil
+}
+
+func (r *levelRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
+
+func (r *levelRecorder) WithGroup(string) slog.Handler { return r }
+
+func TestSupervisor_ParentCancelIsACleanExit(t *testing.T) {
+	rec := &levelRecorder{}
+	s := New(slog.New(rec))
+	s.Register(stubWorker{"returns-ctx-err", func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }})
+	s.Register(stubWorker{"wraps-ctx-err", func(ctx context.Context) error {
+		<-ctx.Done()
+		return fmt.Errorf("drain: %w", ctx.Err())
+	}})
+	s.Register(stubWorker{"returns-nil", func(ctx context.Context) error { <-ctx.Done(); return nil }})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	if err := s.Run(ctx); err != nil {
+		t.Fatalf("Run after a parent cancel = %v, want nil", err)
+	}
+	if len(rec.errors) != 0 {
+		t.Fatalf("a clean shutdown logged at ERROR: %v", rec.errors)
+	}
+}
+
+func TestSupervisor_CanceledWithoutAShutdownIsStillAnError(t *testing.T) {
+	s := New(newTestLogger())
+	s.Register(stubWorker{"spurious", func(context.Context) error { return context.Canceled }})
+	if err := s.Run(context.Background()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled surfaced while nothing asked for a shutdown", err)
+	}
+}
+
+func TestSupervisor_SiblingFailureSurvivesTheCancelItCauses(t *testing.T) {
+	rec := &levelRecorder{}
+	s := New(slog.New(rec))
+	fatal := errors.New("boom")
+	s.Register(stubWorker{"bad", func(context.Context) error { return fatal }})
+	s.Register(stubWorker{"good", func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }})
+	if err := s.Run(context.Background()); !errors.Is(err, fatal) {
+		t.Fatalf("Run = %v, want %v", err, fatal)
+	}
+	if len(rec.errors) != 1 {
+		t.Fatalf("ERROR lines = %v, want exactly the failing worker", rec.errors)
 	}
 }

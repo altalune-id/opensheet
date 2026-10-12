@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,19 +16,19 @@ import (
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
-// NOTE: the definer wrappers are set-returning functions in FROM position, which go-jet cannot build;
-// the column aliases mirror what jet emits for a real table so pgOrgRow still maps.
+// NOTE: the definer wrappers are set-returning functions in FROM position, which go-jet cannot build; the column aliases mirror what jet emits for a real table so pgOrgRow still maps.
 const orgFuncSelect = `SELECT o.id AS "orgs.id", o.slug AS "orgs.slug", o.name AS "orgs.name", ` +
 	`o.created_by AS "orgs.created_by", o.created_at AS "orgs.created_at", o.system AS "orgs.system" FROM `
 
 type postgresStore struct {
-	pool              pdb.Pool
-	pc                *tenant.PgConn
-	orgs              *pgent.Orgs
-	members           *pgent.Memberships
-	users             *pgent.Users
-	resolveBySlugStmt string
-	listForUserStmt   string
+	pool                 pdb.Pool
+	pc                   *tenant.PgConn
+	orgs                 *pgent.Orgs
+	members              *pgent.Memberships
+	users                *pgent.Users
+	resolveBySlugStmt    string
+	resolveSystemOrgStmt string
+	listForUserStmt      string
 }
 
 func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix string) *postgresStore {
@@ -36,14 +37,16 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 	}
 	fnPrefix := schema + "." + tablePrefix
 	return &postgresStore{
-		pool:              pool,
-		pc:                pc,
-		orgs:              pgent.NewOrgs(schema, tablePrefix),
-		members:           pgent.NewMemberships(schema, tablePrefix),
-		users:             pgent.NewUsers(schema, tablePrefix),
-		resolveBySlugStmt: orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
-		// NOTE: the outer ORDER BY is the guarantee — Postgres may inline the LANGUAGE sql SRF and drop its internal one.
-		listForUserStmt: orgFuncSelect + fnPrefix + "list_orgs_for_user(#userID) AS o ORDER BY o.created_at ASC, o.id ASC",
+		pool:                 pool,
+		pc:                   pc,
+		orgs:                 pgent.NewOrgs(schema, tablePrefix),
+		members:              pgent.NewMemberships(schema, tablePrefix),
+		users:                pgent.NewUsers(schema, tablePrefix),
+		resolveBySlugStmt:    orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
+		resolveSystemOrgStmt: orgFuncSelect + fnPrefix + "resolve_system_org() AS o",
+		// NOTE: a SELECT without ORDER BY has no guaranteed row order, whatever ordering the wrapper body carries.
+		listForUserStmt: orgFuncSelect + fnPrefix + "list_orgs_for_user(#userID) AS o" +
+			" ORDER BY o.created_at ASC, o.id ASC",
 	}
 }
 
@@ -62,7 +65,7 @@ func (r *pgOrgRow) toOrg() *Org {
 		Slug:      r.Slug,
 		Name:      r.Name,
 		OwnerID:   r.CreatedBy,
-		CreatedAt: r.CreatedAt,
+		CreatedAt: r.CreatedAt.UTC(),
 		System:    r.System,
 	}
 }
@@ -80,7 +83,7 @@ func (r *pgMembershipRow) toMembership() *Membership {
 		OrgID:     r.OrgID,
 		UserID:    r.UserID,
 		Role:      Role(r.Role),
-		CreatedAt: r.CreatedAt,
+		CreatedAt: r.CreatedAt.UTC(),
 		System:    r.System,
 	}
 }
@@ -100,7 +103,7 @@ func (r *pgMemberProfileRow) toProfile() *MemberProfile {
 		Email:     r.Email,
 		Name:      r.Name,
 		Role:      Role(r.Role),
-		CreatedAt: r.CreatedAt,
+		CreatedAt: r.CreatedAt.UTC(),
 		System:    r.System,
 	}
 }
@@ -132,6 +135,11 @@ func (s *postgresStore) endTx(tx *sql.Tx, owned bool, err error) error {
 		return fmt.Errorf("org.postgres: commit: %w", cerr)
 	}
 	return nil
+}
+
+func isPostgresOneSystemViolation(err error, index string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && strings.HasSuffix(pgErr.ConstraintName, index)
 }
 
 func isPostgresUniqueViolation(err error) bool {

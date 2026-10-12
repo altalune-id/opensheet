@@ -14,6 +14,10 @@ import (
 // enableRLSRe matches `ALTER TABLE {{.Schema}}.{{.TablePrefix}}<name> ENABLE ROW LEVEL SECURITY;`
 var enableRLSRe = regexp.MustCompile(`(?is)ALTER\s+TABLE\s+(?:{{\.Schema}}\.)?{{\.TablePrefix}}(\w+)\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY\s*;`)
 
+var dropTableRe = regexp.MustCompile(`(?is)DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:{{\.Schema}}\.)?{{\.TablePrefix}}(\w+)\s*;`)
+
+var gooseDownRe = regexp.MustCompile(`(?m)^--\s*\+goose\s+Down\b`)
+
 func main() {
 	root, err := moduleRoot()
 	if err != nil {
@@ -35,8 +39,14 @@ func main() {
 		if err != nil {
 			die("read %s: %v", e.Name(), err)
 		}
+		if loc := gooseDownRe.FindIndex(body); loc != nil {
+			body = body[:loc[0]]
+		}
 		for _, m := range enableRLSRe.FindAllSubmatch(body, -1) {
 			seen[string(m[1])] = struct{}{}
+		}
+		for _, m := range dropTableRe.FindAllSubmatch(body, -1) {
+			delete(seen, string(m[1]))
 		}
 	}
 	names := make([]string, 0, len(seen))

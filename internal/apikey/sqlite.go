@@ -3,10 +3,12 @@ package apikey
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/go-jet/jet/v2/qrm"
 	"github.com/go-jet/jet/v2/sqlite"
 	"github.com/google/uuid"
 
@@ -16,240 +18,326 @@ import (
 )
 
 type sqliteStore struct {
-	db     *sql.DB
-	table  *sqliteent.APIKeys
-	grants *sqliteent.APIKeySheets
+	db         *sql.DB
+	keys       *sqliteent.APIKeys
+	grants     *sqliteent.APIKeyProjects
+	grantsExpr sqlite.Expression
 }
 
-func newSQLiteStore(db *sql.DB, tablePrefix string) *sqliteStore {
+func newSQLiteStore(sqlDB *sql.DB, tablePrefix string) *sqliteStore {
 	return &sqliteStore{
-		db:     db,
-		table:  sqliteent.NewAPIKeys(tablePrefix),
-		grants: sqliteent.NewAPIKeySheets(tablePrefix),
+		db:     sqlDB,
+		keys:   sqliteent.NewAPIKeys(tablePrefix),
+		grants: sqliteent.NewAPIKeyProjects(tablePrefix),
+		// NOTE: Raw because go-jet has no builder for a correlated json_group_array subquery in a projection.
+		grantsExpr: sqlite.Raw("COALESCE((SELECT json_group_array(o.project_id) FROM (SELECT g.project_id FROM " + tablePrefix +
+			"api_key_projects g WHERE g.org_id = api_keys.org_id AND g.key_id = api_keys.id ORDER BY g.created_at, g.project_id) o), '[]')"),
 	}
 }
 
-type sqliteAPIKeyRow struct {
-	ID         string  `alias:"api_keys.id"`
-	OrgID      string  `alias:"api_keys.org_id"`
-	ProjectID  string  `alias:"api_keys.project_id"`
-	Name       string  `alias:"api_keys.name"`
-	KeyPrefix  string  `alias:"api_keys.key_prefix"`
-	SecretHash []byte  `alias:"api_keys.secret_hash"`
-	Scopes     string  `alias:"api_keys.scopes"`
-	ExpiresAt  *string `alias:"api_keys.expires_at"`
-	LastUsedAt *string `alias:"api_keys.last_used_at"`
-	RevokedAt  *string `alias:"api_keys.revoked_at"`
-	CreatedAt  string  `alias:"api_keys.created_at"`
+type sqliteKeyRow struct {
+	ID          string  `alias:"api_keys.id"`
+	OrgID       string  `alias:"api_keys.org_id"`
+	ProjectID   *string `alias:"api_keys.project_id"`
+	Kind        string  `alias:"api_keys.kind"`
+	AllProjects bool    `alias:"api_keys.all_projects"`
+	ProjectIDs  string  `alias:"api_keys.project_ids"`
+	Name        string  `alias:"api_keys.name"`
+	SecretHash  []byte  `alias:"api_keys.secret_hash"`
+	SecretHint  string  `alias:"api_keys.secret_hint"`
+	Scopes      string  `alias:"api_keys.scopes"`
+	ResourceIDs string  `alias:"api_keys.resource_ids"`
+	CreatedBy   *string `alias:"api_keys.created_by"`
+	CreatedAt   string  `alias:"api_keys.created_at"`
+	ExpiresAt   *string `alias:"api_keys.expires_at"`
+	RevokedAt   *string `alias:"api_keys.revoked_at"`
+	LastUsedAt  *string `alias:"api_keys.last_used_at"`
 }
 
-func (r *sqliteAPIKeyRow) toAPIKey() (*APIKey, error) {
-	id, err := parseSQLiteUUID("id", r.ID)
+func (r *sqliteKeyRow) toAPIKey() (*APIKey, error) {
+	id, err := uuid.Parse(r.ID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apikey.sqlite: parse id: %w", err)
 	}
-	orgID, err := parseSQLiteUUID("org_id", r.OrgID)
+	oid, err := uuid.Parse(r.OrgID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apikey.sqlite: parse org_id: %w", err)
 	}
-	projectID, err := parseSQLiteUUID("project_id", r.ProjectID)
+	pid, err := parseNullableUUID(r.ProjectID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apikey.sqlite: parse project_id: %w", err)
 	}
-	scopes, err := decodeScopes(r.Scopes)
+	createdBy, err := parseNullableUUID(r.CreatedBy)
 	if err != nil {
-		return nil, fmt.Errorf("apikey.sqlite: scopes: %w", err)
+		return nil, fmt.Errorf("apikey.sqlite: parse created_by: %w", err)
 	}
-	createdAt, err := parseSQLiteTime("created_at", r.CreatedAt)
+	ca, err := time.Parse(time.RFC3339Nano, r.CreatedAt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apikey.sqlite: parse created_at: %w", err)
 	}
-	expiresAt, err := parseSQLiteTimePtr("expires_at", r.ExpiresAt)
-	if err != nil {
-		return nil, err
+	var scopes []string
+	if err := json.Unmarshal([]byte(r.Scopes), &scopes); err != nil {
+		return nil, fmt.Errorf("apikey.sqlite: parse scopes: %w", err)
 	}
-	lastUsedAt, err := parseSQLiteTimePtr("last_used_at", r.LastUsedAt)
-	if err != nil {
-		return nil, err
+	var resourceIDs []uuid.UUID
+	if err := json.Unmarshal([]byte(r.ResourceIDs), &resourceIDs); err != nil {
+		return nil, fmt.Errorf("apikey.sqlite: parse resource_ids: %w", err)
 	}
-	revokedAt, err := parseSQLiteTimePtr("revoked_at", r.RevokedAt)
-	if err != nil {
-		return nil, err
+	projectIDs := []uuid.UUID{}
+	if err := json.Unmarshal([]byte(r.ProjectIDs), &projectIDs); err != nil {
+		return nil, fmt.Errorf("apikey.sqlite: parse project_ids: %w", err)
 	}
-	return &APIKey{
-		ID:         id,
-		OrgID:      orgID,
-		ProjectID:  projectID,
-		Name:       r.Name,
-		KeyPrefix:  r.KeyPrefix,
-		SecretHash: r.SecretHash,
-		Scopes:     scopes,
-		SheetIDs:   []uuid.UUID{},
-		ExpiresAt:  expiresAt,
-		LastUsedAt: lastUsedAt,
-		RevokedAt:  revokedAt,
-		CreatedAt:  createdAt,
-	}, nil
+	var hash [32]byte
+	copy(hash[:], r.SecretHash)
+	k := &APIKey{
+		ID:          id,
+		OrgID:       oid,
+		ProjectID:   pid,
+		Kind:        Kind(r.Kind),
+		AllProjects: r.AllProjects,
+		ProjectIDs:  projectIDs,
+		Name:        r.Name,
+		SecretHash:  hash,
+		SecretHint:  r.SecretHint,
+		Scopes:      scopes,
+		ResourceIDs: resourceIDs,
+		CreatedBy:   createdBy,
+		CreatedAt:   ca,
+	}
+	if r.ExpiresAt != nil && *r.ExpiresAt != "" {
+		t, perr := time.Parse(time.RFC3339Nano, *r.ExpiresAt)
+		if perr != nil {
+			return nil, fmt.Errorf("apikey.sqlite: parse expires_at: %w", perr)
+		}
+		k.ExpiresAt = &t
+	}
+	if r.RevokedAt != nil && *r.RevokedAt != "" {
+		t, perr := time.Parse(time.RFC3339Nano, *r.RevokedAt)
+		if perr != nil {
+			return nil, fmt.Errorf("apikey.sqlite: parse revoked_at: %w", perr)
+		}
+		k.RevokedAt = &t
+	}
+	if r.LastUsedAt != nil && *r.LastUsedAt != "" {
+		t, perr := time.Parse(time.RFC3339Nano, *r.LastUsedAt)
+		if perr != nil {
+			return nil, fmt.Errorf("apikey.sqlite: parse last_used_at: %w", perr)
+		}
+		k.LastUsedAt = &t
+	}
+	return k, nil
 }
 
-type sqliteGrantRow struct {
-	APIKeyID string `alias:"api_key_sheets.api_key_id"`
-	SheetID  string `alias:"api_key_sheets.sheet_id"`
+// NOTE: enrolls in the caller's unit of work, so a Save never opens a second SQLite writer transaction.
+func (s *sqliteStore) txAcquire(ctx context.Context) (*sql.Tx, bool, tenant.Context, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, false, tenant.Context{}, err
+	}
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return tx, false, tc, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, tenant.Context{}, fmt.Errorf("apikey.sqlite: begin: %w", err)
+	}
+	return tx, true, tc, nil
+}
+
+func (s *sqliteStore) endTx(tx *sql.Tx, owned bool, err error) error {
+	if !owned {
+		return err
+	}
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return fmt.Errorf("apikey.sqlite: commit: %w", cerr)
+	}
+	return nil
 }
 
 func (s *sqliteStore) Save(ctx context.Context, k *APIKey) error {
-	if _, err := tenant.From(ctx); err != nil {
-		return err
-	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		if err := s.writeKey(ctx, tx, k); err != nil {
-			return err
-		}
-		return s.writeGrant(ctx, tx, k)
-	})
-}
-
-// SECURITY: a key read through PublicColumns carries no hash, so that case updates in place instead of
-// upserting a NULL secret_hash over a live key.
-func (s *sqliteStore) writeKey(ctx context.Context, tx *sql.Tx, k *APIKey) error {
-	scopes, err := encodeScopes(k.Scopes)
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
 	}
-	if len(k.SecretHash) == 0 {
-		return s.updateKey(ctx, tx, k, scopes)
-	}
-	stmt := s.table.INSERT(s.table.AllColumns).
-		VALUES(
-			k.ID.String(), k.OrgID.String(), k.ProjectID.String(), k.Name, k.KeyPrefix, k.SecretHash,
-			scopes,
-			sqliteNullableTime(k.ExpiresAt), sqliteNullableTime(k.LastUsedAt), sqliteNullableTime(k.RevokedAt),
-			sqliteent.SQLiteTime(k.CreatedAt),
-		).
-		ON_CONFLICT(s.table.ID).
-		DO_UPDATE(sqlite.SET(
-			s.table.Name.SET(sqlite.String(k.Name)),
-			s.table.Scopes.SET(sqlite.String(scopes)),
-			s.table.ExpiresAt.SET(sqliteNullableTimeExpr(k.ExpiresAt)),
-			s.table.LastUsedAt.SET(sqliteNullableTimeExpr(k.LastUsedAt)),
-			s.table.RevokedAt.SET(sqliteNullableTimeExpr(k.RevokedAt)),
-		))
-	if _, err := stmt.ExecContext(ctx, tx); err != nil {
-		if isSQLiteUniqueViolation(err) {
-			return &AlreadyExistsError{Field: "key_prefix", Value: k.KeyPrefix}
-		}
-		return fmt.Errorf("apikey.sqlite.Save: %w", err)
-	}
-	return nil
+	return s.endTx(tx, owned, s.saveWithGrants(ctx, tx, tc, k))
 }
 
-func (s *sqliteStore) updateKey(ctx context.Context, tx *sql.Tx, k *APIKey, scopes string) error {
-	stmt := s.table.
-		UPDATE(s.table.Name, s.table.Scopes, s.table.ExpiresAt, s.table.LastUsedAt, s.table.RevokedAt).
-		SET(
-			sqlite.String(k.Name),
-			sqlite.String(scopes),
-			sqliteNullableTimeExpr(k.ExpiresAt),
-			sqliteNullableTimeExpr(k.LastUsedAt),
-			sqliteNullableTimeExpr(k.RevokedAt),
-		).
-		WHERE(s.table.ID.EQ(sqlite.String(k.ID.String())).
-			AND(s.table.OrgID.EQ(sqlite.String(k.OrgID.String()))))
-	res, err := stmt.ExecContext(ctx, tx)
-	if err != nil {
-		return fmt.Errorf("apikey.sqlite.Save: update: %w", err)
+func (s *sqliteStore) saveWithGrants(ctx context.Context, tx *sql.Tx, tc tenant.Context, k *APIKey) error {
+	if err := s.save(ctx, tx, tc, k); err != nil {
+		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("apikey.sqlite.Save: rows affected: %w", err)
-	}
-	if n == 0 {
-		return &NotFoundError{ID: k.ID.String()}
-	}
-	return nil
+	return s.syncGrants(ctx, tx, tc, k)
 }
 
-func (s *sqliteStore) writeGrant(ctx context.Context, tx *sql.Tx, k *APIKey) error {
-	del := s.grants.DELETE().
-		WHERE(s.grants.APIKeyID.EQ(sqlite.String(k.ID.String())))
-	if _, err := del.ExecContext(ctx, tx); err != nil {
-		return fmt.Errorf("apikey.sqlite.Save: clear grant: %w", err)
+// SECURITY: SQLite has no RLS, so every statement names the caller's org and the composite foreign keys refuse another org's key or project.
+func (s *sqliteStore) syncGrants(ctx context.Context, tx *sql.Tx, tc tenant.Context, k *APIKey) error {
+	keep := make([]sqlite.Expression, 0, len(k.ProjectIDs))
+	for _, id := range k.ProjectIDs {
+		keep = append(keep, sqlite.String(id.String()))
 	}
-	if len(k.SheetIDs) == 0 {
+	where := s.grants.OrgID.EQ(sqlite.String(tc.OrgID.String())).AND(s.grants.KeyID.EQ(sqlite.String(k.ID.String())))
+	if len(keep) > 0 {
+		where = where.AND(s.grants.ProjectID.NOT_IN(keep...))
+	}
+	if _, err := s.grants.DELETE().WHERE(where).ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("apikey.sqlite.Save: prune grants: %w", err)
+	}
+	if len(k.ProjectIDs) == 0 {
 		return nil
 	}
+	now := sqliteent.SQLiteTime(time.Now().UTC())
 	ins := s.grants.INSERT(s.grants.AllColumns)
-	for _, id := range k.SheetIDs {
-		ins = ins.VALUES(k.ID.String(), id.String(), k.OrgID.String())
+	for _, id := range k.ProjectIDs {
+		ins = ins.VALUES(tc.OrgID.String(), k.ID.String(), id.String(), now)
 	}
-	if _, err := ins.ExecContext(ctx, tx); err != nil {
-		return fmt.Errorf("apikey.sqlite.Save: write grant: %w", err)
+	if _, err := ins.ON_CONFLICT(s.grants.KeyID, s.grants.ProjectID).DO_NOTHING().ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("apikey.sqlite.Save: add grants: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context, k *APIKey) error {
+	scopesJSON, err := jsonArray(k.Scopes)
+	if err != nil {
+		return fmt.Errorf("apikey.sqlite.Save: encode scopes: %w", err)
+	}
+	resourceIDsJSON, err := jsonArray(k.ResourceIDs)
+	if err != nil {
+		return fmt.Errorf("apikey.sqlite.Save: encode resource_ids: %w", err)
+	}
+	// SECURITY: the conflict clause is guarded by org; SQLite has no RLS behind this.
+	stmt := s.keys.INSERT(s.keys.AllColumns).
+		VALUES(
+			k.ID.String(),
+			k.OrgID.String(),
+			sqliteNullableUUIDArg(k.ProjectID),
+			string(k.Kind),
+			k.AllProjects,
+			k.Name,
+			k.SecretHash[:],
+			k.SecretHint,
+			scopesJSON,
+			resourceIDsJSON,
+			sqliteNullableUUIDArg(k.CreatedBy),
+			sqliteent.SQLiteTime(k.CreatedAt),
+			sqliteNullableTimeArg(k.ExpiresAt),
+			sqliteNullableTimeArg(k.RevokedAt),
+			sqliteNullableTimeArg(k.LastUsedAt),
+		).
+		ON_CONFLICT(s.keys.ID).
+		DO_UPDATE(
+			sqlite.SET(
+				s.keys.Name.SET(sqlite.String(k.Name)),
+				s.keys.AllProjects.SET(sqlite.Bool(k.AllProjects)),
+				s.keys.Scopes.SET(sqlite.String(scopesJSON)),
+				s.keys.ResourceIDs.SET(sqlite.String(resourceIDsJSON)),
+				s.keys.ExpiresAt.SET(sqliteNullableTimeExpr(k.ExpiresAt)),
+				s.keys.RevokedAt.SET(sqliteNullableTimeExpr(k.RevokedAt)),
+				s.keys.LastUsedAt.SET(sqliteNullableTimeExpr(k.LastUsedAt)),
+			).WHERE(s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
+		)
+	res, execErr := stmt.ExecContext(ctx, tx)
+	if execErr != nil {
+		return fmt.Errorf("apikey.sqlite.Save: %w", execErr)
+	}
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("apikey.sqlite.Save: rows affected: %w", raErr)
+	}
+	if n == 0 {
+		return &NotFoundError{}
 	}
 	return nil
 }
 
 func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID) (*APIKey, error) {
-	tc, err := tenant.From(ctx)
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}
-	cols := s.publicProjection()
-	stmt := sqlite.SELECT(cols[0], cols[1:]...).
-		FROM(s.table).
-		WHERE(s.table.ID.EQ(sqlite.String(id.String())).
-			AND(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String())))).
-		LIMIT(1)
-	var row sqliteAPIKeyRow
-	if qErr := stmt.QueryContext(ctx, s.db, &row); qErr != nil {
-		if isNoRows(qErr) {
-			return nil, &NotFoundError{ID: id.String()}
-		}
-		return nil, fmt.Errorf("apikey.sqlite.ByID: %w", qErr)
+	if owned {
+		defer func() { _ = tx.Rollback() }()
 	}
-	k, err := row.toAPIKey()
-	if err != nil {
-		return nil, err
-	}
-	return k, s.attachGrants(ctx, []*APIKey{k})
+	return s.queryOne(ctx, tx,
+		s.keys.ID.EQ(sqlite.String(id.String())).
+			AND(s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String()))),
+	)
 }
 
-// SECURITY: resolves a presented key before any tenant scope exists; SQLite has no RLS, so this is a plain unfiltered read.
-func (s *sqliteStore) ByPrefix(ctx context.Context, prefix string) (*APIKey, error) {
-	stmt := sqlite.SELECT(s.table.AllColumns).
-		FROM(s.table).
-		WHERE(s.table.KeyPrefix.EQ(sqlite.String(prefix))).
+// SECURITY: unauthenticated lookup; the hash is unguessable, SQLite has no RLS, and every follow-up action re-checks org membership once the key names its org.
+func (s *sqliteStore) BySecretHash(ctx context.Context, hash [32]byte) (*APIKey, error) {
+	execer := qrm.DB(s.db)
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		execer = tx
+	}
+	return s.queryOne(ctx, execer, s.keys.SecretHash.EQ(sqlite.Blob(hash[:])))
+}
+
+func (s *sqliteStore) queryOne(ctx context.Context, execer qrm.DB, cond sqlite.BoolExpression) (*APIKey, error) {
+	stmt := sqlite.SELECT(s.keys.AllColumns, s.grantsExpr.AS("api_keys.project_ids")).
+		FROM(s.keys).
+		WHERE(cond).
 		LIMIT(1)
-	var row sqliteAPIKeyRow
-	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
-		if isNoRows(err) {
+	var row sqliteKeyRow
+	if err := stmt.QueryContext(ctx, execer, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			return nil, &NotFoundError{}
 		}
-		return nil, fmt.Errorf("apikey.sqlite.ByPrefix: %w", err)
+		return nil, fmt.Errorf("apikey.sqlite.query: %w", err)
 	}
-	k, err := row.toAPIKey()
-	if err != nil {
-		return nil, err
-	}
-	return k, s.attachGrants(ctx, []*APIKey{k})
+	return row.toAPIKey()
 }
 
-func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*APIKey, error) {
-	tc, err := tenant.From(ctx)
+func (s *sqliteStore) List(ctx context.Context, projectID uuid.UUID) ([]*APIKey, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if tc.OrgID != orgID {
-		return []*APIKey{}, nil
+	if owned {
+		defer func() { _ = tx.Rollback() }()
 	}
-	cols := s.publicProjection()
-	stmt := sqlite.SELECT(cols[0], cols[1:]...).
-		FROM(s.table).
-		WHERE(s.table.OrgID.EQ(sqlite.String(orgID.String())).
-			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String())))).
-		ORDER_BY(s.table.CreatedAt.DESC(), s.table.ID.DESC())
-	var rows []sqliteAPIKeyRow
-	if qErr := stmt.QueryContext(ctx, s.db, &rows); qErr != nil {
-		return nil, fmt.Errorf("apikey.sqlite.List: %w", qErr)
+	return s.queryMany(ctx, tx, "List", s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+		AND(s.keys.Kind.EQ(sqlite.String(string(KindProject)))).
+		AND(s.keys.ProjectID.EQ(sqlite.String(projectID.String()))))
+}
+
+func (s *sqliteStore) ListOrg(ctx context.Context) ([]*APIKey, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	return s.queryMany(ctx, tx, "ListOrg", s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+		AND(s.keys.Kind.EQ(sqlite.String(string(KindOrg)))))
+}
+
+func (s *sqliteStore) ListPersonal(ctx context.Context, ownerID uuid.UUID) ([]*APIKey, error) {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned {
+		defer func() { _ = tx.Rollback() }()
+	}
+	return s.queryMany(ctx, tx, "ListPersonal", s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+		AND(s.keys.Kind.EQ(sqlite.String(string(KindPersonal)))).
+		AND(s.keys.CreatedBy.EQ(sqlite.String(ownerID.String()))))
+}
+
+func (s *sqliteStore) queryMany(ctx context.Context, tx *sql.Tx, op string, cond sqlite.BoolExpression) ([]*APIKey, error) {
+	stmt := sqlite.SELECT(s.keys.AllColumns, s.grantsExpr.AS("api_keys.project_ids")).
+		FROM(s.keys).
+		WHERE(cond).
+		ORDER_BY(s.keys.CreatedAt.DESC(), s.keys.ID.DESC())
+	var rows []sqliteKeyRow
+	if qErr := stmt.QueryContext(ctx, tx, &rows); qErr != nil {
+		return nil, fmt.Errorf("apikey.sqlite.%s: %w", op, qErr)
 	}
 	out := make([]*APIKey, 0, len(rows))
 	for i := range rows {
@@ -259,127 +347,80 @@ func (s *sqliteStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*
 		}
 		out = append(out, k)
 	}
-	return out, s.attachGrants(ctx, out)
+	return out, nil
 }
 
-func (s *sqliteStore) Delete(ctx context.Context, id uuid.UUID) error {
-	tc, err := tenant.From(ctx)
+func (s *sqliteStore) RevokePersonal(ctx context.Context, ownerID uuid.UUID, at time.Time) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		del := s.grants.DELETE().
-			WHERE(s.grants.APIKeyID.EQ(sqlite.String(id.String())).
-				AND(s.grants.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
-		if _, dErr := del.ExecContext(ctx, tx); dErr != nil {
-			return fmt.Errorf("apikey.sqlite.Delete: clear grant: %w", dErr)
-		}
-		stmt := s.table.DELETE().
-			WHERE(s.table.ID.EQ(sqlite.String(id.String())).
-				AND(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
-		res, eErr := stmt.ExecContext(ctx, tx)
-		if eErr != nil {
-			return fmt.Errorf("apikey.sqlite.Delete: %w", eErr)
-		}
-		n, raErr := res.RowsAffected()
-		if raErr != nil {
-			return fmt.Errorf("apikey.sqlite.Delete: rows affected: %w", raErr)
-		}
-		if n == 0 {
-			return &NotFoundError{ID: id.String()}
-		}
-		return nil
-	})
+	stmt := s.keys.UPDATE(s.keys.RevokedAt).
+		SET(sqlite.String(sqliteent.SQLiteTime(at))).
+		WHERE(s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String())).
+			AND(s.keys.Kind.EQ(sqlite.String(string(KindPersonal)))).
+			AND(s.keys.CreatedBy.EQ(sqlite.String(ownerID.String()))).
+			AND(s.keys.RevokedAt.IS_NULL()))
+	_, err = stmt.ExecContext(ctx, tx)
+	if err != nil {
+		err = fmt.Errorf("apikey.sqlite.RevokePersonal: %w", err)
+	}
+	return s.endTx(tx, owned, err)
 }
 
-// SECURITY: SQLite has no RLS, so the org and project predicates are the only thing keeping the write inside the tenant.
-func (s *sqliteStore) TouchLastUsed(ctx context.Context, orgID, projectID, id uuid.UUID, at time.Time) error {
-	if _, err := tenant.From(ctx); err != nil {
+func (s *sqliteStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {
+	tx, owned, tc, err := s.txAcquire(ctx)
+	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		stmt := s.table.
-			UPDATE(s.table.LastUsedAt).
-			SET(sqlite.String(sqliteent.SQLiteTime(at))).
-			WHERE(s.table.ID.EQ(sqlite.String(id.String())).
-				AND(s.table.OrgID.EQ(sqlite.String(orgID.String()))).
-				AND(s.table.ProjectID.EQ(sqlite.String(projectID.String()))))
-		if _, err := stmt.ExecContext(ctx, tx); err != nil {
-			return fmt.Errorf("apikey.sqlite.TouchLastUsed: %w", err)
-		}
-		return nil
-	})
+	return s.endTx(tx, owned, s.touchLastUsed(ctx, tx, tc, id, at))
 }
 
-func (s *sqliteStore) attachGrants(ctx context.Context, keys []*APIKey) error {
-	if len(keys) == 0 {
-		return nil
+func (s *sqliteStore) touchLastUsed(ctx context.Context, tx *sql.Tx, tc tenant.Context, id uuid.UUID, at time.Time) error {
+	stmt := s.keys.UPDATE(s.keys.LastUsedAt).
+		SET(sqlite.String(sqliteent.SQLiteTime(at))).
+		WHERE(s.keys.ID.EQ(sqlite.String(id.String())).
+			AND(s.keys.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
+	res, err := stmt.ExecContext(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("apikey.sqlite.TouchLastUsed: %w", err)
 	}
-	ids := make([]sqlite.Expression, 0, len(keys))
-	for _, k := range keys {
-		ids = append(ids, sqlite.String(k.ID.String()))
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("apikey.sqlite.TouchLastUsed: rows affected: %w", raErr)
 	}
-	stmt := sqlite.SELECT(s.grants.APIKeyID, s.grants.SheetID).
-		FROM(s.grants).
-		WHERE(s.grants.APIKeyID.IN(ids...)).
-		ORDER_BY(s.grants.SheetID.ASC())
-	var rows []sqliteGrantRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
-		if isNoRows(err) {
-			return nil
-		}
-		return fmt.Errorf("apikey.sqlite.attachGrants: %w", err)
-	}
-	byKey := make(map[string][]uuid.UUID, len(keys))
-	for i := range rows {
-		sheetID, err := parseSQLiteUUID("sheet_id", rows[i].SheetID)
-		if err != nil {
-			return err
-		}
-		byKey[rows[i].APIKeyID] = append(byKey[rows[i].APIKeyID], sheetID)
-	}
-	for _, k := range keys {
-		if got, ok := byKey[k.ID.String()]; ok {
-			k.SheetIDs = got
-		}
+	if n == 0 {
+		return &NotFoundError{}
 	}
 	return nil
 }
 
-func (s *sqliteStore) publicProjection() []sqlite.Projection {
-	return []sqlite.Projection{
-		s.table.ID,
-		s.table.OrgID,
-		s.table.ProjectID,
-		s.table.Name,
-		s.table.KeyPrefix,
-		s.table.Scopes,
-		s.table.ExpiresAt,
-		s.table.LastUsedAt,
-		s.table.RevokedAt,
-		s.table.CreatedAt,
+func jsonArray[T any](v []T) (string, error) {
+	if len(v) == 0 {
+		return "[]", nil
 	}
-}
-
-func (s *sqliteStore) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
-	if tx, ok := pdb.CurrentTx(ctx); ok {
-		return fn(tx)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("apikey.sqlite: begin: %w", err)
+		return "", err
 	}
-	if fnErr := fn(tx); fnErr != nil {
-		_ = tx.Rollback()
-		return fnErr
-	}
-	if cErr := tx.Commit(); cErr != nil {
-		return fmt.Errorf("apikey.sqlite: commit: %w", cErr)
-	}
-	return nil
+	return string(b), nil
 }
 
-func sqliteNullableTime(t *time.Time) any {
+func sqliteNullableUUIDArg(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id.String()
+}
+
+func parseNullableUUID(raw *string) (uuid.UUID, error) {
+	if raw == nil || *raw == "" {
+		return uuid.Nil, nil
+	}
+	return uuid.Parse(*raw)
+}
+
+func sqliteNullableTimeArg(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
@@ -388,41 +429,7 @@ func sqliteNullableTime(t *time.Time) any {
 
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
-		return sqlite.StringExp(sqlite.NULL)
+		return sqliteent.NullText()
 	}
 	return sqlite.String(sqliteent.SQLiteTime(*t))
-}
-
-func parseSQLiteUUID(col, raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("apikey.sqlite: parse %s: %w", col, err)
-	}
-	return id, nil
-}
-
-func parseSQLiteTime(col, raw string) (time.Time, error) {
-	t, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("apikey.sqlite: parse %s: %w", col, err)
-	}
-	return t.UTC(), nil
-}
-
-func parseSQLiteTimePtr(col string, raw *string) (*time.Time, error) {
-	if raw == nil || *raw == "" {
-		return nil, nil //nolint:nilnil // absent nullable timestamp
-	}
-	t, err := parseSQLiteTime(col, *raw)
-	if err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
-func isSQLiteUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

@@ -22,8 +22,8 @@ type GooglePickerView struct {
 // NOTE: setAppId is what records the drive.file grant for the picked document. Without it the Picker still
 // returns a file id, but every later Sheets read of that id fails with 404.
 // https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
-// NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so an
-// OPENSHEET_UI_MODE=vendored deployment keeps one external runtime dependency on this page alone.
+// NOTE: the Picker library only loads from apis.google.com and cannot be vendored, so this page alone keeps an
+// external runtime dependency, and an enforcing CSP must admit Google's script and frame origins for it.
 // https://developers.google.com/drive/picker/guides/overview
 func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -176,7 +176,46 @@ func GooglePickerPage(d web.LayoutData, v GooglePickerView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</p></noscript><script src=\"https://apis.google.com/js/api.js\" async defer onload=\"opensheetPickerReady()\"></script><script>\n\t\tfunction opensheetPickerReady() {\n\t\t\tvar host = document.getElementById('opensheet-picker');\n\t\t\tif (!host || !window.gapi) return;\n\t\t\tgapi.load('picker', function() {\n\t\t\t\tvar view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);\n\t\t\t\tview.setIncludeFolders(true);\n\t\t\t\tvar builder = new google.picker.PickerBuilder()\n\t\t\t\t\t.setDeveloperKey(host.getAttribute('data-api-key'))\n\t\t\t\t\t.setOAuthToken(host.getAttribute('data-access-token'))\n\t\t\t\t\t.addView(view);\n\t\t\t\tvar appId = host.getAttribute('data-app-id');\n\t\t\t\tif (appId) builder.setAppId(appId);\n\t\t\t\tvar picker = builder\n\t\t\t\t\t.setCallback(function(data) {\n\t\t\t\t\t\tif (data.action !== google.picker.Action.PICKED) return;\n\t\t\t\t\t\tvar doc = data.docs[0];\n\t\t\t\t\t\tvar url = host.getAttribute('data-return-url') +\n\t\t\t\t\t\t\t'?google_file_id=' + encodeURIComponent(doc.id) +\n\t\t\t\t\t\t\t'&title=' + encodeURIComponent(doc.name || '');\n\t\t\t\t\t\twindow.location.assign(url);\n\t\t\t\t\t})\n\t\t\t\t\t.build();\n\t\t\t\tpicker.setVisible(true);\n\t\t\t});\n\t\t}\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</p></noscript><script nonce=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var12 string
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Nonce)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 40, Col: 25}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\">\n\t\tfunction opensheetPickerReady() {\n\t\t\tvar host = document.getElementById('opensheet-picker');\n\t\t\tif (!host || !window.gapi) return;\n\t\t\tgapi.load('picker', function() {\n\t\t\t\tvar view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);\n\t\t\t\tview.setIncludeFolders(true);\n\t\t\t\tvar builder = new google.picker.PickerBuilder()\n\t\t\t\t\t.setDeveloperKey(host.getAttribute('data-api-key'))\n\t\t\t\t\t.setOAuthToken(host.getAttribute('data-access-token'))\n\t\t\t\t\t.addView(view);\n\t\t\t\tvar appId = host.getAttribute('data-app-id');\n\t\t\t\tif (appId) builder.setAppId(appId);\n\t\t\t\tvar picker = builder\n\t\t\t\t\t.setCallback(function(data) {\n\t\t\t\t\t\tif (data.action !== google.picker.Action.PICKED) return;\n\t\t\t\t\t\tvar doc = data.docs[0];\n\t\t\t\t\t\tvar url = host.getAttribute('data-return-url') +\n\t\t\t\t\t\t\t'?google_file_id=' + encodeURIComponent(doc.id) +\n\t\t\t\t\t\t\t'&title=' + encodeURIComponent(doc.name || '');\n\t\t\t\t\t\twindow.location.assign(url);\n\t\t\t\t\t})\n\t\t\t\t\t.build();\n\t\t\t\tpicker.setVisible(true);\n\t\t\t});\n\t\t}\n\t\t</script><script src=\"https://apis.google.com/js/api.js\" nonce=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var13 string
+		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Nonce)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 67, Col: 65}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\"></script><script nonce=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var14 string
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Nonce)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/google_picker.templ`, Line: 68, Col: 25}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\">opensheetPickerReady();</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -200,9 +239,9 @@ func GooglePickerLayout(d web.LayoutData, v GooglePickerView) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var12 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var12 == nil {
-			templ_7745c5c3_Var12 = templ.NopComponent
+		templ_7745c5c3_Var15 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var15 == nil {
+			templ_7745c5c3_Var15 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = Layout(web.WithContent(d, GooglePickerPage(d, v))).Render(ctx, templ_7745c5c3_Buffer)

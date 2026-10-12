@@ -111,6 +111,7 @@ myservice/
 ```
 
 **Rules for domain packages:**
+
 - Each package has **one clear purpose** — name it after what it does, not what layer it is (`jobs/`, not `service/`)
 - Packages do not import each other sideways — cycles are a sign of wrong boundaries; `main` is the wiring point
 - Related sub-concerns that always travel together stay in one package (e.g. job creation + worker handler both live in `jobs/` because they share the job lifecycle domain)
@@ -127,7 +128,7 @@ Write concrete types first. Only define an interface when you discover that mult
 
 ### 2. Define Interfaces Where They Are Used
 
-Interfaces belong in the package that *consumes* them, not the package that *implements* them. This decouples your packages.
+Interfaces belong in the package that _consumes_ them, not the package that _implements_ them. This decouples your packages.
 
 ```go
 // processor/processor.go

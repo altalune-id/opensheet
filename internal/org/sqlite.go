@@ -135,6 +135,9 @@ func (s *sqliteStore) Save(ctx context.Context, o *Org) error {
 			s.orgs.System.SET(sqlite.Int64(boolToInt(o.System))),
 		))
 	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+		if isSQLiteUniqueViolation(err, "orgs.system") {
+			return &SystemOrgExistsError{Slug: o.Slug}
+		}
 		if isSQLiteUniqueViolation(err, "slug") {
 			return &AlreadyExistsError{Slug: o.Slug}
 		}
@@ -145,6 +148,22 @@ func (s *sqliteStore) Save(ctx context.Context, o *Org) error {
 
 func (s *sqliteStore) BySlug(ctx context.Context, slug string) (*Org, error) {
 	return s.queryOrg(ctx, s.orgs.Slug.EQ(sqlite.String(slug)), &NotFoundError{Slug: slug})
+}
+
+func (s *sqliteStore) SystemOrg(ctx context.Context) (*Org, error) {
+	stmt := sqlite.SELECT(s.orgs.ID, s.orgs.Slug, s.orgs.Name, s.orgs.CreatedBy, s.orgs.CreatedAt, s.orgs.System).
+		FROM(s.orgs).
+		WHERE(s.orgs.System.EQ(sqlite.Int64(1))).
+		ORDER_BY(s.orgs.CreatedAt.ASC(), s.orgs.ID.ASC()).
+		LIMIT(1)
+	var row sqliteOrgRow
+	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return nil, &NotFoundError{System: true}
+		}
+		return nil, fmt.Errorf("org.sqlite: SystemOrg: %w", err)
+	}
+	return row.toOrg()
 }
 
 func (s *sqliteStore) ByID(ctx context.Context, id uuid.UUID) (*Org, error) {

@@ -71,6 +71,10 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 							data-fix-id-column
 							type="button"
 							hx-post={ d.ProjectPath(v.ProjectSlug, v.FixIDColumnPath) }
+							hx-nonce={ d.Nonce }
+							hx-disable="this"
+							hx-status:4xx="target:#hx-error swap:innerHTML"
+							hx-status:5xx="target:#hx-error swap:innerHTML"
 							hx-target="#sheets-section"
 							hx-swap="outerHTML"
 							class="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/60"
@@ -98,6 +102,10 @@ templ SheetSection(d web.LayoutData, v SheetsView) {
 				method="post"
 				action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets")) }
 				hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets") }
+				hx-nonce={ d.Nonce }
+				hx-disable="find button, find input"
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
 				hx-target="#sheets-section"
 				hx-swap="outerHTML"
 				class="mt-6 rounded-lg border border-border bg-card p-4 shadow-sm"
@@ -250,6 +258,7 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 				@endpointRow(d, v, "DELETE", v.DataURL+"/rows/$ROW_ID", d.Tr("sheets.endpoint_delete_row"), authn.ScopeSheetsWrite, true)
 				@endpointRow(d, v, "DELETE", v.DataURL+"/cache", d.Tr("sheets.endpoint_purge"), authn.ScopeCachePurge, false)
 			</ul>
+			@curlCopyScript(d.Nonce)
 			if v.Public {
 				<p data-public-warning class="mt-2 text-xs text-red-700 dark:text-red-300">{ d.Tr("sheets.public_warning") }</p>
 			} else {
@@ -283,6 +292,10 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 						method="post"
 						action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/purge")) }
 						hx-post={ d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/purge") }
+						hx-nonce={ d.Nonce }
+						hx-disable="find button, find input"
+						hx-status:4xx="target:#hx-error swap:innerHTML"
+						hx-status:5xx="target:#hx-error swap:innerHTML"
 						hx-target="#purge-status"
 						hx-swap="innerHTML"
 						class="inline"
@@ -297,6 +310,9 @@ templ SheetPage(d web.LayoutData, v SheetView) {
 			<div
 				id="sheet-preview"
 				hx-get={ d.ProjectPath(v.ProjectSlug, "/sheets/"+v.ID+"/preview") }
+				hx-nonce={ d.Nonce }
+				hx-status:4xx="target:#hx-error swap:innerHTML"
+				hx-status:5xx="target:#hx-error swap:innerHTML"
 				hx-trigger="load"
 				hx-swap="innerHTML"
 				class="mt-4 text-sm text-muted-foreground"
@@ -409,7 +425,8 @@ templ endpointRow(d web.LayoutData, v SheetView, method, path, hint, scope strin
 				data-method={ method }
 				data-path={ path }
 				data-public={ publicFlag(v.Public, method) }
-				class={ copyButton }
+				data-copied-label={ d.Tr("common.copied") }
+				class={ curlCopyButton }
 			>
 				@icons.Icon("clipboard", "h-3.5 w-3.5")
 				<span data-copy-label>{ d.Tr("sheets.copy_curl") }</span>
@@ -437,4 +454,73 @@ func publicFlag(public bool, method string) string {
 		return "1"
 	}
 	return "0"
+}
+
+// Destructive-action styling, shared so every delete control reads the same.
+const (
+	dangerIconButton = "rounded p-1.5 text-red-600 transition hover:bg-red-50 hover:text-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+	dangerButton     = "inline-flex items-center gap-2 rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:border-red-400 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/40"
+)
+
+const curlCopyButton = "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+
+// curlCopyScript copies a ready-to-run curl for every [data-copy-curl] button.
+templ curlCopyScript(nonce string) {
+	<script nonce={ nonce }>
+	if (!window.opensheetCurlCopyBound) {
+	window.opensheetCurlCopyBound = true;
+	(function() {
+		function flash(btn) {
+			var label = btn.querySelector('[data-copy-label]');
+			if (!label || btn.dataset.copyBusy) return;
+			btn.dataset.copyBusy = '1';
+			var was = label.textContent;
+			label.textContent = btn.getAttribute('data-copied-label') || was;
+			window.setTimeout(function() {
+				label.textContent = was;
+				delete btn.dataset.copyBusy;
+			}, 1500);
+		}
+		function write(text, btn) {
+			if (navigator.clipboard && window.isSecureContext) {
+				navigator.clipboard.writeText(text).then(function() { flash(btn); });
+				return;
+			}
+			var ta = document.createElement('textarea');
+			ta.value = text;
+			ta.setAttribute('readonly', '');
+			ta.style.position = 'fixed';
+			ta.style.opacity = '0';
+			document.body.appendChild(ta);
+			ta.select();
+			try { document.execCommand('copy'); flash(btn); } catch (e) {}
+			document.body.removeChild(ta);
+		}
+		function endpointURL(btn) {
+			var path = btn.getAttribute('data-path') || '';
+			if (/^https?:\/\//.test(path)) return path;
+			return window.location.origin + path;
+		}
+		function curlFor(btn) {
+			var method = btn.getAttribute('data-method') || 'GET';
+			var parts = ['curl'];
+			if (method !== 'GET') parts.push('-X ' + method);
+			parts.push("'" + endpointURL(btn) + "'");
+			if (btn.getAttribute('data-public') !== '1') {
+				parts.push("-H 'Authorization: Bearer $OPENSHEET_API_KEY'");
+			}
+			if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+				parts.push("-H 'Content-Type: application/json'");
+				parts.push("-d '" + (btn.getAttribute('data-body') || '{"column": "value"}') + "'");
+			}
+			return parts.join(' \\\n  ');
+		}
+		document.addEventListener('click', function(e) {
+			if (!e.target || !e.target.closest) return;
+			var btn = e.target.closest('[data-copy-curl]');
+			if (btn) write(curlFor(btn), btn);
+		});
+	})();
+	}
+	</script>
 }

@@ -30,9 +30,10 @@ type ProjectedRow struct {
 
 // ContractState is what a refresh learned from the tab's header row: its table contract, and its soft-delete opt-in.
 type ContractState struct {
-	OK         bool
-	Reason     string
-	SoftDelete bool
+	OK            bool
+	Reason        string
+	SoftDelete    bool
+	HeaderColumns []string
 }
 
 // SheetState is what a sheet's row bookkeeping holds: the contract its last refresh learned, the digest of its projected rows, and its generation.
@@ -79,8 +80,7 @@ type RowStore interface {
 	PurgeSheet(ctx context.Context, sheetID uuid.UUID) error
 }
 
-// RowsDigest is the content digest of one tab's projected rows: the signal a refresh compares to decide whether the generation moves.
-// NOTE: the tombstone is hashed as a flag, never as its timestamp — tombstoneAt stands an unparseable marker in with the fetch time, which would otherwise churn the digest on every refresh.
+// RowsDigest is the content digest of one tab's projected rows. NOTE: the tombstone is hashed as a flag, never its timestamp, or the digest would churn on every refresh.
 func RowsDigest(rows []ProjectedRow) (string, error) {
 	h := sha256.New()
 	digestField(h, rowDigestVersion)
@@ -174,6 +174,29 @@ func tombstoneFlag(at *time.Time) string {
 
 func dataColumns(data gsheet.Row) []string {
 	return slices.Sorted(maps.Keys(data))
+}
+
+// NOTE: the empty string is the never-read sentinel, which no JSON array encodes to, so a read header row with no columns stays distinguishable.
+func encodeHeaderColumns(cols []string) (string, error) {
+	if cols == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(cols)
+	if err != nil {
+		return "", fmt.Errorf("sheet: marshal header columns: %w", err)
+	}
+	return string(raw), nil
+}
+
+func decodeHeaderColumns(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	out := []string{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("sheet: unmarshal header columns: %w", err)
+	}
+	return out, nil
 }
 
 func marshalRowData(data gsheet.Row) (string, error) {

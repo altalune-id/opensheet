@@ -12,13 +12,14 @@ type Users struct {
 	Email           sqlite.ColumnString
 	Name            sqlite.ColumnString
 	AvatarURL       sqlite.ColumnString
+	PasswordHash    sqlite.ColumnString
 	IsAdmin         sqlite.ColumnInteger
+	Locale          sqlite.ColumnString
 	TermsAcceptedAt sqlite.ColumnString
 	CreatedAt       sqlite.ColumnString
 	UpdatedAt       sqlite.ColumnString
 
-	AllColumns     sqlite.ColumnList
-	MutableColumns sqlite.ColumnList
+	AllColumns sqlite.ColumnList
 }
 
 // NewUsers builds the users binding. tablePrefix matches DB.TablePrefix (e.g. "opensheet_").
@@ -30,12 +31,13 @@ func NewUsers(tablePrefix string) *Users {
 		email           = sqlite.StringColumn("email")
 		name            = sqlite.StringColumn("name")
 		avatarURL       = sqlite.StringColumn("avatar_url")
+		passwordHash    = sqlite.StringColumn("password_hash")
 		isAdmin         = sqlite.IntegerColumn("is_admin")
+		locale          = sqlite.StringColumn("locale")
 		termsAcceptedAt = sqlite.StringColumn("terms_accepted_at")
 		createdAt       = sqlite.StringColumn("created_at")
 		updatedAt       = sqlite.StringColumn("updated_at")
-		all             = sqlite.ColumnList{id, idpIssuer, idpSubject, email, name, avatarURL, isAdmin, termsAcceptedAt, createdAt, updatedAt}
-		mutable         = sqlite.ColumnList{idpIssuer, idpSubject, email, name, avatarURL, isAdmin, termsAcceptedAt, updatedAt}
+		all             = sqlite.ColumnList{id, idpIssuer, idpSubject, email, name, avatarURL, passwordHash, isAdmin, locale, termsAcceptedAt, createdAt, updatedAt}
 	)
 	return &Users{
 		Table:           sqlite.NewTable("", tablePrefix+"users", "users", all...),
@@ -45,11 +47,12 @@ func NewUsers(tablePrefix string) *Users {
 		Email:           email,
 		Name:            name,
 		AvatarURL:       avatarURL,
+		PasswordHash:    passwordHash,
 		IsAdmin:         isAdmin,
+		Locale:          locale,
 		TermsAcceptedAt: termsAcceptedAt,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		AllColumns:      all,
-		MutableColumns:  mutable,
 	}
 }

@@ -1,0 +1,38 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "List a project's blog posts.",
+    "inputSchema": {
+      "properties": {
+        "projectId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "projectId"
+      ],
+      "type": "object"
+    },
+    "name": "blog_list",
+    "title": "Blog list"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Publish a draft blog post.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "blog_publish",
+    "title": "Blog publish"
+  }
+]

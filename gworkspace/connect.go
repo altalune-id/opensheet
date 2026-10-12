@@ -31,9 +31,7 @@ type Connector struct {
 	timeout time.Duration
 }
 
-// NewConnector binds the flow to an OAuth client; an empty scopes keeps Scopes().
-// NOTE: only WithTimeout applies here; WithBaseURL is a transport option and is ignored — the token
-// endpoint comes from cfg.Endpoint.
+// NewConnector binds the flow to an OAuth client; an empty scopes keeps Scopes(). NOTE: only WithTimeout applies here; WithBaseURL is a transport option and is ignored — the token endpoint comes from cfg.Endpoint.
 func NewConnector(cfg *oauth2.Config, scopes []string, opts ...Option) (*Connector, error) {
 	if cfg == nil {
 		return nil, errors.New("gworkspace: oauth config: is nil")
@@ -99,8 +97,7 @@ func grantedScopes(tok *oauth2.Token) []string {
 	return strings.Fields(raw)
 }
 
-// SECURITY: the id_token arrives inside the token-endpoint response over TLS, so the channel authenticates it;
-// only the email claim is read and it is display-only, never an authorization input.
+// SECURITY: the id_token arrives inside the token-endpoint response over TLS, so the channel authenticates it; only the email claim is read and it is display-only, never an authorization input.
 func accountEmail(tok *oauth2.Token) string {
 	raw, ok := tok.Extra("id_token").(string)
 	if !ok {
@@ -123,9 +120,7 @@ func accountEmail(tok *oauth2.Token) string {
 	return strings.TrimSpace(claims.Email)
 }
 
-// ProjectNumber returns the Cloud project number a Google OAuth client ID was issued under, or ""
-// when clientID does not carry one. The Picker needs it as the Drive App ID for the drive.file scope.
-// https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
+// ProjectNumber returns the Cloud project number a Google OAuth client ID was issued under, or "" when clientID does not carry one. The Picker needs it as the Drive App ID for the drive.file scope. https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
 func ProjectNumber(clientID string) string {
 	num, _, ok := strings.Cut(strings.TrimSpace(clientID), "-")
 	if !ok || num == "" {

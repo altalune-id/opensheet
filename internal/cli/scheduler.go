@@ -103,7 +103,6 @@ func schedulerRunner(cmd *cobra.Command, bootServer ServerBootFn) (runner *sched
 	return s.Scheduler, func() { _ = s.Close() }, nil
 }
 
-// schedulerAppError maps scheduler's typed errors onto the CLI exit contract; scheduler/ cannot import apperror.
 func schedulerAppError(err error) error {
 	switch {
 	case scheduler.IsUnknownJobError(err):

@@ -14,7 +14,6 @@ func NewStore(cfg db.DBConfig, pool db.Pool, pc *tenant.PgConn) Store {
 }
 
 // NewRowStore dispatches to the driver-specific RowStore implementation.
-// NOTE: unlike NewSnapshotStore there is no memory variant — the projection is always in the database, on both drivers.
 func NewRowStore(cfg db.DBConfig, pool db.Pool, pc *tenant.PgConn) RowStore {
 	if cfg.Driver == db.DriverPostgres {
 		return newPostgresRowStore(pc, cfg.Schema, cfg.TablePrefix)

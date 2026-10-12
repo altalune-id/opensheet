@@ -22,19 +22,17 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// SECURITY: no field of this message may ever carry the plaintext key or its hash; key_prefix is the public half.
 type APIKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	ProjectId     string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	KeyPrefix     string                 `protobuf:"bytes,4,opt,name=key_prefix,json=keyPrefix,proto3" json:"key_prefix,omitempty"`
-	Scopes        []string               `protobuf:"bytes,5,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	SheetIds      []string               `protobuf:"bytes,6,rep,name=sheet_ids,json=sheetIds,proto3" json:"sheet_ids,omitempty"`
+	Scopes        []string               `protobuf:"bytes,4,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	ResourceIds   []string               `protobuf:"bytes,5,rep,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	LastUsedAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
-	RevokedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	RevokedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
+	LastUsedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -90,13 +88,6 @@ func (x *APIKey) GetName() string {
 	return ""
 }
 
-func (x *APIKey) GetKeyPrefix() string {
-	if x != nil {
-		return x.KeyPrefix
-	}
-	return ""
-}
-
 func (x *APIKey) GetScopes() []string {
 	if x != nil {
 		return x.Scopes
@@ -104,9 +95,16 @@ func (x *APIKey) GetScopes() []string {
 	return nil
 }
 
-func (x *APIKey) GetSheetIds() []string {
+func (x *APIKey) GetResourceIds() []string {
 	if x != nil {
-		return x.SheetIds
+		return x.ResourceIds
+	}
+	return nil
+}
+
+func (x *APIKey) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
 	}
 	return nil
 }
@@ -118,13 +116,6 @@ func (x *APIKey) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *APIKey) GetLastUsedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.LastUsedAt
-	}
-	return nil
-}
-
 func (x *APIKey) GetRevokedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.RevokedAt
@@ -132,9 +123,9 @@ func (x *APIKey) GetRevokedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *APIKey) GetCreatedAt() *timestamppb.Timestamp {
+func (x *APIKey) GetLastUsedAt() *timestamppb.Timestamp {
 	if x != nil {
-		return x.CreatedAt
+		return x.LastUsedAt
 	}
 	return nil
 }
@@ -185,7 +176,7 @@ func (x *ListRequest) GetProjectId() string {
 
 type ListResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ApiKeys       []*APIKey              `protobuf:"bytes,1,rep,name=api_keys,json=apiKeys,proto3" json:"api_keys,omitempty"`
+	Keys          []*APIKey              `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -220,19 +211,20 @@ func (*ListResponse) Descriptor() ([]byte, []int) {
 	return file_apikey_v1_apikey_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ListResponse) GetApiKeys() []*APIKey {
+func (x *ListResponse) GetKeys() []*APIKey {
 	if x != nil {
-		return x.ApiKeys
+		return x.Keys
 	}
 	return nil
 }
 
 type CreateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Scopes        []string               `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	SheetIds      []string               `protobuf:"bytes,4,rep,name=sheet_ids,json=sheetIds,proto3" json:"sheet_ids,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId   string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Scopes      []string               `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	ResourceIds []string               `protobuf:"bytes,4,rep,name=resource_ids,json=resourceIds,proto3" json:"resource_ids,omitempty"`
+	// Required: when the key stops working, in the future and at most one year away
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -289,9 +281,9 @@ func (x *CreateRequest) GetScopes() []string {
 	return nil
 }
 
-func (x *CreateRequest) GetSheetIds() []string {
+func (x *CreateRequest) GetResourceIds() []string {
 	if x != nil {
-		return x.SheetIds
+		return x.ResourceIds
 	}
 	return nil
 }
@@ -304,10 +296,10 @@ func (x *CreateRequest) GetExpiresAt() *timestamppb.Timestamp {
 }
 
 type CreateResponse struct {
-	state  protoimpl.MessageState `protogen:"open.v1"`
-	ApiKey *APIKey                `protobuf:"bytes,1,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
-	// SECURITY: the only place the plaintext key is ever returned; no other RPC can retrieve it.
-	PlaintextKey  string `protobuf:"bytes,2,opt,name=plaintext_key,json=plaintextKey,proto3" json:"plaintext_key,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Key   *APIKey                `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// plaintext is the one-time secret. It is never present on any other response.
+	Plaintext     string `protobuf:"bytes,2,opt,name=plaintext,proto3" json:"plaintext,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,16 +334,16 @@ func (*CreateResponse) Descriptor() ([]byte, []int) {
 	return file_apikey_v1_apikey_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *CreateResponse) GetApiKey() *APIKey {
+func (x *CreateResponse) GetKey() *APIKey {
 	if x != nil {
-		return x.ApiKey
+		return x.Key
 	}
 	return nil
 }
 
-func (x *CreateResponse) GetPlaintextKey() string {
+func (x *CreateResponse) GetPlaintext() string {
 	if x != nil {
-		return x.PlaintextKey
+		return x.Plaintext
 	}
 	return ""
 }
@@ -359,7 +351,7 @@ func (x *CreateResponse) GetPlaintextKey() string {
 type RevokeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	ApiKeyId      string                 `protobuf:"bytes,2,opt,name=api_key_id,json=apiKeyId,proto3" json:"api_key_id,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -401,16 +393,15 @@ func (x *RevokeRequest) GetProjectId() string {
 	return ""
 }
 
-func (x *RevokeRequest) GetApiKeyId() string {
+func (x *RevokeRequest) GetId() string {
 	if x != nil {
-		return x.ApiKeyId
+		return x.Id
 	}
 	return ""
 }
 
 type RevokeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ApiKey        *APIKey                `protobuf:"bytes,1,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -445,59 +436,47 @@ func (*RevokeResponse) Descriptor() ([]byte, []int) {
 	return file_apikey_v1_apikey_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *RevokeResponse) GetApiKey() *APIKey {
-	if x != nil {
-		return x.ApiKey
-	}
-	return nil
-}
-
 var File_apikey_v1_apikey_proto protoreflect.FileDescriptor
 
 const file_apikey_v1_apikey_proto_rawDesc = "" +
 	"\n" +
-	"\x16apikey/v1/apikey.proto\x12\tapikey.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8e\x03\n" +
+	"\x16apikey/v1/apikey.proto\x12\tapikey.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf5\x02\n" +
 	"\x06APIKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x02 \x01(\tR\tprojectId\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1d\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
+	"\x06scopes\x18\x04 \x03(\tR\x06scopes\x12!\n" +
+	"\fresource_ids\x18\x05 \x03(\tR\vresourceIds\x129\n" +
 	"\n" +
-	"key_prefix\x18\x04 \x01(\tR\tkeyPrefix\x12\x16\n" +
-	"\x06scopes\x18\x05 \x03(\tR\x06scopes\x12\x1b\n" +
-	"\tsheet_ids\x18\x06 \x03(\tR\bsheetIds\x129\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12<\n" +
-	"\flast_used_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"lastUsedAt\x129\n" +
+	"expires_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x129\n" +
 	"\n" +
-	"revoked_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x129\n" +
-	"\n" +
-	"created_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\",\n" +
+	"revoked_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x12<\n" +
+	"\flast_used_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"lastUsedAt\",\n" +
 	"\vListRequest\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x01 \x01(\tR\tprojectId\"<\n" +
-	"\fListResponse\x12,\n" +
-	"\bapi_keys\x18\x01 \x03(\v2\x11.apikey.v1.APIKeyR\aapiKeys\"\xb2\x01\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\"5\n" +
+	"\fListResponse\x12%\n" +
+	"\x04keys\x18\x01 \x03(\v2\x11.apikey.v1.APIKeyR\x04keys\"\xb8\x01\n" +
 	"\rCreateRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
-	"\x06scopes\x18\x03 \x03(\tR\x06scopes\x12\x1b\n" +
-	"\tsheet_ids\x18\x04 \x03(\tR\bsheetIds\x129\n" +
+	"\x06scopes\x18\x03 \x03(\tR\x06scopes\x12!\n" +
+	"\fresource_ids\x18\x04 \x03(\tR\vresourceIds\x129\n" +
 	"\n" +
-	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"a\n" +
-	"\x0eCreateResponse\x12*\n" +
-	"\aapi_key\x18\x01 \x01(\v2\x11.apikey.v1.APIKeyR\x06apiKey\x12#\n" +
-	"\rplaintext_key\x18\x02 \x01(\tR\fplaintextKey\"L\n" +
+	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"S\n" +
+	"\x0eCreateResponse\x12#\n" +
+	"\x03key\x18\x01 \x01(\v2\x11.apikey.v1.APIKeyR\x03key\x12\x1c\n" +
+	"\tplaintext\x18\x02 \x01(\tR\tplaintext\">\n" +
 	"\rRevokeRequest\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1c\n" +
-	"\n" +
-	"api_key_id\x18\x02 \x01(\tR\bapiKeyId\"<\n" +
-	"\x0eRevokeResponse\x12*\n" +
-	"\aapi_key\x18\x01 \x01(\v2\x11.apikey.v1.APIKeyR\x06apiKey2\xc6\x01\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"\x10\n" +
+	"\x0eRevokeResponse2\xc6\x01\n" +
 	"\rAPIKeyService\x127\n" +
 	"\x04List\x12\x16.apikey.v1.ListRequest\x1a\x17.apikey.v1.ListResponse\x12=\n" +
 	"\x06Create\x12\x18.apikey.v1.CreateRequest\x1a\x19.apikey.v1.CreateResponse\x12=\n" +
@@ -529,25 +508,24 @@ var file_apikey_v1_apikey_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_apikey_v1_apikey_proto_depIdxs = []int32{
-	7,  // 0: apikey.v1.APIKey.expires_at:type_name -> google.protobuf.Timestamp
-	7,  // 1: apikey.v1.APIKey.last_used_at:type_name -> google.protobuf.Timestamp
+	7,  // 0: apikey.v1.APIKey.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 1: apikey.v1.APIKey.expires_at:type_name -> google.protobuf.Timestamp
 	7,  // 2: apikey.v1.APIKey.revoked_at:type_name -> google.protobuf.Timestamp
-	7,  // 3: apikey.v1.APIKey.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 4: apikey.v1.ListResponse.api_keys:type_name -> apikey.v1.APIKey
+	7,  // 3: apikey.v1.APIKey.last_used_at:type_name -> google.protobuf.Timestamp
+	0,  // 4: apikey.v1.ListResponse.keys:type_name -> apikey.v1.APIKey
 	7,  // 5: apikey.v1.CreateRequest.expires_at:type_name -> google.protobuf.Timestamp
-	0,  // 6: apikey.v1.CreateResponse.api_key:type_name -> apikey.v1.APIKey
-	0,  // 7: apikey.v1.RevokeResponse.api_key:type_name -> apikey.v1.APIKey
-	1,  // 8: apikey.v1.APIKeyService.List:input_type -> apikey.v1.ListRequest
-	3,  // 9: apikey.v1.APIKeyService.Create:input_type -> apikey.v1.CreateRequest
-	5,  // 10: apikey.v1.APIKeyService.Revoke:input_type -> apikey.v1.RevokeRequest
-	2,  // 11: apikey.v1.APIKeyService.List:output_type -> apikey.v1.ListResponse
-	4,  // 12: apikey.v1.APIKeyService.Create:output_type -> apikey.v1.CreateResponse
-	6,  // 13: apikey.v1.APIKeyService.Revoke:output_type -> apikey.v1.RevokeResponse
-	11, // [11:14] is the sub-list for method output_type
-	8,  // [8:11] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	0,  // 6: apikey.v1.CreateResponse.key:type_name -> apikey.v1.APIKey
+	1,  // 7: apikey.v1.APIKeyService.List:input_type -> apikey.v1.ListRequest
+	3,  // 8: apikey.v1.APIKeyService.Create:input_type -> apikey.v1.CreateRequest
+	5,  // 9: apikey.v1.APIKeyService.Revoke:input_type -> apikey.v1.RevokeRequest
+	2,  // 10: apikey.v1.APIKeyService.List:output_type -> apikey.v1.ListResponse
+	4,  // 11: apikey.v1.APIKeyService.Create:output_type -> apikey.v1.CreateResponse
+	6,  // 12: apikey.v1.APIKeyService.Revoke:output_type -> apikey.v1.RevokeResponse
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_apikey_v1_apikey_proto_init() }
