@@ -64,7 +64,7 @@ func New(t *testing.T) *Handle {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	c, err := postgres.Run(ctx, "postgres:17-alpine",
+	c, err := postgres.Run(ctx, "postgres:18-alpine",
 		postgres.WithDatabase("opensheet_test"),
 		postgres.WithUsername("opensheet"),
 		postgres.WithPassword("opensheet"),
