@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: opensheet
           POSTGRES_PASSWORD: opensheet

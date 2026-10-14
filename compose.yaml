@@ -2,7 +2,7 @@ name: opensheet
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: opensheet
@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/data/pg:/var/lib/postgresql/data
+      - ./docker/data/pg:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U opensheet -d opensheet"]
       interval: 5s

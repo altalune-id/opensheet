@@ -30,7 +30,7 @@ an `attest-build-provenance` attestation. `<owner>` comes from `GHCR_OWNER` on r
 
 ## Local dev stack (compose)
 
-`compose.yaml` starts Postgres 17 + [Mailpit](https://mailpit.axllent.org/) + NATS (JetStream,
+`compose.yaml` starts Postgres 18 + [Mailpit](https://mailpit.axllent.org/) + NATS (JetStream,
 token `opensheet-dev`) + opensheet, under `docker compose` or `podman-compose`. opensheet is at
 `http://127.0.0.1:5150/login`; every outbound email lands in Mailpit at `http://127.0.0.1:8025`.
 
@@ -45,6 +45,11 @@ Postgres data lives at `./docker/data/pg` and NATS data at `./docker/data/nats` 
 `.gitignore`d). The stack runs `selfhosted` with `OPENSHEET_DB_ALLOW_BYPASS_RLS=true` (RLS off),
 Mailpit's open SMTP and the queue on; production mail goes under `mail.smtp.*` (or `mail.resend.*`
 with `mail.driver=resend`), and the role graph below.
+
+The Postgres 18 image keeps its cluster under `/var/lib/postgresql/18/docker`, so
+`./docker/data/pg` mounts at `/var/lib/postgresql`. A data directory created by the Postgres 17
+stack does not start on 18: run `make compose-nuke` to start fresh, or `pg_upgrade` it (or
+`pg_dumpall` from 17 and restore into 18) to keep the data.
 
 ## Postgres
 
