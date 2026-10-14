@@ -13,6 +13,7 @@ import (
 const (
 	sqlStateUniqueViolation     = "23505"
 	sqlStateForeignKeyViolation = "23503"
+	sqlStateRestrictViolation   = "23001"
 )
 
 func (s *postgresStore) Save(ctx context.Context, c *Credential) error {
@@ -65,7 +66,7 @@ func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {
 		AND(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	res, execErr := stmt.ExecContext(ctx, tx)
 	if execErr != nil {
-		if pgSQLState(execErr) == sqlStateForeignKeyViolation {
+		if state := pgSQLState(execErr); state == sqlStateForeignKeyViolation || state == sqlStateRestrictViolation {
 			return s.endTx(tx, owned, &InUseError{ID: id.String()})
 		}
 		return s.endTx(tx, owned, fmt.Errorf("credential.postgres.Delete: %w", execErr))

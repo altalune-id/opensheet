@@ -291,6 +291,7 @@ func TestPostgres_Credential_DeleteReferencedIsInUse(t *testing.T) {
 	delErr := f.store.Delete(ctx, c.ID)
 	require.True(t, credential.IsInUseError(delErr), "want *InUseError, got %T: %v", delErr, delErr)
 	require.NotContains(t, delErr.Error(), "23503", "the SQLSTATE must not leak into the domain error")
+	require.NotContains(t, delErr.Error(), "23001", "the SQLSTATE must not leak into the domain error")
 
 	got, err := f.store.ByID(ctx, c.ID)
 	require.NoError(t, err, "a refused delete must leave the row in place")
