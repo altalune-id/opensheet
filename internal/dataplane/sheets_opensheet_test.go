@@ -1507,7 +1507,7 @@ func TestHandler_ListTabsOfASpreadsheetWithNoneServesAnEmptyArray(t *testing.T) 
 	}
 }
 
-// The documented rule from the spec: the tabs routes name no sheet, so they authorize project-wide. A key restricted to specific sheets is refused by APIKey.Allows and cannot use them at all.
+// The documented rule in docs/surfaces/opensheet.md: the tabs routes name no sheet, so they authorize project-wide. A key restricted to specific sheets is refused by APIKey.Allows and cannot use them at all.
 func TestHandler_TabsRoutesAuthorizeWithoutASheet(t *testing.T) {
 	for _, tc := range []struct {
 		method string
@@ -1921,7 +1921,7 @@ func TestHandler_CreateAndReplaceRowAuthorizeEvenOnAPublicSheet(t *testing.T) {
 	}
 }
 
-// The numeric_columns control key is what keyed create closes the backlog item on: it names a hint, and must not be refused as an unknown column.
+// The numeric_columns control key names a hint on keyed create, and must not be refused as an unknown column.
 func TestHandler_CreateRowAcceptsNumericColumnsAsAControlKey(t *testing.T) {
 	g := newRig()
 

@@ -20,7 +20,7 @@ func readResourceBody(uri string) map[string]any {
 	}
 }
 
-// TestMCP_AppsUIServesTheAdvertisedResource is the end-to-end guard for the backlog item: the ui:// link the server advertises must resolve to a document over the real mount.
+// TestMCP_AppsUIServesTheAdvertisedResource asserts end to end that the ui:// link the server advertises resolves to a document over the real mount.
 func TestMCP_AppsUIServesTheAdvertisedResource(t *testing.T) {
 	f := newMCPFixture(t, mcpOpts{enabled: true, appsUI: true})
 

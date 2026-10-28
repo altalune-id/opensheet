@@ -143,7 +143,7 @@ func TestQueryRows_UnknownColumnIsRefused(t *testing.T) {
 	}
 }
 
-// NOTE: the deliberate answer for a tab holding a complete projection whose every row is tombstoned; docs/BACKLOG.md carries the store-level gap that makes it necessary.
+// NOTE: the deliberate answer for a tab holding a complete projection whose every row is tombstoned.
 func TestQueryRows_ATabWithNoLiveRowAnswersWithAnEmptyPage(t *testing.T) {
 	h := newReadHarness(t, harnessOpts{})
 	sh, _ := h.seed(t, "Q1", sheet.VisibilityKey, 0)

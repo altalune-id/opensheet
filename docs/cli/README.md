@@ -109,7 +109,7 @@ calls yet. Scripts must key off the **exit code**, not stderr text.
 ## Declared but not wired
 
 Present in `--help` and accepted on the command line, but no code reads them. Listed so a script
-does not depend on them; each has a `BACKLOG.md` entry.
+does not depend on them.
 
 | Flag                                | Today                                                                 |
 | ----------------------------------- | --------------------------------------------------------------------- |

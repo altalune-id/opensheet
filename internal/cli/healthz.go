@@ -65,7 +65,7 @@ func newHealthzCmd() *cobra.Command {
 
 var errHealthzUnhealthy = errors.New("healthz: unhealthy")
 
-// NOTE: diverges from spec #2.5 — only an explicit --url/OPENSHEET_URL moves the probe, because a liveness probe must reach the listener beside it, never a saved profile or http.baseURL.
+// NOTE: only an explicit --url/OPENSHEET_URL moves the probe, because a liveness probe must reach the listener beside it, never a saved profile or http.baseURL.
 func healthzTarget(cmd *cobra.Command) string {
 	base := explicitURL(cmd)
 	if base == "" {

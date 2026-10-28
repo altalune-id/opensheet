@@ -116,7 +116,7 @@ func TestPgRowStore_Replace_RoundTripsJSON(t *testing.T) {
 			fmt.Sprintf("SELECT data->>'%s' FROM public.%ssheet_rows WHERE sheet_id = $1", key, f.prefix),
 			sh.ID).Scan(&extracted))
 		assert.Equal(t, data[key], extracted,
-			"data must be stored as a jsonb object so spec 3 can filter on data->>'%s'", key)
+			"data must be stored as a jsonb object so a filter can read data->>'%s'", key)
 	}
 }
 
@@ -962,7 +962,7 @@ func TestPgTypedGrammar_AgreesWithTheGoGrammar(t *testing.T) {
 		}
 	})
 
-	// NumPattern alone bounds each digit run, not the significant digits across the point, so task 3's CASE needs both halves.
+	// NumPattern alone bounds each digit run, not the significant digits across the point, so the typed CASE needs both halves.
 	t.Run("the shape regex alone is not the guard", func(t *testing.T) {
 		const crossRun = "123456789012345.1"
 		_, ok := sheet.ParseNum(crossRun)
@@ -1052,7 +1052,7 @@ func TestPgRowStore_Query_NonFiniteCellsAreExcludedFromEveryNumComparison(t *tes
 	}
 }
 
-// TestQueryTyped_IsIdenticalAcrossDrivers is spec section 9 assertion 1: one grammar, compiled twice, answering identically — including num.lt, the arm that returns too many rows rather than too few under the SQLite text-bind defect.
+// TestQueryTyped_IsIdenticalAcrossDrivers asserts one grammar, compiled twice, answering identically — including num.lt, the arm that returns too many rows rather than too few under the SQLite text-bind defect.
 func TestQueryTyped_IsIdenticalAcrossDrivers(t *testing.T) {
 	for _, fixture := range []struct {
 		name    string
@@ -1133,7 +1133,7 @@ func seedSQLiteSortedFixture(
 	return k
 }
 
-// TestQuery_SortedWalkVisitsEveryRowExactlyOnce is spec section 9 assertion 2, and the assertion task 4 exists for: both directions, both drivers, walked to exhaustion at limit=2 over a fixture with two nulls, three rows sharing a sort value, a row_index gap and a tombstone.
+// TestQuery_SortedWalkVisitsEveryRowExactlyOnce walks both directions on both drivers to exhaustion at limit=2 over a fixture with two nulls, three rows sharing a sort value, a row_index gap and a tombstone.
 func TestQuery_SortedWalkVisitsEveryRowExactlyOnce(t *testing.T) {
 	pgf := newPgFixture(t)
 	pgCtx := pgf.a.ctx(t)

@@ -148,5 +148,5 @@ scoped API keys.
 - **opensheet-api skill** — [`skills/opensheet-api/`](skills/opensheet-api/SKILL.md) ships to
   integrators of the data plane; it is not a dev skill for this repo. Keep it in step with the
   routes and with `docs/errors/opensheet.md`.
-- **Template sync** — state and the export command are in `~/workspace/altalune-sync/opensheet/`
-  (`LAST_SYNC`, `DEVIATIONS.md`). A template-owned file edited here is a deviation: list it there.
+- **Template sync** — a template-owned file edited here is a deviation from the template; record
+  it with the sync state, outside this repo.

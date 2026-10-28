@@ -405,7 +405,7 @@ func (a *Authenticator) AuthorizeProject(ctx context.Context, raw, scope string,
 	return p, nil
 }
 
-// SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier (see BACKLOG).
+// SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier.
 func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error) {
 	if a.scheme.Authn().Looks(raw) != authn.ShapeAPIKey {
 		return nil, &authn.UnauthorizedError{}

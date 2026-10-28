@@ -116,7 +116,7 @@ func TestResourceMetaIsAbsentWhenNothingIsDeclared(t *testing.T) {
 	}
 }
 
-// TestUnpublishedUIReferenceFailsTheBuild is the guard that this backlog item existed for: an advertised ui:// link that resolves to nothing renders a blank panel in every host.
+// TestUnpublishedUIReferenceFailsTheBuild fails the build on an advertised ui:// link that resolves to nothing, which renders a blank panel in every host.
 func TestUnpublishedUIReferenceFailsTheBuild(t *testing.T) {
 	reg := mcp.NewRegistry()
 	reg.Register(mcp.ToolSpec{Name: "blog_list", Scope: "posts:read", UI: "ui://blog/list", Handler: okHandler}, nil)
