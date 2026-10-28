@@ -67,6 +67,7 @@ lifecycle) · `cobra-viper` · `go-release` · `go-spec-reviewer` ·
 - **Comments — default NO comments.** Keep 1-line godoc on exported symbols,
   TODO/SECURITY/FIXME/NOTE markers, external URL references. Delete rationale, history and
   architecture prose. Enforced by `make comment-check` (`cmd/comment-lint`, CI job `comment-check`).
+- **No references to uncommitted files.** Never reference untracked files or IDs defined only in them.
 - **Config awareness tags.** Every `Config` field you add or change carries
   `awareness:"..."` (`required` / `bootstrap` / `secret` / `mode:<x>`; `-` opts out, and a
   nested struct inherits via `mergeAwareness`). Cloud mode ALLOWS `Genesis.Email` for
