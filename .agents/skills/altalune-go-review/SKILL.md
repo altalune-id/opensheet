@@ -50,8 +50,8 @@ same-named personal skill. Read the named sections, not the whole file; do not r
 | `cmd/` or `internal/cli/`                                           | `cobra-viper`                              |
 | a `.templ` file or htmx attribute                                   | `htmx-guidance`                            |
 
-If a spec or plan drove the change (`docs/superpowers/specs/`, `docs/superpowers/plans/`),
-read it: a change that does not do what the plan says is a finding.
+If a spec or plan drove the change, read it: a change that does not do what the plan says is
+a finding.
 
 ## 3. Review in four passes
 
@@ -80,7 +80,7 @@ Drop anything a gate already enforces — a style nit `make lint` catches — un
 
 ## 5. Report
 
-Rank by severity, most severe first. The levels are the ones `BACKLOG.md` files under:
+Rank by severity, most severe first:
 
 | Level | Meaning                                                           |
 | ----- | ----------------------------------------------------------------- |
@@ -110,11 +110,9 @@ Then run `scope.sh mark`, so the next `delta` shows only what changes after this
 
 ## 6. Ask, then act
 
-Ask the user which to do — fix a set of findings now, park the rest in `BACKLOG.md`, both, or
-neither. Do not edit code before the answer. P0 is never parked — it is fixed or it blocks.
-A parked P1–P3 finding goes under the first heading that starts with `## P<n> —` in
-`BACKLOG.md` (create it if missing), as `### <finding>` plus the `file:line`, the evidence and
-the fix.
+Ask the user which to do — fix a set of findings now, park the rest, both, or neither. Do not
+edit code before the answer. P0 is never parked — it is fixed or it blocks. A parked P1–P3
+finding keeps its level, the `file:line`, the evidence and the fix.
 
 After fixes, review again with `delta` — it covers the fixes only.
 

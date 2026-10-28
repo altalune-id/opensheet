@@ -257,7 +257,7 @@ func newAuthTokenMintCmd(_ ServerBootFn) *cobra.Command {
 				return ErrNotSignedIn
 			}
 			_ = session.SourceToken
-			return errors.New("auth token mint: not implemented yet (blocked on Task 33 tokens issuer)")
+			return errors.New("auth token mint: not implemented yet (pending the tokens issuer)")
 		},
 	}
 	cmd.Flags().DurationVar(&ttl, "ttl", 15*time.Minute, "Token time-to-live (e.g. 15m, 1h)")

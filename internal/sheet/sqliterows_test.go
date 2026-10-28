@@ -1316,7 +1316,7 @@ func assertSortedWalk(t *testing.T, live []sheet.ProjectedRow, want, got [][]str
 		"the walk must visit every live row exactly once: no repeats, no omissions")
 }
 
-// TestSQLiteRowStore_Query_SortedWalkVisitsEveryRowExactlyOnce is the assertion task 4 exists for; its cross-driver half lives in rows_integration_test.go.
+// TestSQLiteRowStore_Query_SortedWalkVisitsEveryRowExactlyOnce is the SQLite half; the cross-driver half lives in rows_integration_test.go.
 func TestSQLiteRowStore_Query_SortedWalkVisitsEveryRowExactlyOnce(t *testing.T) {
 	for _, fx := range sortedWalkFixtures() {
 		t.Run(fx.name, func(t *testing.T) {

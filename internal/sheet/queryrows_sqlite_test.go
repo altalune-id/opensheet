@@ -205,7 +205,7 @@ func (q *queryFixture) walkNames(t *testing.T, f sheet.RowFilter) ([]string, []i
 	return nil, nil
 }
 
-// TestQueryRows_ASortedReadOrdersEveryPage is the route-level half of task 4's walk: the order, the pages and the v2 envelope all reach a caller only through this path.
+// TestQueryRows_ASortedReadOrdersEveryPage is the route-level half of the sorted walk: the order, the pages and the v2 envelope all reach a caller only through this path.
 func TestQueryRows_ASortedReadOrdersEveryPage(t *testing.T) {
 	for _, tc := range []struct {
 		spec string

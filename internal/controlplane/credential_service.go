@@ -69,7 +69,7 @@ func (s *CredentialService) StartGoogleConnect(ctx context.Context, req *connect
 	if err != nil {
 		return nil, err
 	}
-	// SECURITY: ConnectWorkflow.Start binds the grant to a person, and an API-key principal has no user - spec 6.2.
+	// SECURITY: ConnectWorkflow.Start binds the grant to a person, and an API-key principal has no user.
 	if tc.UserID == uuid.Nil {
 		return nil, forbiddenErr("google connect requires a user principal", "project_id", tc.ProjectID.String())
 	}
