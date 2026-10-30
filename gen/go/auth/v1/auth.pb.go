@@ -58,15 +58,16 @@ func (*WhoamiRequest) Descriptor() ([]byte, []int) {
 }
 
 type WhoamiResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	ActiveOrgId   string                 `protobuf:"bytes,4,opt,name=active_org_id,json=activeOrgId,proto3" json:"active_org_id,omitempty"`
-	ActiveOrgSlug string                 `protobuf:"bytes,5,opt,name=active_org_slug,json=activeOrgSlug,proto3" json:"active_org_slug,omitempty"`
-	Scopes        []string               `protobuf:"bytes,6,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	UserId          string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Email           string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	Name            string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	ActiveOrgId     string                 `protobuf:"bytes,4,opt,name=active_org_id,json=activeOrgId,proto3" json:"active_org_id,omitempty"`
+	ActiveOrgSlug   string                 `protobuf:"bytes,5,opt,name=active_org_slug,json=activeOrgSlug,proto3" json:"active_org_slug,omitempty"`
+	Scopes          []string               `protobuf:"bytes,6,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	ActiveProjectId string                 `protobuf:"bytes,7,opt,name=active_project_id,json=activeProjectId,proto3" json:"active_project_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *WhoamiResponse) Reset() {
@@ -141,19 +142,27 @@ func (x *WhoamiResponse) GetScopes() []string {
 	return nil
 }
 
+func (x *WhoamiResponse) GetActiveProjectId() string {
+	if x != nil {
+		return x.ActiveProjectId
+	}
+	return ""
+}
+
 var File_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"\x12auth/v1/auth.proto\x12\aauth.v1\"\x0f\n" +
-	"\rWhoamiRequest\"\xb7\x01\n" +
+	"\rWhoamiRequest\"\xe3\x01\n" +
 	"\x0eWhoamiResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\"\n" +
 	"\ractive_org_id\x18\x04 \x01(\tR\vactiveOrgId\x12&\n" +
 	"\x0factive_org_slug\x18\x05 \x01(\tR\ractiveOrgSlug\x12\x16\n" +
-	"\x06scopes\x18\x06 \x03(\tR\x06scopes2H\n" +
+	"\x06scopes\x18\x06 \x03(\tR\x06scopes\x12*\n" +
+	"\x11active_project_id\x18\a \x01(\tR\x0factiveProjectId2H\n" +
 	"\vAuthService\x129\n" +
 	"\x06Whoami\x12\x16.auth.v1.WhoamiRequest\x1a\x17.auth.v1.WhoamiResponseB\x82\x01\n" +
 	"\vcom.auth.v1B\tAuthProtoP\x01Z+altalune.id/opensheet/gen/go/auth/v1;authv1\xa2\x02\x03AXX\xaa\x02\aAuth.V1\xca\x02\aAuth\\V1\xe2\x02\x13Auth\\V1\\GPBMetadata\xea\x02\bAuth::V1b\x06proto3"

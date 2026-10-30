@@ -66,12 +66,14 @@ R1 intact with no new exception, and it buys something else: the CLI walks the i
 exact path, so a break in the public contract breaks your own tooling first. Procedure:
 [`howto/cli-command.md`](../howto/cli-command.md).
 
-Two client shapes are therefore shipped and both are reference implementations:
+One client shape is shipped:
 
 | Client                | Speaks      | Credential | Built by                  | Reference command  |
 | --------------------- | ----------- | ---------- | ------------------------- | ------------------ |
 | `controlplane.Client` | Connect, S2 | Bearer JWT | `internal/boot/client.go` | `opensheet todo …` |
-| `dataplane.Client`    | REST, S3    | API key    | `internal/cli/blog.go`    | `opensheet blog …` |
+
+opensheet's CLI has no data-plane caller: integrators call `/api/v1/` with an API key, as
+[`opensheet`](opensheet.md) describes.
 
 **A client, not a peer of the server.** Single-user, local-first CLIs own their protocol
 session in the CLI process and keep state on the operator's disk. Borrow their **ergonomics** —
@@ -90,10 +92,10 @@ resolve without its project.
 **Output, retargeting and credential binding are already contracts of this repo.** Output is
 `--output=text|json|ndjson` through `internal/cli/render` — do not adopt another tool's output
 flags, `ndjson` already covers the streaming case. Every fork is self-hostable, so the CLI is
-retargetable without editing a config file: a root persistent `--url` / `OPENSHEET_URL` and a saved
-profile keyed by URL (`internal/cli/url.go`, `internal/cli/profile.go`), which is why
-`credentialFor` answers `HostMismatchError` rather than forwarding a saved credential to a
-host named on the command line. The envelopes and the exit codes are [`cli`](../cli/README.md);
+retargetable without editing a config file: a root persistent `--url` / `OPENSHEET_URL` and named
+profiles (`--profile` / `OPENSHEET_PROFILE`, `internal/cli/url.go`, `internal/cli/profile.go`), each
+bound to the URL it signed in to, which is why the CLI answers `ProfileHostMismatchError` rather
+than forwarding a profile's token to a server named on the command line. The envelopes and the exit codes are [`cli`](../cli/README.md);
 the flags, the precedence, the `healthz` carve-out and that SECURITY note are
 [`cli resolution`](../cli/resolution.md).
 

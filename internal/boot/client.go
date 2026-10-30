@@ -18,11 +18,11 @@ type Client struct {
 	Conn     *controlplane.Client
 }
 
-// BootClient builds the minimal wired graph for CLI subcommands that talk to a remote opensheet server.
-func BootClient(_ context.Context, cfg *config.Config, token string) (*Client, error) {
+// BootClient builds the minimal wired graph for CLI subcommands that call the opensheet server at baseURL with token.
+func BootClient(_ context.Context, cfg *config.Config, baseURL, token string) (*Client, error) {
 	log := logger.New(cfg.Log)
 	reporter := apperror.NewReporter(log, cfg.Mode.IsProduction())
-	conn := controlplane.NewClient(cfg.HTTP.BaseURL, token)
+	conn := controlplane.NewClient(baseURL, token)
 	return &Client{
 		Cfg:      cfg,
 		Log:      log,

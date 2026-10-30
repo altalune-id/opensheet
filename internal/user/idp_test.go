@@ -215,3 +215,19 @@ func TestEnsureFromOIDC_RefusesAVerifiedEmailLinkedToAnotherSubjectAtTheSameIssu
 	require.NoError(t, err)
 	assert.Equal(t, owner.ID, still.ID, "another subject at the same issuer must not take the account")
 }
+
+// TestSQLiteStore_EnsureFromOIDC_EmailChangeOntoAnotherUser proves a verified email change that collides with another user is an identity conflict, not a 500.
+func TestSQLiteStore_EnsureFromOIDC_EmailChangeOntoAnotherUser(t *testing.T) {
+	t.Parallel()
+	db, dbcfg := openMemSQLite(t)
+	svc := user.NewService(user.NewStore(dbcfg, pdb.Pool{W: db, R: db}), user.GenesisConfig{}, newTestLogger(), noopUnexpected())
+	ctx := t.Context()
+
+	_, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "a@x.id", EmailVerified: true, Name: "A"})
+	require.NoError(t, err)
+	_, err = svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-2", Email: "b@x.id", EmailVerified: true, Name: "B"})
+	require.NoError(t, err)
+
+	_, err = svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-2", Email: "a@x.id", EmailVerified: true, Name: "B"})
+	assert.True(t, user.IsIdentityConflictError(err), "got %v", err)
+}

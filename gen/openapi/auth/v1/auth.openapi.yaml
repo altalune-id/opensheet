@@ -66,6 +66,9 @@ components:
           items:
             type: string
           title: scopes
+        activeProjectId:
+          type: string
+          title: active_project_id
       title: WhoamiResponse
       additionalProperties: false
     connect-protocol-version:

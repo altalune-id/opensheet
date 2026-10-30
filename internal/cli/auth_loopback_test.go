@@ -67,7 +67,7 @@ func TestLoopbackSignIn_UsesTheNativeClientOnALoopbackRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loopbackSignIn: %v", err)
 	}
-	if tok.Subject != idp.User.Subject || tok.Email != idp.User.Email || !tok.EmailVerified {
+	if tok.IDToken.Subject != idp.User.Subject || tok.IDToken.Email != idp.User.Email || !tok.IDToken.EmailVerified {
 		t.Fatalf("token = %+v", tok)
 	}
 	if got := seen.Get("client_id"); got != "cli-client" {

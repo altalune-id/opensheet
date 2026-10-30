@@ -11,24 +11,25 @@ Built by Cobra factories in `internal/cli/`, rooted at `NewRootCmd`. The `--help
 (Runtime, Auth, Tenancy, Domain, Meta) are cosmetic and not part of the contract. Adding a command
 is a procedure, not a contract: [`howto/cli-command.md`](../howto/cli-command.md).
 
-| Part                          | Covers                                                                                  |
-| ----------------------------- | --------------------------------------------------------------------------------------- |
-| [`commands`](commands.md)     | every command with its args, flags and printed contract; `todo`; `blog`; payload fields |
-| [`resolution`](resolution.md) | global flags, token and URL precedence, the `healthz` carve-out                         |
+| Part                          | Covers                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| [`commands`](commands.md)     | every command with its args, flags and printed contract; `todo`; payload fields |
+| [`resolution`](resolution.md) | global flags, token and URL precedence, the `healthz` carve-out                 |
 
 ## How a command reaches the domain
 
 R11: the CLI owns no verbs. What a command calls decides which credential it needs.
 
-| Reaches                                    | Commands                                                                    | Credential          |
-| ------------------------------------------ | --------------------------------------------------------------------------- | ------------------- |
-| in-process services (`ServerBootFn`)       | `init`, `serve`, `migrate`, `scheduler`, `auth`, `org`, `project`, `invite` | session file, or DB |
-| control plane S2, Connect (`ClientBootFn`) | `todo`                                                                      | bearer token        |
-| data plane S3, REST                        | `blog`                                                                      | API key             |
-| nothing but `config.Load`                  | `version`, `healthz`, `completion`                                          | none                |
+| Reaches                                    | Commands                                                                                  | Credential                  |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- | --------------------------- |
+| in-process services (`ServerBootFn`)       | `init`, `serve`, `migrate`, `scheduler`, `org`, `project`, `invite`, `auth login` (local) | local profile, or DB        |
+| control plane S2, Connect (`ClientBootFn`) | `todo`, `auth whoami`, `auth login --url` (its `Whoami`)                                  | profile token, or `--token` |
+| Othra, OAuth 2.0                           | `auth login --url` (RFC 8252 loopback), `auth logout` (RFC 7009), refreshes               | native public client, PKCE  |
+| nothing but `config.Load`                  | `version`, `healthz`, `completion`                                                        | none                        |
 
-`org`, `project`, `invite` and `todo` resolve a principal before doing anything, so they fail with
-`not signed in` without a session or `--token`.
+`org`, `project` and `invite` act as the local profile's principal and fail with exit `2` without
+one; they refuse `--url`, `--token` and `--token-file`. `todo` exists only when `published.Todo` is
+on, and fails with exit `2` without a remote profile or `--token`. No command calls the data plane. Profiles and precedence: [`resolution`](resolution.md).
 
 ## Command tree
 
@@ -37,10 +38,9 @@ Args, flags and what each command prints: [`commands`](commands.md).
 ```
 opensheet
 ├─ Runtime   init · serve · migrate {up,status,down-to} · scheduler {list,run}
-├─ Auth      auth {login,logout,whoami,token mint}
+├─ Auth      auth {login,logout,whoami}
 ├─ Tenancy   org {list,create} · project {list,create} · invite {list,send,revoke}
-├─ Domain    todo {list,add,toggle,delete}                             control plane S2
-│            blog {list,get,create,update,publish,unpublish,delete}    data plane S3
+├─ Domain    todo {list,add,toggle,delete}    control plane S2, only with published.Todo
 └─ Meta      version · healthz · completion
 ```
 
@@ -72,14 +72,13 @@ Error code strings (`GEN005`, `TDO001`, …): [`error codes`](../errors/README.m
 `--output` picks the format; `render.Detect` falls back to `OPENSHEET_OUTPUT`, then to text on a TTY and
 json otherwise. An unrecognised value falls back to text.
 
-| Format   | Envelope                                                        |
-| -------- | --------------------------------------------------------------- |
-| `text`   | aligned table for lists, `key: value` lines for single records  |
-| `json`   | `{"data": <shape>}` — indented, HTML escaping off, no `meta`    |
-| `ndjson` | one compact JSON object per line, no envelope — **`blog` only** |
+| Format   | Envelope                                                       |
+| -------- | -------------------------------------------------------------- |
+| `text`   | aligned table for lists, `key: value` lines for single records |
+| `json`   | `{"data": <shape>}` — indented, HTML escaping off, no `meta`   |
+| `ndjson` | accepted, and treated as `json`                                |
 
-Every command except `blog` treats `ndjson` as `json` and emits the `data` envelope. Only
-`renderPosts` / `renderPost` call `render.NDJSON`.
+Every command treats `ndjson` as `json` and emits the `data` envelope; none calls `render.NDJSON`.
 
 Per-command fields under `data`: [`commands`](commands.md#payload-fields).
 
@@ -89,7 +88,7 @@ Per-command fields under `data`: [`commands`](commands.md#payload-fields).
 error envelope on stdout and `--output` does not affect it. One line on **stderr**:
 
 ```
-2026/01/02 15:04:05 ERROR opensheet error="blog get: no such org, project or post"
+2026/01/02 15:04:05 ERROR opensheet error="invite revoke: invite not found"
 ```
 
 `internal/cli/render/error.go` defines a structured alternative
@@ -111,16 +110,12 @@ calls yet. Scripts must key off the **exit code**, not stderr text.
 Present in `--help` and accepted on the command line, but no code reads them. Listed so a script
 does not depend on them.
 
-| Flag                                | Today                                                                 |
-| ----------------------------------- | --------------------------------------------------------------------- |
-| `--no-interactive`                  | never consulted; prompts still appear                                 |
-| `--log-level`, `--log-format`       | flags ignored; `OPENSHEET_LOG_LEVEL` / `OPENSHEET_LOG_FORMAT` do work |
-| `auth login --print-token`          | plumbed into `loginOpts`, never read; no token is printed             |
-| `init --project-slug`               | echoed in the success line; no project is created                     |
-| `--org`, `--project` outside `blog` | ignored; the session principal decides                                |
-
-No command writes a session profile (`saveProfile` has no production caller), so `blog` in practice
-needs an explicit `--token` / `OPENSHEET_TOKEN` plus `--org` and `--project`.
+| Flag                          | Today                                                                 |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `--no-interactive`            | never consulted; prompts still appear                                 |
+| `--log-level`, `--log-format` | flags ignored; `OPENSHEET_LOG_LEVEL` / `OPENSHEET_LOG_FORMAT` do work |
+| `init --project-slug`         | echoed in the success line; no project is created                     |
+| `--org`, `--project`          | ignored; the session principal decides                                |
 
 ## Not on this surface
 

@@ -12,6 +12,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// EnvPrefix prefixes every environment variable the binary reads, config keys and CLI settings alike.
+const EnvPrefix = "OPENSHEET"
+
 // Option customizes Load's behavior.
 type Option func(*loadOptions)
 
@@ -36,7 +39,7 @@ func Load(path string, opts ...Option) (*Config, error) {
 	var cfg Config
 	bindEnv(v, "", reflect.TypeOf(cfg))
 
-	v.SetEnvPrefix("OPENSHEET")
+	v.SetEnvPrefix(EnvPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 

@@ -15,7 +15,9 @@ import (
 	"github.com/altalune-id/oidcrp"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"google.golang.org/grpc/codes"
 
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/cli/render"
@@ -31,107 +33,139 @@ const (
 func newAuthCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "auth",
-		Short:   "Manage authentication (login, logout, whoami, token)",
+		Short:   "Sign in through Othra (login, logout, whoami)",
 		GroupID: "auth",
 	}
 	cmd.AddCommand(
-		newAuthLoginCmd(bootServer),
-		newAuthLogoutCmd(bootServer),
-		newAuthWhoamiCmd(bootServer, bootClient),
-		newAuthTokenCmd(bootServer),
+		newAuthLoginCmd(bootServer, bootClient),
+		newAuthLogoutCmd(),
+		newAuthWhoamiCmd(bootClient),
 	)
-	return cmd
-}
-
-func newAuthLoginCmd(bootServer ServerBootFn) *cobra.Command {
-	var admin bool
-	var printToken bool
-	var email string
-	var passwordStdin bool
-	cmd := &cobra.Command{
-		Use:   "login",
-		Short: "Sign in with OIDC (default) or the local genesis admin (--admin)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := withCfg(cmd)
-			if err != nil {
-				return err
-			}
-			s, err := bootServer(cmd.Context(), cfg)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = s.Close() }()
-			return runLogin(cmd, s, loginOpts{admin: admin, printToken: printToken, email: email, passwordStdin: passwordStdin})
-		},
-	}
-	cmd.Flags().BoolVar(&admin, "admin", false, "Break-glass: force local genesis login even when OIDC is configured")
-	cmd.Flags().BoolVar(&printToken, "print-token", false, "Print the bearer token on success (for scripts)")
-	cmd.Flags().StringVar(&email, "email", "", "Email for local login (skips prompt)")
-	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "Read password from stdin (unmasked)")
 	return cmd
 }
 
 type loginOpts struct {
 	admin         bool
-	printToken    bool
 	email         string
 	passwordStdin bool
 }
 
-func runLogin(cmd *cobra.Command, s *boot.Server, o loginOpts) error {
+func newAuthLoginCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+	var o loginOpts
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Sign in to a remote server (--url) through Othra, or in-process on this server",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := withCfg(cmd)
+			if err != nil {
+				return err
+			}
+			if err := refuseLoginToken(cmd); err != nil {
+				return err
+			}
+			store, err := sessionStore(cmd)
+			if err != nil {
+				return err
+			}
+			name := profileName(cmd)
+			if base := explicitURL(cmd); base != "" {
+				if o.admin || o.email != "" || o.passwordStdin {
+					return apperror.New(apperror.CodeValidation,
+						"login: --admin, --email and --password-stdin sign in on this server; drop --url", codes.InvalidArgument)
+				}
+				l := remoteLogin{
+					cfg: cfg, bootClient: bootClient, httpClient: operatorHTTPClient(), open: oidcrp.OpenBrowser,
+					out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(), store: store,
+				}
+				return l.run(cmd.Context(), base, name)
+			}
+			return localLogin(cmd, bootServer, cfg, store, name, o)
+		},
+	}
+	cmd.Flags().BoolVar(&o.admin, "admin", false, "Break-glass: force local genesis login even when OIDC is configured")
+	cmd.Flags().StringVar(&o.email, "email", "", "Email for local login (skips prompt)")
+	cmd.Flags().BoolVar(&o.passwordStdin, "password-stdin", false, "Read password from stdin (unmasked)")
+	return cmd
+}
+
+func refuseLoginToken(cmd *cobra.Command) error {
+	for _, name := range []string{"token", "token-file"} {
+		if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+			return apperror.New(apperror.CodeValidation,
+				"login: --"+name+" is a credential already; pass it to each command instead of signing in", codes.InvalidArgument)
+		}
+	}
+	return nil
+}
+
+func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config, store profileStore, name string, o loginOpts) error {
+	s, err := bootServer(cmd.Context(), cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	p, err := runLogin(cmd, s, o)
+	if err != nil {
+		return err
+	}
+	if err := store.put(cmd.Context(), name, profile{Principal: viewOfSession(p)}); err != nil {
+		return fmt.Errorf("login: persist session: %w", err)
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s, profile %s)\n", p.Email, p.Source, name)
+	return nil
+}
+
+func runLogin(cmd *cobra.Command, s *boot.Server, o loginOpts) (session.Principal, error) {
 	if o.admin || !s.Caps.ExternalIdentity {
 		if !s.Auth.LocalConfigured() {
-			return errors.New("login: local admin login not configured; set OPENSHEET_GENESIS_EMAIL / OPENSHEET_GENESIS_PASSWORD")
+			return session.Principal{}, errors.New("login: local admin login not configured; set OPENSHEET_GENESIS_EMAIL / OPENSHEET_GENESIS_PASSWORD")
 		}
 		if o.admin && s.Caps.ExternalIdentity {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warn: --admin break-glass login (OIDC bypassed for this session)")
 		}
 		return runLocalPrompt(cmd, s, o)
 	}
-	return runLoopback(cmd.Context(), cmd, s, o)
+	return runLoopback(cmd.Context(), cmd, s)
 }
 
-func runLocalPrompt(cmd *cobra.Command, s *boot.Server, o loginOpts) error {
+func runLocalPrompt(cmd *cobra.Command, s *boot.Server, o loginOpts) (session.Principal, error) {
 	reader := bufio.NewReader(os.Stdin)
 	emailAddr := strings.TrimSpace(o.email)
 	if emailAddr == "" {
 		_, _ = fmt.Fprint(cmd.OutOrStdout(), "Email: ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return fmt.Errorf("login: read email: %w", err)
+			return session.Principal{}, fmt.Errorf("login: read email: %w", err)
 		}
 		emailAddr = strings.TrimSpace(line)
 	}
 	pw, err := readPassword(cmd, reader, o.passwordStdin)
 	if err != nil {
-		return fmt.Errorf("login: read password: %w", err)
+		return session.Principal{}, fmt.Errorf("login: read password: %w", err)
 	}
 	p, err := s.Auth.LoginLocal(cmd.Context(), auth.Credentials{Email: emailAddr, Password: pw})
 	if err != nil {
 		if auth.IsInvalidCredentialsError(err) {
-			return errors.New("login: invalid credentials")
+			return session.Principal{}, errors.New("login: invalid credentials")
 		}
-		return err
+		return session.Principal{}, err
 	}
-	if err := saveSessionFile(s.Cfg.Session.Path, &sessionFile{Principal: p, IssuedAt: time.Now().UTC()}); err != nil {
-		return fmt.Errorf("login: persist session: %w", err)
-	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s)\n", p.Email, p.Source)
-	return nil
+	return p, nil
 }
 
-func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server, _ loginOpts) error {
+func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server) (session.Principal, error) {
 	if s.Platform == nil || s.Platform.AltAuth == nil {
-		return errors.New("login: OIDC not configured (oidc.issuer / oidc.clientID)")
+		return session.Principal{}, errors.New("login: OIDC not configured (oidc.issuer / oidc.clientID)")
 	}
 	if s.Cfg.OIDC.CLIClientID == "" {
-		return errors.New("login: oidc.cliClientID not set; register a native client for the CLI (set OPENSHEET_OIDC_CLI_CLIENT_ID)")
+		return session.Principal{}, errors.New("login: oidc.cliClientID not set; register a native client for the CLI (set OPENSHEET_OIDC_CLI_CLIENT_ID)")
 	}
 	rp := cliRelyingParty(s.Cfg.OIDC, s.Platform.AltAuth.Keys().HTTPClient())
-	tok, err := loopbackSignIn(ctx, rp, s.Cfg.OIDC.RedirectPort, cmd.ErrOrStderr(), oidcrp.OpenBrowser)
+	set, err := loopbackSignIn(ctx, rp, s.Cfg.OIDC.RedirectPort, cmd.ErrOrStderr(), oidcrp.OpenBrowser)
 	if err != nil {
-		return fmt.Errorf("login: loopback: %w", err)
+		return session.Principal{}, fmt.Errorf("login: loopback: %w", err)
 	}
+	tok := set.IDToken
 	p, err := s.Auth.LoginOIDC(ctx, auth.OIDCClaims{
 		Issuer:        s.Cfg.OIDC.Issuer,
 		Subject:       tok.Subject,
@@ -141,15 +175,11 @@ func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server, _ logi
 	})
 	if err != nil {
 		if auth.IsNotInvitedError(err) {
-			return errors.New("login: not invited to this deployment; ask an admin to send an invite")
+			return session.Principal{}, errors.New("login: not invited to this deployment; ask an admin to send an invite")
 		}
-		return err
+		return session.Principal{}, err
 	}
-	if err := saveSessionFile(s.Cfg.Session.Path, &sessionFile{Principal: p, IssuedAt: time.Now().UTC()}); err != nil {
-		return fmt.Errorf("login: persist session: %w", err)
-	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s)\n", p.Email, p.Source)
-	return nil
+	return p, nil
 }
 
 // SECURITY: the CLI is a native public client (RFC 8252), so it never carries the web client's secret.
@@ -163,10 +193,10 @@ func cliRelyingParty(cfg config.OIDCConfig, client *http.Client) *oidcrp.Client 
 	})
 }
 
-func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Writer, open func(context.Context, string) error) (*oidcrp.IDToken, error) {
+func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Writer, open func(context.Context, string) error) (*oidcrp.TokenSet, error) {
 	ctx, cancel := context.WithTimeout(ctx, loopbackTimeout)
 	defer cancel()
-	set, err := rp.RunLoopback(ctx, oidcrp.LoopbackConfig{
+	return rp.RunLoopback(ctx, oidcrp.LoopbackConfig{
 		Port:   port,
 		Prompt: "select_account",
 		Open: func(ctx context.Context, authURL string) error {
@@ -177,10 +207,6 @@ func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Wri
 			return nil
 		},
 	})
-	if err != nil {
-		return nil, err
-	}
-	return set.IDToken, nil
 }
 
 func readPassword(cmd *cobra.Command, reader *bufio.Reader, stdinMode bool) (string, error) {
@@ -207,99 +233,30 @@ func readPassword(cmd *cobra.Command, reader *bufio.Reader, stdinMode bool) (str
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-func newAuthLogoutCmd(bootServer ServerBootFn) *cobra.Command {
+func newAuthLogoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
-		Short: "Clear the local session file",
+		Short: "Revoke the profile's refresh token at Othra and remove the profile",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := withCfg(cmd)
+			store, err := sessionStore(cmd)
 			if err != nil {
 				return err
 			}
-			s, err := bootServer(cmd.Context(), cfg)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = s.Close() }()
-			if err := clearSessionFile(s.Cfg.Session.Path); err != nil {
-				return err
-			}
-			cmd.Println("Signed out.")
-			return nil
+			return logout(cmd.Context(), store, profileName(cmd), operatorHTTPClient(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 }
 
-func newAuthWhoamiCmd(_ ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newAuthWhoamiCmd(bootClient ClientBootFn) *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
-		Short: "Show the current signed-in user",
+		Short: "Show who the current credential acts as",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := withCfg(cmd)
+			in, err := invocationFrom(cmd)
 			if err != nil {
 				return err
 			}
-			p, err := Resolve(cmd.Context(), cmd, cfg, bootClient)
-			if err != nil {
-				return err
-			}
-			format := render.Detect(cmd)
-			switch format {
-			case render.FormatJSON, render.FormatNDJSON:
-				return render.JSON(cmd.OutOrStdout(), whoamiPayload(p, cfg.Session.Path))
-			default:
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-					"user_id: %s\nemail:   %s\nname:    %s\nsource:  %s\nsession: %s\n",
-					p.UserID, p.Email, p.Name, p.Source, cfg.Session.Path)
-				return nil
-			}
+			return whoami(cmd.Context(), in, bootClient, cmd.OutOrStdout(), render.Detect(cmd))
 		},
 	}
-}
-
-func whoamiPayload(p Principal, sessionPath string) map[string]any {
-	return map[string]any{
-		"user_id":      p.UserID.String(),
-		"email":        p.Email,
-		"name":         p.Name,
-		"source":       string(p.Source),
-		"session_path": sessionPath,
-	}
-}
-
-func newAuthTokenCmd(bootServer ServerBootFn) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "token",
-		Short: "Mint or inspect API tokens",
-	}
-	cmd.AddCommand(newAuthTokenMintCmd(bootServer))
-	return cmd
-}
-
-func newAuthTokenMintCmd(_ ServerBootFn) *cobra.Command {
-	var ttl time.Duration
-	cmd := &cobra.Command{
-		Use:   "mint",
-		Short: "Mint a short-lived API token for the signed-in user",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			// TODO(task-33): thread this through boot.Server.Tokens once the
-			// issuer implements Mint. For now the command is a stub that
-			// reports back the requested TTL and the session identity.
-			cfg, err := withCfg(cmd)
-			if err != nil {
-				return err
-			}
-			sess, err := loadSessionFile(cfg.Session.Path)
-			if err != nil {
-				return err
-			}
-			if sess == nil {
-				return ErrNotSignedIn
-			}
-			_ = session.SourceToken
-			return errors.New("auth token mint: not implemented yet (needs a token issuer)")
-		},
-	}
-	cmd.Flags().DurationVar(&ttl, "ttl", 15*time.Minute, "Token time-to-live (e.g. 15m, 1h)")
-	return cmd
 }

@@ -3,99 +3,165 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
+	"os"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/platform/config"
-	"altalune.id/opensheet/internal/platform/session"
 )
 
-func bootServerEcho(_ context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
-	return &boot.Server{Cfg: cfg}, nil
-}
-
-func TestWhoami_NoSession(t *testing.T) {
-	setSelfhostedEnv(t)
-
-	root := NewRootCmd(bootServerEcho, stubClientBoot)
+func runCLI(t *testing.T, bootClient ClientBootFn, args ...string) (string, error) {
+	t.Helper()
+	root := NewRootCmd(stubServerBoot, bootClient)
 	buf := &bytes.Buffer{}
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"auth", "whoami"})
+	root.SetArgs(args)
 	err := root.ExecuteContext(context.Background())
-	if !errors.Is(err, ErrNotSignedIn) {
-		t.Fatalf("got %v, want ErrNotSignedIn", err)
+	return buf.String(), err
+}
+
+func TestWhoami_NotSignedIn(t *testing.T) {
+	setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	_, err := runCLI(t, stubClientBoot, "auth", "whoami")
+	if !IsNotSignedInError(err) || ExitCodeFor(err) != ExitUnauth {
+		t.Fatalf("err = %v (exit %d), want NotSignedInError exiting 2", err, ExitCodeFor(err))
 	}
 }
 
-func TestWhoami_WithSession(t *testing.T) {
+func TestWhoami_LocalProfilePrintsTheStoredPrincipal(t *testing.T) {
 	sessPath := setSelfhostedEnv(t)
-	uid := uuid.New()
-	if err := saveSessionFile(sessPath, &sessionFile{
-		Principal: session.Principal{UserID: uid, Email: "who@here", Source: session.SourceGenesis},
-		IssuedAt:  time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	clearCLIEnv(t)
+	writeRemoteProfile(t, sessPath, defaultProfile, profile{Principal: principalView{Source: "genesis", Email: "who@here"}})
 
-	root := NewRootCmd(bootServerEcho, stubClientBoot)
-	buf := &bytes.Buffer{}
-	root.SetOut(buf)
-	root.SetErr(buf)
-	root.SetArgs([]string{"--output", "text", "auth", "whoami"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	out, err := runCLI(t, stubClientBoot, "--output", "json", "auth", "whoami")
+	if err != nil {
 		t.Fatalf("whoami: %v", err)
 	}
-	if !strings.Contains(buf.String(), "who@here") {
-		t.Errorf("expected email in output, got %q", buf.String())
+	if !strings.Contains(out, `"data"`) || !strings.Contains(out, "who@here") || !strings.Contains(out, `"source": "genesis"`) {
+		t.Fatalf("output = %q", out)
 	}
 }
 
-func TestWhoami_JSONOutput(t *testing.T) {
+func TestWhoami_RemoteProfileAsksTheServerAndRefreshesThePrincipal(t *testing.T) {
 	sessPath := setSelfhostedEnv(t)
-	if err := saveSessionFile(sessPath, &sessionFile{
-		Principal: session.Principal{UserID: uuid.New(), Email: "j@son", Source: session.SourceGenesis},
-		IssuedAt:  time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	clearCLIEnv(t)
+	f := newRemoteFixture(t, testCLIClient)
+	f.store = profileStore{path: sessPath}
+	p := f.signedIn(t, "prod")
+	p.Principal = principalView{Email: "stale@example.com"}
+	writeRemoteProfile(t, sessPath, "prod", p)
 
-	root := NewRootCmd(bootServerEcho, stubClientBoot)
-	buf := &bytes.Buffer{}
-	root.SetOut(buf)
-	root.SetErr(buf)
-	root.SetArgs([]string{"--output", "json", "auth", "whoami"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		t.Fatalf("whoami json: %v", err)
+	out, err := runCLI(t, boot.BootClient, "--profile", "prod", "--output", "text", "auth", "whoami")
+	if err != nil {
+		t.Fatalf("whoami: %v (%s)", err, out)
 	}
-	out := buf.String()
-	if !strings.Contains(out, `"data"`) || !strings.Contains(out, "j@son") {
-		t.Errorf("expected JSON envelope with email, got %q", out)
+	if !strings.Contains(out, testEmail) || !strings.Contains(out, f.app.projectID) || !strings.Contains(out, "prod") {
+		t.Fatalf("output = %q", out)
+	}
+	if got := f.profile(t, "prod").Principal.Email; got != testEmail {
+		t.Fatalf("stored principal email = %q, want whoami's", got)
 	}
 }
 
-func TestLogout_RemovesSession(t *testing.T) {
+func TestWhoami_ExplicitTokenLeavesProfilesAlone(t *testing.T) {
 	sessPath := setSelfhostedEnv(t)
-	if err := saveSessionFile(sessPath, &sessionFile{
-		Principal: session.Principal{UserID: uuid.New(), Email: "z@z", Source: session.SourceGenesis},
-	}); err != nil {
-		t.Fatal(err)
+	clearCLIEnv(t)
+	f := newRemoteFixture(t, testCLIClient)
+	f.store = profileStore{path: sessPath}
+	p := f.signedIn(t, defaultProfile)
+	p.Principal = principalView{Email: "stale@example.com"}
+	writeRemoteProfile(t, sessPath, defaultProfile, p)
+
+	out, err := runCLI(t, boot.BootClient, "--url", f.app.URL, "--token", p.Token.Access, "--output", "json", "auth", "whoami")
+	if err != nil {
+		t.Fatalf("whoami: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, testEmail) {
+		t.Fatalf("output = %q", out)
+	}
+	if got := f.profile(t, defaultProfile).Principal.Email; got != "stale@example.com" {
+		t.Fatalf("an explicit token rewrote the profile: %q", got)
 	}
 
-	root := NewRootCmd(bootServerEcho, stubClientBoot)
-	buf := &bytes.Buffer{}
-	root.SetOut(buf)
-	root.SetErr(buf)
-	root.SetArgs([]string{"auth", "logout"})
-	if err := root.ExecuteContext(context.Background()); err != nil {
+	_, err = runCLI(t, boot.BootClient, "--url", f.app.URL, "--token", "not-a-token", "auth", "whoami")
+	if ExitCodeFor(err) != ExitUnauth || !strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("a rejected token: err = %v (exit %d), want exit 2 with a sign-in hint", err, ExitCodeFor(err))
+	}
+}
+
+func TestLogin_RefusesATokenAndLocalFlagsWithURL(t *testing.T) {
+	setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	for _, args := range [][]string{
+		{"auth", "login", "--token", "tok"},
+		{"auth", "login", "--url", "https://app.example.com", "--admin"},
+		{"auth", "login", "--url", "https://app.example.com", "--email", "a@b.co"},
+	} {
+		if _, err := runCLI(t, stubClientBoot, args...); ExitCodeFor(err) != ExitInvalidArg {
+			t.Fatalf("%v: err = %v, want exit %d", args, err, ExitInvalidArg)
+		}
+	}
+}
+
+func TestLogout_CommandRemovesALocalProfile(t *testing.T) {
+	sessPath := setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	writeRemoteProfile(t, sessPath, defaultProfile, profile{Principal: principalView{Email: "z@z"}})
+
+	out, err := runCLI(t, stubClientBoot, "auth", "logout")
+	if err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	if s, _ := loadSessionFile(sessPath); s != nil {
-		t.Fatal("session file should be gone")
+	if !strings.Contains(out, "Signed out (profile default)") {
+		t.Fatalf("output = %q", out)
+	}
+	if p, _ := (profileStore{path: sessPath}).load(defaultProfile); p != nil {
+		t.Fatal("the profile survived logout")
+	}
+}
+
+func TestLogin_LocalSavesALocalProfileTheInProcessCommandsUse(t *testing.T) {
+	sessPath := setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
+		return boot.BootServer(ctx, cfg)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("hunter2\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin })
+
+	root := NewRootCmd(bootFn, stubClientBoot)
+	buf := &bytes.Buffer{}
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"--profile", "ops", "auth", "login", "--email", "root@example.com", "--password-stdin"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("login: %v (%s)", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "profile ops") {
+		t.Fatalf("output = %q", buf.String())
+	}
+	p, err := (profileStore{path: sessPath}).load("ops")
+	if err != nil || p == nil || p.URL != "" || p.Token != nil || p.Principal.Email != "root@example.com" || p.Principal.UserID == "" {
+		t.Fatalf("local profile = %+v, %v", p, err)
+	}
+
+	root = NewRootCmd(bootFn, stubClientBoot)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs([]string{"--profile", "ops", "--output", "json", "org", "list"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("org list as the local profile: %v (%s)", err, buf.String())
 	}
 }

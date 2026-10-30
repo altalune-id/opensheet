@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/sealer"
@@ -124,8 +125,7 @@ func TestNewWebDeps_RejectsAShortSecret(t *testing.T) {
 func TestBootClient_Wires(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
-	cfg.HTTP.BaseURL = "http://127.0.0.1:0"
-	c, err := BootClient(context.Background(), cfg, "sometoken")
+	c, err := BootClient(context.Background(), cfg, "http://127.0.0.1:0", "sometoken")
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.NotNil(t, c.Log)
@@ -187,4 +187,26 @@ func TestOnboardPolicyFrom_ModeCloud(t *testing.T) {
 	cfg.Mode = config.ModeCloud
 	pol := onboardPolicyFrom(cfg)
 	assert.NotEmpty(t, pol.Mode)
+}
+
+func TestAPIResource_ResolvedOnceAndWarnsOnABadAudience(t *testing.T) {
+	t.Parallel()
+	cfg := config.Defaults()
+	cfg.API.Enabled = true
+	cfg.Tokens.Issuer = "https://issuer.example.com"
+	cfg.Tokens.Audience = "https://app.example.com/api"
+
+	res := apiResource(cfg, discardLogger())
+	require.NotNil(t, res)
+	srv, _ := buildAPIHandler(cfg, &platform.Kernel{Log: discardLogger()}, &Services{}, res)
+	assert.Same(t, res, srv.Resource)
+
+	cfg.Tokens.Audience = "not a url"
+	var buf bytes.Buffer
+	assert.Nil(t, apiResource(cfg, slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))))
+	assert.Contains(t, buf.String(), "tokens.audience is not an http(s) resource identifier")
+
+	cfg.Tokens.Audience = "https://app.example.com/api"
+	cfg.Tokens.Issuer = ""
+	assert.Nil(t, apiResource(cfg, discardLogger()))
 }

@@ -30,13 +30,13 @@ func Interceptor(c Chain, table ScopeTable) connect.UnaryInterceptorFunc {
 			if !isSession(p.Source) {
 				want, ok := table[req.Spec().Procedure]
 				if !ok {
-					return nil, &InsufficientScopeError{Scope: "undeclared"}
+					return nil, &InsufficientScopeError{Source: p.Source}
 				}
 				if want == SessionOnly {
 					return nil, &SessionRequiredError{}
 				}
 				if !slices.Contains(p.Scopes, want) {
-					return nil, &InsufficientScopeError{Scope: want}
+					return nil, &InsufficientScopeError{Scope: want, Source: p.Source}
 				}
 			}
 			return next(session.PrincipalInto(ctx, p), req)

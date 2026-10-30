@@ -20,6 +20,7 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/handlers"
@@ -35,6 +36,7 @@ type oidcHarness struct {
 	idp    *oidcrptest.IDP
 	mux    *http.ServeMux
 	secret []byte
+	tr     *i18n.Translator
 }
 
 func newOIDCHarness(t *testing.T) *oidcHarness {
@@ -66,6 +68,9 @@ func newOIDCHarness(t *testing.T) *oidcHarness {
 }
 
 func (o *oidcHarness) do(r *http.Request) *httptest.ResponseRecorder {
+	if o.tr != nil {
+		r = r.WithContext(i18n.TranslatorInto(r.Context(), o.tr))
+	}
 	rec := httptest.NewRecorder()
 	o.mux.ServeHTTP(rec, r)
 	return rec
@@ -234,6 +239,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 		run      func(t *testing.T, o *oidcHarness) *httptest.ResponseRecorder
 		status   int
 		location string
+		key      string
 	}{
 		{
 			name: "no state cookie",
@@ -242,6 +248,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), nil)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "a forged state cookie",
@@ -250,6 +257,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), &http.Cookie{Name: oidcStateCookie, Value: "forged|sig"})
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "a state that is not this attempt's",
@@ -260,6 +268,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(q, state)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "an iss that is not the issuer",
@@ -270,6 +279,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(q, state)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "an upstream error with a description",
@@ -282,6 +292,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(q, state)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "a nonce that is not this attempt's",
@@ -291,6 +302,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "the issuer refuses the code",
@@ -301,6 +313,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(q, state)
 			},
 			status: http.StatusBadRequest,
+			key:    "errors.signin.expired",
 		},
 		{
 			name: "the issuer is failing",
@@ -310,6 +323,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusBadGateway,
+			key:    "errors.signin.unavailable",
 		},
 		{
 			name: "an unverified email",
@@ -319,6 +333,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusForbidden,
+			key:    "errors.signin.email_unverified",
 		},
 		{
 			name: "an email linked to another subject at the issuer",
@@ -331,6 +346,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusForbidden,
+			key:    "errors.signin.identity_conflict",
 		},
 		{
 			name: "a sign-in the app refuses",
@@ -340,6 +356,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusForbidden,
+			key:    "errors.signin.not_permitted",
 		},
 		{
 			name: "the user store is failing",
@@ -349,6 +366,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				return o.callback(o.idp.Authorize(authURL), state)
 			},
 			status: http.StatusInternalServerError,
+			key:    "errors.signin.unavailable",
 		},
 		{
 			name: "the person cancelled",
@@ -364,6 +382,7 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			o := newOIDCHarness(t)
+			o.tr = i18n.NewEmbeddedBundle(i18n.EnUS).For(i18n.EnUS)
 			rec := tt.run(t, o)
 			require.Equal(t, tt.status, rec.Code, "body=%s", rec.Body.String())
 			if tt.location != "" {
@@ -373,8 +392,8 @@ func TestOIDC_CallbackFailuresNeverShowUpstreamText(t *testing.T) {
 				assert.NotContains(t, rec.Body.String(), leak, "the page must name a reason, never an internal error")
 			}
 			assert.Nil(t, cookieNamed(rec, web.SessionCookieName), "a failed sign-in must not start a session")
-			if tt.status >= http.StatusBadRequest {
-				assert.Contains(t, rec.Body.String(), "Please try signing in again.", "the page renders a reason key, not the error")
+			if tt.key != "" {
+				assert.Contains(t, rec.Body.String(), o.tr.T(tt.key+".body"), "the page must render %s", tt.key)
 			}
 		})
 	}

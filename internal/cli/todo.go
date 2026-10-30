@@ -9,11 +9,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	authv1 "altalune.id/opensheet/gen/go/auth/v1"
 	todov1 "altalune.id/opensheet/gen/go/todo/v1"
 	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/internal/controlplane"
 )
 
-func newTodoCmd(_ ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newTodoCmd(bootClient ClientBootFn) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "todo",
 		Short:   "Manage todos in the active project",
@@ -37,22 +39,19 @@ func newTodoListCmd(bootClient ClientBootFn) *cobra.Command {
 			if doneFlag && openFlag {
 				return errors.New("todo list: --done and --open are mutually exclusive")
 			}
-			p, err := withPrincipal(cmd, bootClient, true)
-			if err != nil {
-				return err
-			}
-			if p.ProjectID == uuid.Nil {
-				return errors.New("todo list: no active project — pass --project or run `opensheet auth login`")
-			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {
 				return err
 			}
-			resp, err := conn.Todo.List(cmd.Context(), connect.NewRequest(&todov1.ListRequest{
-				ProjectId: p.ProjectID.String(),
-			}))
+			projectID, err := activeProjectID(cmd, conn, "todo list")
 			if err != nil {
 				return err
+			}
+			resp, err := conn.Todo.List(cmd.Context(), connect.NewRequest(&todov1.ListRequest{
+				ProjectId: projectID,
+			}))
+			if err != nil {
+				return withHint(err)
 			}
 			items := filterTodos(resp.Msg.GetTodos(), doneFlag, openFlag)
 			format := render.Detect(cmd)
@@ -88,23 +87,20 @@ func newTodoAddCmd(bootClient ClientBootFn) *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			title := strings.Join(args, " ")
-			p, err := withPrincipal(cmd, bootClient, true)
-			if err != nil {
-				return err
-			}
-			if p.ProjectID == uuid.Nil {
-				return errors.New("todo add: no active project — pass --project or run `opensheet auth login`")
-			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {
 				return err
 			}
+			projectID, err := activeProjectID(cmd, conn, "todo add")
+			if err != nil {
+				return err
+			}
 			resp, err := conn.Todo.Create(cmd.Context(), connect.NewRequest(&todov1.CreateRequest{
-				ProjectId: p.ProjectID.String(),
+				ProjectId: projectID,
 				Title:     title,
 			}))
 			if err != nil {
-				return err
+				return withHint(err)
 			}
 			t := resp.Msg.GetTodo()
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Added todo %s: %s\n", t.GetId(), t.GetTitle())
@@ -122,9 +118,6 @@ func newTodoToggleCmd(bootClient ClientBootFn) *cobra.Command {
 			if _, err := uuid.Parse(args[0]); err != nil {
 				return fmt.Errorf("todo toggle: %q is not a uuid: %w", args[0], err)
 			}
-			if _, err := withPrincipal(cmd, bootClient, true); err != nil {
-				return err
-			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {
 				return err
@@ -133,7 +126,7 @@ func newTodoToggleCmd(bootClient ClientBootFn) *cobra.Command {
 				TodoId: args[0],
 			}))
 			if err != nil {
-				return err
+				return withHint(err)
 			}
 			t := resp.Msg.GetTodo()
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s done=%v\n", t.GetId(), t.GetDone())
@@ -151,9 +144,6 @@ func newTodoDeleteCmd(bootClient ClientBootFn) *cobra.Command {
 			if _, err := uuid.Parse(args[0]); err != nil {
 				return fmt.Errorf("todo delete: %q is not a uuid: %w", args[0], err)
 			}
-			if _, err := withPrincipal(cmd, bootClient, true); err != nil {
-				return err
-			}
 			conn, err := connFromCmd(cmd, bootClient)
 			if err != nil {
 				return err
@@ -161,12 +151,23 @@ func newTodoDeleteCmd(bootClient ClientBootFn) *cobra.Command {
 			if _, err := conn.Todo.Delete(cmd.Context(), connect.NewRequest(&todov1.DeleteRequest{
 				TodoId: args[0],
 			})); err != nil {
-				return err
+				return withHint(err)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted todo %s\n", args[0])
 			return nil
 		},
 	}
+}
+
+func activeProjectID(cmd *cobra.Command, conn *controlplane.Client, op string) (string, error) {
+	resp, err := conn.Auth.Whoami(cmd.Context(), connect.NewRequest(&authv1.WhoamiRequest{}))
+	if err != nil {
+		return "", withHint(err)
+	}
+	if id := resp.Msg.GetActiveProjectId(); id != "" {
+		return id, nil
+	}
+	return "", errors.New(op + ": the server resolved no active project for this credential")
 }
 
 func protoTodoToMap(t *todov1.Todo) map[string]any {

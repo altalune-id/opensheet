@@ -93,3 +93,17 @@ func TestPostgres_EnsureFromOIDC_EmailChangedAtIDP(t *testing.T) {
 	_, err = store.ByEmail(ctx, "old@x.id")
 	assert.True(t, user.IsNotFoundError(err), "the old address must no longer resolve, got %v", err)
 }
+
+// TestPostgres_EnsureFromOIDC_EmailChangeOntoAnotherUser proves a verified email change that collides with another user is an identity conflict, not a 500.
+func TestPostgres_EnsureFromOIDC_EmailChangeOntoAnotherUser(t *testing.T) {
+	svc := user.NewService(newPostgresStoreForTest(t), user.GenesisConfig{}, newTestLogger(), noopUnexpected())
+	ctx := t.Context()
+
+	_, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "a@x.id", EmailVerified: true, Name: "A"})
+	require.NoError(t, err)
+	_, err = svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-2", Email: "b@x.id", EmailVerified: true, Name: "B"})
+	require.NoError(t, err)
+
+	_, err = svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-2", Email: "a@x.id", EmailVerified: true, Name: "B"})
+	assert.True(t, user.IsIdentityConflictError(err), "got %v", err)
+}

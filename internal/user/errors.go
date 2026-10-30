@@ -230,12 +230,14 @@ func IsEmailUnverifiedError(err error) bool {
 	return ok
 }
 
-// IdentityConflictError signals an OIDC sign-in whose verified email belongs to a user linked to another subject at the same issuer.
-type IdentityConflictError struct{}
+// IdentityConflictError signals an OIDC sign-in whose verified email belongs to another user; Cause is the store error, if any.
+type IdentityConflictError struct{ Cause error }
 
 func (*IdentityConflictError) Error() string {
-	return "user: oidc email is linked to another subject at this issuer"
+	return "user: oidc email belongs to another user"
 }
+
+func (e *IdentityConflictError) Unwrap() error { return e.Cause }
 
 // ToAppError maps IdentityConflictError to the canonical PermissionDenied envelope.
 func (*IdentityConflictError) ToAppError() *apperror.AppError {

@@ -11,25 +11,25 @@ import (
 )
 
 // TODO(future-proto): switch to bootClient.Conn once api/project/v1 lands.
-func newProjectCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newProjectCmd(bootServer ServerBootFn) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "project",
 		Short:   "Manage projects within the active org",
 		GroupID: "tenancy",
 	}
 	cmd.AddCommand(
-		newProjectListCmd(bootServer, bootClient),
-		newProjectCreateCmd(bootServer, bootClient),
+		newProjectListCmd(bootServer),
+		newProjectCreateCmd(bootServer),
 	)
 	return cmd
 }
 
-func newProjectListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newProjectListCmd(bootServer ServerBootFn) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List projects in the active org",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}
@@ -65,13 +65,13 @@ func newProjectListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.
 	}
 }
 
-func newProjectCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newProjectCreateCmd(bootServer ServerBootFn) *cobra.Command {
 	var slug, name string
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new project in the active org",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}

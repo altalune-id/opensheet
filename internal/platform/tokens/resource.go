@@ -8,6 +8,9 @@ import (
 	"github.com/altalune-id/oauthrs"
 )
 
+// CLIClientIDMember is the RFC 9728 extension member naming the native client the CLI signs in with. https://www.rfc-editor.org/rfc/rfc9728.html#section-2
+const CLIClientIDMember = "cli_client_id"
+
 // Resource carries the identifiers a protected resource's mount, verifier and 401 challenge must agree on. https://www.rfc-editor.org/rfc/rfc9728.html#section-3
 type Resource struct {
 	Identifier   string
@@ -33,6 +36,15 @@ func (r Resource) MetadataHandler(issuer string, scopes []string) http.Handler {
 	return oauthrs.MetadataHandler(oauthrs.ProtectedResource{
 		Resource: r.Identifier, AuthorizationServers: []string{issuer}, ScopesSupported: scopes,
 	})
+}
+
+// CLIMetadataHandler serves the resource's RFC 9728 document plus a CLIClientIDMember when cliClientID is set.
+func (r Resource) CLIMetadataHandler(issuer string, scopes []string, cliClientID string) http.Handler {
+	pr := oauthrs.ProtectedResource{Resource: r.Identifier, AuthorizationServers: []string{issuer}, ScopesSupported: scopes}
+	if cliClientID != "" {
+		pr.Extra = map[string]any{CLIClientIDMember: cliClientID}
+	}
+	return oauthrs.MetadataHandler(pr)
 }
 
 // Challenge is the WWW-Authenticate value of a 401 on this resource (RFC 6750 Section 3).

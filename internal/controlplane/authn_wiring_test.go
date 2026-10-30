@@ -299,3 +299,70 @@ func TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated(t *testin
 		})
 	}
 }
+
+// TestServer_HandlerOptions_ChallengesFollowRFC6750 proves the 401 says invalid_token only for a presented credential and the 403 names a scope only to a token missing a real one.
+func TestServer_HandlerOptions_ChallengesFollowRFC6750(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	resource, err := tokens.NewResource("https://app.example.com/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := fakes.NewAPIKey()
+	readKey, readPlain, err := apikey.Scheme{}.Mint(uuid.New(), uuid.New(), "read-only", []string{authn.ScopeSheetsRead}, nil, nil, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Seed(readKey)
+	scheme := authn.Scheme{Prefix: apikey.DefaultPrefix}
+	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	readToken := authn.Chain{keyAuthn, tokens.NewAuthenticator(scopedTokenVerifier{scopes: []string{authn.ScopeSheetsRead}}, scheme)}
+	refused := authn.Chain{keyAuthn, tokens.NewAuthenticator(failingTokenVerifier{err: &tokens.InvalidTokenError{Reason: "signature"}}, scheme)}
+
+	for _, tc := range []struct {
+		name      string
+		chain     authn.Chain
+		procedure string
+		bearer    string
+		want      connect.Code
+		challenge string
+	}{
+		{"no credential", refused, sheetv1connect.SheetServiceDeleteProcedure, "", connect.CodeUnauthenticated, resource.Challenge()},
+		{"a refused token", refused, sheetv1connect.SheetServiceDeleteProcedure, "aaa.bbb.ccc", connect.CodeUnauthenticated, resource.InvalidToken()},
+		{"a token missing a scope", readToken, sheetv1connect.SheetServiceDeleteProcedure, "aaa.bbb.ccc", connect.CodePermissionDenied, resource.InsufficientScope(authn.ScopeSheetsAdmin)},
+		{"a key missing a scope", readToken, sheetv1connect.SheetServiceDeleteProcedure, readPlain, connect.CodePermissionDenied, ""},
+		{"a token on an undeclared procedure", readToken, "/test.UndeclaredService/DoSomething", "aaa.bbb.ccc", connect.CodePermissionDenied, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{
+				Kernel:   &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
+				Authn:    tc.chain,
+				Resource: &resource,
+			}
+			mux := http.NewServeMux()
+			mux.Handle(tc.procedure, connect.NewUnaryHandlerSimple(tc.procedure,
+				func(context.Context, *sheetv1.DeleteRequest) (*sheetv1.DeleteResponse, error) {
+					t.Fatal("the handler ran for a refused call")
+					return nil, nil
+				}, s.handlerOptions()...))
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+
+			client := connect.NewClient[sheetv1.DeleteRequest, sheetv1.DeleteResponse](http.DefaultClient, ts.URL+tc.procedure)
+			req := connect.NewRequest(&sheetv1.DeleteRequest{SheetId: uuid.NewString()})
+			if tc.bearer != "" {
+				req.Header().Set("Authorization", "Bearer "+tc.bearer)
+			}
+			_, err := client.CallUnary(t.Context(), req)
+			if connect.CodeOf(err) != tc.want {
+				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+			var cerr *connect.Error
+			if !errors.As(err, &cerr) {
+				t.Fatalf("err = %T, want *connect.Error", err)
+			}
+			if got := cerr.Meta().Get("WWW-Authenticate"); got != tc.challenge {
+				t.Fatalf("WWW-Authenticate = %q, want %q", got, tc.challenge)
+			}
+		})
+	}
+}
