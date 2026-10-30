@@ -27,7 +27,7 @@ func profileName(cmd *cobra.Command) string {
 			return v
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv(envVar("PROFILE"))); v != "" {
+	if v := strings.TrimSpace(os.Getenv(config.EnvVar("profile"))); v != "" {
 		return v
 	}
 	return defaultProfile
@@ -53,11 +53,12 @@ func operatorHTTPClient() *http.Client {
 }
 
 type invocation struct {
-	cfg     *config.Config
-	store   profileStore
-	profile string
-	url     string
-	token   string
+	cfg            *config.Config
+	explicitConfig bool
+	store          profileStore
+	profile        string
+	url            string
+	token          string
 }
 
 func invocationFrom(cmd *cobra.Command) (invocation, error) {
@@ -73,10 +74,17 @@ func invocationFrom(cmd *cobra.Command) (invocation, error) {
 	if err != nil {
 		return invocation{}, err
 	}
-	return invocation{cfg: cfg, store: store, profile: profileName(cmd), url: explicitURL(cmd), token: token}, nil
+	return invocation{
+		cfg: cfg, explicitConfig: explicitConfig(cmd), store: store, profile: profileName(cmd), url: explicitURL(cmd), token: token,
+	}, nil
 }
 
-// NOTE: precedence is --url > OPENSHEET_URL > the profile's URL > config http.baseURL.
+func explicitConfig(cmd *cobra.Command) bool {
+	f := cmd.Root().PersistentFlags().Lookup("config")
+	return f != nil && f.Changed && strings.TrimSpace(f.Value.String()) != ""
+}
+
+// SECURITY: precedence is --url > OPENSHEET_URL > the profile's URL > http.baseURL, the last only from a config file named with -c, never one discovered in the working directory.
 func (in invocation) baseURL(p *profile) string {
 	if in.url != "" {
 		return in.url
@@ -84,7 +92,7 @@ func (in invocation) baseURL(p *profile) string {
 	if p != nil && p.URL != "" {
 		return p.URL
 	}
-	if in.cfg != nil {
+	if in.cfg != nil && in.explicitConfig {
 		return strings.TrimSpace(in.cfg.HTTP.BaseURL)
 	}
 	return ""

@@ -40,7 +40,7 @@ func TestSanitizeRedirect(t *testing.T) {
 func TestSwitcher_SetsCookieAndRedirects(t *testing.T) {
 	t.Parallel()
 	b := i18n.NewEmbeddedBundle(i18n.EnUS)
-	h := i18n.Switcher(i18n.SwitcherOpts{Bundle: b, CookieSecure: true, CookiePath: "/app"})
+	h := i18n.Switcher(i18n.SwitcherOpts{Bundle: b, Secure: func(*http.Request) bool { return true }, CookiePath: "/app"})
 
 	form := url.Values{}
 	form.Set("locale", "id-ID")

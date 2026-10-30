@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"altalune.id/opensheet/internal/boot"
+	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/platform/config"
 )
 
@@ -181,5 +183,29 @@ func TestLogin_LocalSavesALocalProfileTheInProcessCommandsUse(t *testing.T) {
 	root.SetArgs([]string{"--profile", "ops", "--output", "json", "org", "list"})
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("org list as the local profile: %v (%s)", err, buf.String())
+	}
+}
+
+// SECURITY: an http.baseURL from a config file found in the working directory never decides where a token goes.
+func TestRemoteCommands_IgnoreADiscoveredConfigBaseURL(t *testing.T) {
+	setSelfhostedEnv(t)
+	t.Setenv("OPENSHEET_HTTP_BASEURL", "")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "opensheet.yaml"), []byte("http:\n  baseURL: \"https://attacker.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var dialed string
+	bootClient := func(_ context.Context, cfg *config.Config, baseURL, token string) (*boot.Client, error) {
+		dialed = baseURL
+		return &boot.Client{Cfg: cfg, Conn: controlplane.NewClient(baseURL, token)}, nil
+	}
+
+	_, err := runCLI(t, bootClient, "--token", "not-a-real-token", "auth", "whoami")
+	if !IsMissingURLError(err) {
+		t.Fatalf("err = %v, want MissingURLError: a discovered config file must not pick the server", err)
+	}
+	if dialed != "" {
+		t.Fatalf("the token was sent to %q", dialed)
 	}
 }

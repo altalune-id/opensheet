@@ -28,11 +28,11 @@ func (h *LocaleHandler) Register(mux web.Mux) {
 		return
 	}
 	mux.HandleFunc("POST /locale", i18n.Switcher(i18n.SwitcherOpts{
-		Bundle:       h.I18n,
-		CookieSecure: h.Cfg.HTTP.CookieSecure,
-		CookiePath:   h.cookiePath(),
-		Persist:      h.persister(),
-		Fallback:     h.Cfg.HTTP.BasePath + "/",
+		Bundle:     h.I18n,
+		Secure:     h.SecureCookie,
+		CookiePath: h.cookiePath(),
+		Persist:    h.persister(),
+		Fallback:   h.Cfg.HTTP.BasePath + "/",
 	}))
 }
 

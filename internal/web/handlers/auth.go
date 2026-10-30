@@ -292,7 +292,6 @@ func (h *AuthHandler) PostLogout(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case endURL == "":
 		case !sameOrigin(endURL, h.Cfg.OIDC.Issuer):
-			// SECURITY: the CSP form-action allows only the issuer's origin, so another origin would strand the browser on a CSP error.
 			h.LogErr("web auth: end session url", errors.New("end_session_endpoint is not on the issuer's origin"))
 		default:
 			http.Redirect(w, r, endURL, http.StatusSeeOther) //nolint:gosec // G710: the end_session_endpoint of the issuer's own discovery.
@@ -323,7 +322,6 @@ func (h *AuthHandler) Register(mux web.Mux) {
 }
 
 func sameOrigin(a, b string) bool {
-	ua, errA := url.Parse(a)
-	ub, errB := url.Parse(b)
-	return errA == nil && errB == nil && ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
+	o := web.Origin(a)
+	return o != "" && o == web.Origin(b)
 }

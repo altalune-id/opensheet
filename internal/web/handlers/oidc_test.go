@@ -14,6 +14,7 @@ import (
 
 	"github.com/altalune-id/oidcrp"
 	"github.com/altalune-id/oidcrp/oidcrptest"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -23,6 +24,7 @@ import (
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/handlers"
@@ -449,4 +451,57 @@ func TestSignInRefusalIsAnExplicitList(t *testing.T) {
 		assert.Equal(t, tc.want, handlers.IsSignInRefusal(err), "%v", tc.code)
 	}
 	assert.False(t, handlers.IsSignInRefusal(errors.New("connection refused")), "an untyped error is an outage")
+}
+
+func TestOIDC_LogoutEndsTheSessionAtTheIssuer(t *testing.T) {
+	issuer, rec := logoutWithEndSession(t, "/end-session")
+	require.Equal(t, http.StatusSeeOther, rec.Code, "body=%s", rec.Body.String())
+	loc := rec.Header().Get("Location")
+	assert.True(t, strings.HasPrefix(loc, issuer+"/end-session?"), "sign-out must reach the issuer, got %q", loc)
+	assert.Equal(t, "header.payload.signature", mustQuery(t, loc).Get("id_token_hint"))
+	assert.Contains(t, rec.Header().Get("Set-Cookie"), web.SessionCookieName, "the local session is cleared too")
+}
+
+// SECURITY: an end_session_endpoint on another origin is never followed, because the CSP form-action allows only the issuer's.
+func TestOIDC_LogoutStaysLocalWhenEndSessionIsOnAnotherOrigin(t *testing.T) {
+	_, rec := logoutWithEndSession(t, "https://elsewhere.example/end-session")
+	require.Equal(t, http.StatusSeeOther, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, "/", rec.Header().Get("Location"))
+	assert.Contains(t, rec.Header().Get("Set-Cookie"), web.SessionCookieName, "the local session is cleared either way")
+}
+
+func logoutWithEndSession(t *testing.T, endSession string) (string, *httptest.ResponseRecorder) {
+	t.Helper()
+	mux := http.NewServeMux()
+	issuer := httptest.NewServer(mux)
+	t.Cleanup(issuer.Close)
+	if strings.HasPrefix(endSession, "/") {
+		endSession = issuer.URL + endSession
+	}
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuer":"` + issuer.URL + `","authorization_endpoint":"` + issuer.URL + `/authorize",` +
+			`"token_endpoint":"` + issuer.URL + `/token","jwks_uri":"` + issuer.URL + `/jwks",` +
+			`"end_session_endpoint":"` + endSession + `","response_types_supported":["code"],` +
+			`"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"],` +
+			`"code_challenge_methods_supported":["S256"]}`))
+	})
+
+	f := newFixture(t)
+	f.Cfg.OIDC.Issuer = issuer.URL
+	f.Cfg.OIDC.ClientID = "web-client"
+	f.Cfg.OIDC.EndSessionOnLogout = true
+	rp := oidcrp.New(oidcrp.Config{
+		Issuer: issuer.URL, ClientID: "web-client", ClientSecret: "web-secret",
+		RedirectURI: "http://localhost/oauth/callback", Scopes: []string{"openid"}, HTTPClient: issuer.Client(),
+	})
+	h := handlers.NewAuthHandler(f.Deps, nil, f.Users, f.Orgs, f.Projects, rp, nil)
+	routes := http.NewServeMux()
+	h.Register(routes)
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, f.authedRequest(t, http.MethodPost, "/logout", "", session.Principal{
+		UserID: uuid.New(), Source: session.SourceOIDC, IDToken: "header.payload.signature",
+	}))
+	return issuer.URL, rec
 }

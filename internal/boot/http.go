@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -291,17 +290,9 @@ func cspOptions(cfg *config.Config) webmw.CSPOptions {
 		ReportOnly: cfg.HTTP.CSP.ReportOnly,
 		ReportURI:  cfg.HTTP.CSP.ReportURI,
 	}
-	if origin := issuerOrigin(cfg.OIDC.Issuer); origin != "" && cfg.OIDC.EndSessionOnLogout {
+	if origin := web.Origin(cfg.OIDC.Issuer); origin != "" && cfg.OIDC.EndSessionOnLogout {
 		opts.ExtraFormAction = []string{origin}
 	}
 	opts.ExtraFormAction = append(opts.ExtraFormAction, opensheetFormAction(cfg)...)
 	return opts
-}
-
-func issuerOrigin(issuer string) string {
-	u, err := url.Parse(issuer)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
 }

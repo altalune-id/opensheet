@@ -5,13 +5,15 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 func explicitURL(cmd *cobra.Command) string {
 	if f := cmd.Root().PersistentFlags().Lookup("url"); f != nil && f.Changed {
 		return strings.TrimSpace(f.Value.String())
 	}
-	return strings.TrimSpace(os.Getenv(envVar("URL")))
+	return strings.TrimSpace(os.Getenv(config.EnvVar("url")))
 }
 
 func sameURL(a, b string) bool {

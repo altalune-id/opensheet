@@ -15,6 +15,9 @@ import (
 // EnvPrefix prefixes every environment variable the binary reads, config keys and CLI settings alike.
 const EnvPrefix = "OPENSHEET"
 
+// EnvVar returns the environment variable name for a dotted config key.
+func EnvVar(key string) string { return envVarName(EnvPrefix, key) }
+
 // Option customizes Load's behavior.
 type Option func(*loadOptions)
 
