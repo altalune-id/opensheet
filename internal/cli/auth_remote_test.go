@@ -20,6 +20,7 @@ import (
 	"github.com/altalune-id/oauthrs"
 	"github.com/altalune-id/oidcrp/oidcrptest"
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 
 	authv1 "altalune.id/opensheet/gen/go/auth/v1"
 	"altalune.id/opensheet/gen/go/auth/v1/authv1connect"
@@ -630,7 +631,7 @@ func TestResolveRemote_ExplicitTokenIgnoresABrokenSessionFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	in := invocation{cfg: config.Defaults(), store: profileStore{path: path}, profile: defaultProfile, token: "tok"}
+	in := invocation{cfg: config.Defaults(), explicitConfig: true, store: profileStore{path: path}, profile: defaultProfile, token: "tok"}
 	in.cfg.HTTP.BaseURL = "https://cfg.example"
 	for _, explicit := range []string{"", "https://flag.example"} {
 		in.url = explicit
@@ -659,5 +660,66 @@ func TestResolveRemote_RefusesABearerOverPlainHTTP(t *testing.T) {
 	in.url, in.token = "http://127.0.0.1:5180", "tok"
 	if _, err := resolveRemote(t.Context(), in, http.DefaultClient); err != nil {
 		t.Fatalf("loopback stays allowed for local development: %v", err)
+	}
+}
+
+// SECURITY: RFC 7009: a local sign-in that overwrites a remote profile revokes the refresh token it replaces.
+func TestReplaceProfile_LocalOverRemoteRevokesTheRefreshToken(t *testing.T) {
+	f := newRemoteFixture(t, testCLIClient)
+	f.signedIn(t, "ops")
+
+	local := profile{Principal: principalView{Email: testEmail, UserID: "usr_local"}}
+	if err := replaceProfile(t.Context(), f.store, f.client, &f.errOut, "ops", local); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if f.idp.Revocations() != 1 {
+		t.Fatalf("revocations = %d, want the replaced refresh token revoked", f.idp.Revocations())
+	}
+	got, err := f.store.load("ops")
+	if err != nil || got == nil || got.URL != "" || got.Token != nil {
+		t.Fatalf("profile = %+v, %v; want the local profile", got, err)
+	}
+}
+
+// SECURITY: RFC 7009: an `auth login` that overwrites a remote profile revokes the refresh token it replaces.
+func TestLocalLogin_OverARemoteProfileRevokesItsRefreshToken(t *testing.T) {
+	sessPath := setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	f := newRemoteFixture(t, testCLIClient)
+	f.store = profileStore{path: sessPath}
+	f.signedIn(t, "ops")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("hunter2\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin })
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	cmd.SetOut(&f.out)
+	cmd.SetErr(&f.errOut)
+	bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
+		return boot.BootServer(ctx, cfg)
+	}
+	if err := localLogin(cmd, bootFn, cfg, f.store, "ops", loginOpts{email: "root@example.com", passwordStdin: true}, f.client); err != nil {
+		t.Fatalf("local login: %v (stderr %q)", err, f.errOut.String())
+	}
+	if f.idp.Revocations() != 1 {
+		t.Fatalf("revocations = %d, want the replaced refresh token revoked", f.idp.Revocations())
+	}
+	got, err := f.store.load("ops")
+	if err != nil || got == nil || got.URL != "" || got.Token != nil || got.Principal.Email != "root@example.com" {
+		t.Fatalf("profile = %+v, %v; want the local profile", got, err)
 	}
 }

@@ -79,7 +79,7 @@ func newAuthLoginCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Co
 				}
 				return l.run(cmd.Context(), base, name)
 			}
-			return localLogin(cmd, bootServer, cfg, store, name, o)
+			return localLogin(cmd, bootServer, cfg, store, name, o, operatorHTTPClient())
 		},
 	}
 	cmd.Flags().BoolVar(&o.admin, "admin", false, "Break-glass: force local genesis login even when OIDC is configured")
@@ -98,7 +98,7 @@ func refuseLoginToken(cmd *cobra.Command) error {
 	return nil
 }
 
-func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config, store profileStore, name string, o loginOpts) error {
+func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config, store profileStore, name string, o loginOpts, httpClient *http.Client) error {
 	s, err := bootServer(cmd.Context(), cfg)
 	if err != nil {
 		return err
@@ -108,7 +108,7 @@ func localLogin(cmd *cobra.Command, bootServer ServerBootFn, cfg *config.Config,
 	if err != nil {
 		return err
 	}
-	if err := store.put(cmd.Context(), name, profile{Principal: viewOfSession(p)}); err != nil {
+	if err := replaceProfile(cmd.Context(), store, httpClient, cmd.ErrOrStderr(), name, profile{Principal: viewOfSession(p)}); err != nil {
 		return fmt.Errorf("login: persist session: %w", err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s, profile %s)\n", p.Email, p.Source, name)

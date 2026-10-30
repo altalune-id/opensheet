@@ -262,7 +262,7 @@ func (d Deps) Key(purpose string) []byte {
 }
 
 // SecureCookie reports whether cookies written for r carry the Secure attribute.
-func (d Deps) SecureCookie(r *http.Request) bool { return d.Cfg.HTTP.CookieSecure || r.TLS != nil }
+func (d Deps) SecureCookie(r *http.Request) bool { return web.SecureCookie(d.Cfg.HTTP.CookieSecure, r) }
 
 func (d Deps) hasSecret() bool { return len(d.secret) >= MinSecretLen }
 

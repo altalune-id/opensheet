@@ -10,8 +10,6 @@ import (
 	"altalune.id/opensheet/internal/platform/config"
 )
 
-func envVar(suffix string) string { return config.EnvPrefix + "_" + suffix }
-
 // NOTE: precedence is --token, then --token-file, then OPENSHEET_TOKEN; an empty result falls through to the profile.
 func resolveToken(cmd *cobra.Command) (string, error) {
 	root := cmd.Root()
@@ -29,5 +27,5 @@ func resolveToken(cmd *cobra.Command) (string, error) {
 		}
 		return tok, nil
 	}
-	return strings.TrimSpace(os.Getenv(envVar("TOKEN"))), nil
+	return strings.TrimSpace(os.Getenv(config.EnvVar("token"))), nil
 }

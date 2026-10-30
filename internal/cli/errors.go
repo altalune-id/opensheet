@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 const unauthenticatedHint = "not signed in or credential rejected; run `opensheet auth login --url <url>` or pass --token"
@@ -168,7 +169,7 @@ func IsMalformedURLError(err error) bool {
 type MissingURLError struct{}
 
 func (e *MissingURLError) Error() string {
-	return "no server URL; pass --url or set " + envVar("URL")
+	return "no server URL; pass --url or set " + config.EnvVar("url")
 }
 
 // ToAppError maps the missing URL to InvalidArgument.

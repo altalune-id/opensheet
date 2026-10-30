@@ -7,20 +7,20 @@ Commands: [`commands`](commands.md).
 
 Persistent on root, so every command accepts them. Only some read them.
 
-| Flag               | Env                    | Default                                       | Read by                                                                     |
-| ------------------ | ---------------------- | --------------------------------------------- | --------------------------------------------------------------------------- |
-| `-c, --config`     | —                      | discover `opensheet.yaml` in `.` then `$HOME` | every command, via `config.Load`                                            |
-| `--url`            | `OPENSHEET_URL`        | the profile's URL, then `http.baseURL`        | `auth login` (picks remote sign-in), `auth whoami`, `todo`, `healthz`       |
-| `--token`          | `OPENSHEET_TOKEN`      | —                                             | `auth whoami`, `todo`                                                       |
-| `--token-file`     | —                      | —                                             | same as `--token`; the file holds the token alone                           |
-| `--profile`        | `OPENSHEET_PROFILE`    | `default`                                     | `auth`, `todo`, and the in-process commands, which act as its local sign-in |
-| `--output`         | `OPENSHEET_OUTPUT`     | text on a TTY, json off-TTY                   | every command that prints a payload                                         |
-| `--org`            | `OPENSHEET_ORG`        | —                                             | nothing — declared, not wired                                               |
-| `--project`        | `OPENSHEET_PROJECT`    | —                                             | nothing — declared, not wired                                               |
-| `--no-interactive` | —                      | `false`                                       | nothing — declared, not wired                                               |
-| `--log-level`      | `OPENSHEET_LOG_LEVEL`  | `info`                                        | nothing; the **env var** works, via `log.level` in config                   |
-| `--log-format`     | `OPENSHEET_LOG_FORMAT` | `json`                                        | nothing; the **env var** works, via `log.format` in config                  |
-| `-v, --version`    | —                      | —                                             | root, prints the version string and exits                                   |
+| Flag               | Env                    | Default                                          | Read by                                                                     |
+| ------------------ | ---------------------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `-c, --config`     | —                      | discover `opensheet.yaml` in `.` then `$HOME`    | every command, via `config.Load`                                            |
+| `--url`            | `OPENSHEET_URL`        | the profile's URL, then `http.baseURL` from `-c` | `auth login` (picks remote sign-in), `auth whoami`, `todo`, `healthz`       |
+| `--token`          | `OPENSHEET_TOKEN`      | —                                                | `auth whoami`, `todo`                                                       |
+| `--token-file`     | —                      | —                                                | same as `--token`; the file holds the token alone                           |
+| `--profile`        | `OPENSHEET_PROFILE`    | `default`                                        | `auth`, `todo`, and the in-process commands, which act as its local sign-in |
+| `--output`         | `OPENSHEET_OUTPUT`     | text on a TTY, json off-TTY                      | every command that prints a payload                                         |
+| `--org`            | `OPENSHEET_ORG`        | —                                                | nothing — declared, not wired                                               |
+| `--project`        | `OPENSHEET_PROJECT`    | —                                                | nothing — declared, not wired                                               |
+| `--no-interactive` | —                      | `false`                                          | nothing — declared, not wired                                               |
+| `--log-level`      | `OPENSHEET_LOG_LEVEL`  | `info`                                           | nothing; the **env var** works, via `log.level` in config                   |
+| `--log-format`     | `OPENSHEET_LOG_FORMAT` | `json`                                           | nothing; the **env var** works, via `log.format` in config                  |
+| `-v, --version`    | —                      | —                                                | root, prints the version string and exits                                   |
 
 `--org` / `--project` are **not** global tenant overrides. Every tenant-scoped command takes its org
 and project from the principal and ignores both flags. See
@@ -83,7 +83,7 @@ Token, first hit wins (`internal/cli/token.go`, `internal/cli/profile.go`):
 URL, first hit wins (`internal/cli/url.go`):
 
 ```
---url > OPENSHEET_URL > the profile's URL > http.baseURL from config
+--url > OPENSHEET_URL > the profile's URL > http.baseURL from a config named with -c
 ```
 
 No URL at all exits `4` (`MissingURLError`).

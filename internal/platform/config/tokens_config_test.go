@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidate_TokensAudienceDefaultsToTheAPIResource(t *testing.T) {
 	for _, basePath := range []string{"", "/console"} {
@@ -38,5 +41,17 @@ func TestValidate_TokensIssuerMustMatchOIDCIssuer(t *testing.T) {
 	c.OIDC.Issuer = c.Tokens.Issuer
 	if err := c.Validate(); err != nil {
 		t.Fatalf("matching issuers: %v", err)
+	}
+}
+
+func TestValidate_RejectsANegativeIntrospectionBudget(t *testing.T) {
+	c := validMCPConfig()
+	c.Tokens.Introspection.MaxPerMinute = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "MaxPerMinute") {
+		t.Fatalf("err = %v, want a refusal naming MaxPerMinute", err)
+	}
+	c.Tokens.Introspection.MaxPerMinute = 0
+	if err := c.Validate(); err != nil {
+		t.Fatalf("0 (no local cap): %v", err)
 	}
 }

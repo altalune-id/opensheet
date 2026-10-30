@@ -1320,3 +1320,20 @@ func TestTodoHandler_FragmentLinksStayProjectScoped(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), `"/orgs"`,
 		"a fragment rendered without ActiveOrg collapses ProjectPath to /orgs")
 }
+
+// SECURITY: the locale cookie set over TLS is Secure even when http.cookieSecure is off.
+func TestLocale_CookieIsSecureOverTLS(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.Cfg.HTTP.CookieSecure = false
+	f.Deps.I18n = i18n.NewEmbeddedBundle(i18n.EnUS)
+	mux := http.NewServeMux()
+	handlers.NewLocaleHandler(f.Deps, f.Users).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "https://app.example.com/locale", strings.NewReader("locale=en-US&redirect=/"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1, "status=%d", rec.Code)
+	assert.True(t, cookies[0].Secure)
+}
