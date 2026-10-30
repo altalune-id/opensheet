@@ -129,7 +129,7 @@ http:
   # [required] env: OPENSHEET_HTTP_BASE_URL
   baseURL: ""
   # env: OPENSHEET_HTTP_COOKIE_SECURE
-  cookieSecure: false
+  cookieSecure: ""
   csp:
     # [required] env: OPENSHEET_HTTP_CSP_ENABLED
     enabled: true
@@ -194,6 +194,8 @@ mcp:
     clientID: ""
     # [secret] env: OPENSHEET_MCP_INTROSPECTION_CLIENT_SECRET
     clientSecret: ""
+    # env: OPENSHEET_MCP_INTROSPECTION_MAX_PER_MINUTE
+    maxPerMinute: ""
 
 # [required, bootstrap] env: OPENSHEET_MODE
 mode: selfhosted
@@ -322,5 +324,7 @@ tokens:
     clientID: ""
     # [secret] env: OPENSHEET_TOKENS_INTROSPECTION_CLIENT_SECRET
     clientSecret: ""
+    # env: OPENSHEET_TOKENS_INTROSPECTION_MAX_PER_MINUTE
+    maxPerMinute: 0
   # [required, mode:cloud] env: OPENSHEET_TOKENS_ISSUER
   issuer: ""

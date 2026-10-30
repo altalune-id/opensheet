@@ -31,6 +31,21 @@ func TestWhoami_NotSignedIn(t *testing.T) {
 	}
 }
 
+func TestWhoami_AfterLogoutWithNoServerURLIsNotSignedIn(t *testing.T) {
+	sessPath := setSelfhostedEnv(t)
+	clearCLIEnv(t)
+	t.Setenv("OPENSHEET_HTTP_BASEURL", "")
+	writeRemoteProfile(t, sessPath, "prod", profile{URL: "https://app.example.com"})
+	if _, err := runCLI(t, stubClientBoot, "--profile", "prod", "auth", "logout"); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+
+	_, err := runCLI(t, stubClientBoot, "--profile", "prod", "auth", "whoami")
+	if !IsNotSignedInError(err) || ExitCodeFor(err) != ExitUnauth {
+		t.Fatalf("err = %v (exit %d), want NotSignedInError exiting 2", err, ExitCodeFor(err))
+	}
+}
+
 func TestWhoami_LocalProfilePrintsTheStoredPrincipal(t *testing.T) {
 	sessPath := setSelfhostedEnv(t)
 	clearCLIEnv(t)
@@ -60,6 +75,9 @@ func TestWhoami_RemoteProfileAsksTheServerAndRefreshesThePrincipal(t *testing.T)
 	}
 	if !strings.Contains(out, testEmail) || !strings.Contains(out, f.app.projectID) || !strings.Contains(out, "prod") {
 		t.Fatalf("output = %q", out)
+	}
+	if !strings.Contains(out, "source:     token") {
+		t.Fatalf("output = %q, want the server's principal source", out)
 	}
 	if got := f.profile(t, "prod").Principal.Email; got != testEmail {
 		t.Fatalf("stored principal email = %q, want whoami's", got)

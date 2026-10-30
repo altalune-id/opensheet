@@ -28,10 +28,10 @@ github.com/a-h/parse v0.0.0-20250122154542-74294addb73e h1:HjVbSQHy+dnlS6C3XajZ6
 github.com/a-h/parse v0.0.0-20250122154542-74294addb73e/go.mod h1:3mnrkvGpurZ4ZrTDbYU84xhwXW2TjTKShSwjRi2ihfQ=
 github.com/a-h/templ v0.3.1070 h1:3iCOXHXqFXa99OQzgkUOLJbNzv/QjFGLwKZkBAg+ADA=
 github.com/a-h/templ v0.3.1070/go.mod h1:iIqB3g2RHBe/WlnPwa+Bvhh1TKXHWLRnBD9NWHOLm78=
-github.com/altalune-id/oauthrs v0.0.0-20261030000256-f3cd84b86f6f h1:UJTewk76YqvU1iKXLB3Ufk24wp75+jwVnMidZvp5XhM=
-github.com/altalune-id/oauthrs v0.0.0-20261030000256-f3cd84b86f6f/go.mod h1:scx1owAfXtwk94ZibOM7RhjcSSOaOuPdiCpbKypBkBM=
-github.com/altalune-id/oidcrp v0.0.0-20261029230018-81e927225965 h1:jKqDXfjkgTunvFsaDk2kovCMN7h4OhDUhYpW7iGHahY=
-github.com/altalune-id/oidcrp v0.0.0-20261029230018-81e927225965/go.mod h1:OV58ZY3u9PZ3apy6RtVsIxQdefRUbZjGJLDYexPErNM=
+github.com/altalune-id/oauthrs v0.0.0-20261030070826-6e5063f3b6ca h1:tKea61n8yfmjGVagwhfzEDTOrOA1k7ANcQ72bUcceuk=
+github.com/altalune-id/oauthrs v0.0.0-20261030070826-6e5063f3b6ca/go.mod h1:poqXURiUA1jEnFK4Han6QYrMchVRM03WLDh/PSpThs8=
+github.com/altalune-id/oidcrp v0.0.0-20261030070618-63bfc891ff35 h1:kpCHHP/AyfmgAkVWq34Kyc3kD/dQP2lFymwMOi531Ro=
+github.com/altalune-id/oidcrp v0.0.0-20261030070618-63bfc891ff35/go.mod h1:OV58ZY3u9PZ3apy6RtVsIxQdefRUbZjGJLDYexPErNM=
 github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52REI=
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antithesishq/antithesis-sdk-go v0.8.0-default-no-op h1:1BOWQJweNyvZMlpAHXGLiZQn9S+QXGcz3xh94lC0w6E=

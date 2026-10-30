@@ -89,8 +89,8 @@ func (w *ConnectWorkflow) Start(
 	return w.connector.AuthCodeURL(signed), nil
 }
 
-// Complete verifies the signed state, exchanges the code and stores the refresh token sealed against its credential row. SECURITY: the refresh token never reaches a return value, an error message, a log field or a span attribute.
-func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (*Credential, error) {
+// Complete verifies the signed state was issued to userID, exchanges the code and stores the refresh token sealed against its credential row. SECURITY: the refresh token never reaches a return value, an error message, a log field or a span attribute.
+func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string, userID uuid.UUID) (*Credential, error) {
 	ctx, span := tracer.Start(ctx, "credential.Connect.Complete")
 	defer span.End()
 
@@ -101,6 +101,9 @@ func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
+	}
+	if userID == uuid.Nil || st.UserID != userID {
+		return nil, &StateInvalidError{Reason: reasonUser}
 	}
 	if strings.TrimSpace(code) == "" {
 		return nil, &StateInvalidError{Reason: reasonNoCode}
@@ -158,16 +161,24 @@ func (w *ConnectWorkflow) Complete(ctx context.Context, code, rawState string) (
 	return w.save(ctx, fresh)
 }
 
-// ReturnTo recovers the post-connect redirect target from a signed state without consuming the authorization code.
-func (w *ConnectWorkflow) ReturnTo(rawState string) (string, error) {
+// ConnectTarget is what a verified connect state names: the tenant the grant is for, the user who started it and where to return.
+type ConnectTarget struct {
+	OrgID     uuid.UUID
+	ProjectID uuid.UUID
+	UserID    uuid.UUID
+	ReturnTo  string
+}
+
+// Target verifies a signed state without consuming the authorization code. SECURITY: the state names a tenant, it does not grant one — the caller still checks the signed-in user against it.
+func (w *ConnectWorkflow) Target(rawState string) (ConnectTarget, error) {
 	if err := w.configured(); err != nil {
-		return "", err
+		return ConnectTarget{}, err
 	}
 	st, err := decodeState(w.secret, rawState, w.now())
 	if err != nil {
-		return "", err
+		return ConnectTarget{}, err
 	}
-	return st.ReturnTo, nil
+	return ConnectTarget{OrgID: st.OrgID, ProjectID: st.ProjectID, UserID: st.UserID, ReturnTo: st.ReturnTo}, nil
 }
 
 func (w *ConnectWorkflow) configured() error {

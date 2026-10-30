@@ -18,4 +18,5 @@ message WhoamiResponse {
   string active_org_slug = 5;
   repeated string scopes = 6;
   string active_project_id = 7;
+  string source = 8;
 }

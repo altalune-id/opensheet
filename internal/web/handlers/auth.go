@@ -33,19 +33,11 @@ type AuthHandler struct {
 	Projects *project.Service
 	AltAuth  *oidcrp.Client
 	Required *atomic.Bool
-
-	stateSecret []byte
 }
 
 // NewAuthHandler wires the handler.
 func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *org.Service, projects *project.Service, ac *oidcrp.Client, required *atomic.Bool) *AuthHandler {
 	return &AuthHandler{Deps: d, Auth: authSvc, Users: users, Orgs: orgs, Projects: projects, AltAuth: ac, Required: required}
-}
-
-// WithStateSecret sets the key that signs the sign-in state and last-user cookies.
-func (h *AuthHandler) WithStateSecret(secret []byte) *AuthHandler {
-	h.stateSecret = secret
-	return h
 }
 
 func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Principal) session.Principal {
@@ -190,7 +182,7 @@ func (h *AuthHandler) pendingInviteDest(r *http.Request) string {
 	if err != nil || c.Value == "" {
 		return ""
 	}
-	token, err := web.VerifyCookie(h.SecretBytes(), c.Value)
+	token, err := web.VerifyCookie(h.Key(web.PurposeInvite), c.Value)
 	if err != nil || token == "" {
 		return ""
 	}
@@ -297,7 +289,12 @@ func (h *AuthHandler) PostLogout(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.LogErr("web auth: end session url", err)
 		}
-		if endURL != "" {
+		switch {
+		case endURL == "":
+		case !sameOrigin(endURL, h.Cfg.OIDC.Issuer):
+			// SECURITY: the CSP form-action allows only the issuer's origin, so another origin would strand the browser on a CSP error.
+			h.LogErr("web auth: end session url", errors.New("end_session_endpoint is not on the issuer's origin"))
+		default:
 			http.Redirect(w, r, endURL, http.StatusSeeOther) //nolint:gosec // G710: the end_session_endpoint of the issuer's own discovery.
 			return
 		}
@@ -323,4 +320,10 @@ func (h *AuthHandler) Register(mux web.Mux) {
 		mux.HandleFunc("GET /login/oidc", h.GetOIDCStart)
 		mux.HandleFunc("GET /oauth/callback", h.GetOIDCCallback)
 	}
+}
+
+func sameOrigin(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	return errA == nil && errB == nil && ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host)
 }

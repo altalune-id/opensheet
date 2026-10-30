@@ -3,8 +3,11 @@ package tokens
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"hash/crc32"
 	"net/http"
+	"strings"
 
 	"github.com/altalune-id/oauthrs"
 	"github.com/altalune-id/oidcrp"
@@ -15,6 +18,12 @@ import (
 
 // PersonalTokenPrefix starts every Othra personal token, the only opaque token sent to introspection.
 const PersonalTokenPrefix = "othra_pt_" //nolint:gosec // G101: a public token prefix, not a credential.
+
+const (
+	base62           = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	personalTokenLen = 43
+	personalSumLen   = 6
+)
 
 // Verifier verifies a bearer token and returns the authenticated Principal.
 type Verifier interface {
@@ -42,6 +51,7 @@ func NewVerifier(cfg Config, keys *oidcrp.KeySource) (Verifier, error) {
 		// SECURITY: a negative cache TTL asks Othra on every call, so a revoked personal token stops at once.
 		rsCfg.Introspection = &oauthrs.Introspection{
 			ClientID: cfg.Introspection.ClientID, ClientSecret: cfg.Introspection.ClientSecret, TokenPrefix: PersonalTokenPrefix, CacheTTL: -1,
+			Precheck: personalTokenShape, MaxPerMinute: cfg.Introspection.MaxPerMinute,
 		}
 	}
 	rs, err := oauthrs.New(rsCfg)
@@ -49,6 +59,24 @@ func NewVerifier(cfg Config, keys *oidcrp.KeySource) (Verifier, error) {
 		return nil, err
 	}
 	return &verifier{rs: rs}, nil
+}
+
+func personalTokenShape(token string) bool {
+	body, ok := strings.CutPrefix(token, PersonalTokenPrefix)
+	if !ok || len(body) != personalTokenLen+personalSumLen || strings.Trim(body, base62) != "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(body[personalTokenLen:]), []byte(personalTokenSum(body[:personalTokenLen]))) == 1
+}
+
+func personalTokenSum(body string) string {
+	n := crc32.ChecksumIEEE([]byte(body))
+	out := make([]byte, personalSumLen)
+	for i := personalSumLen - 1; i >= 0; i-- {
+		out[i] = base62[n%62]
+		n /= 62
+	}
+	return string(out)
 }
 
 type verifier struct {
@@ -72,6 +100,8 @@ func (v *verifier) Verify(ctx context.Context, raw string) (session.Principal, e
 // NOTE: a failure oauthrs does not type as a token problem is an issuer outage, so a client keeps its token.
 func refusal(err error) error {
 	switch {
+	case errors.Is(err, oauthrs.ErrIntrospectionBudget):
+		return &authn.UnavailableError{Cause: err}
 	case oauthrs.IsExpiredTokenError(err):
 		return &ExpiredTokenError{Cause: err}
 	case oauthrs.IsInvalidTokenError(err), oauthrs.IsMissingTokenError(err), oauthrs.IsMalformedRequestError(err):

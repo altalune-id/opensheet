@@ -18,6 +18,7 @@ import (
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
+	"altalune.id/opensheet/internal/web"
 )
 
 type opensheetServices struct {
@@ -122,7 +123,7 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 		credentialStore,
 		credSealer,
 		connector,
-		k.OIDCStateSecret,
+		web.DeriveKey(k.StateSecret, web.PurposeGoogleConnect),
 		nil,
 		log,
 		reporter.Unexpected,

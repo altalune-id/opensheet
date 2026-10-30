@@ -12,6 +12,7 @@ import (
 
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
@@ -100,13 +101,26 @@ func (h *GoogleConnectHandler) GetCallback(w http.ResponseWriter, r *http.Reques
 		h.ErrorPage(w, r, http.StatusNotFound, "Not available", "This deployment has no Google OAuth client configured.")
 		return
 	}
+	p, _, ok := h.RequireSignedIn(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
 	state := q.Get("state")
-	returnTo, err := h.Connect.ReturnTo(state)
+	target, err := h.Connect.Target(state)
 	if err != nil {
 		h.LogErr("web google connect: state", err)
 		h.ErrorPage(w, r, http.StatusBadRequest, "Connect link expired",
 			"Start the Google connection again from the credentials page.", err)
+		return
+	}
+	if target.UserID != p.UserID {
+		h.LogErr("web google connect: state", errors.New("connect state was issued to another user"))
+		h.ErrorPage(w, r, http.StatusBadRequest, "Connect link expired",
+			"Start the Google connection again from the credentials page.")
+		return
+	}
+	if !h.stillMember(w, r, target) {
 		return
 	}
 	if err := checkDriveFileGranted(q.Get("scope")); err != nil {
@@ -114,12 +128,27 @@ func (h *GoogleConnectHandler) GetCallback(w http.ResponseWriter, r *http.Reques
 			"opensheet needs the Google Drive file permission to read the sheets you pick. Connect again and leave that permission ticked.")
 		return
 	}
-	if _, err := h.Connect.Complete(r.Context(), q.Get("code"), state); err != nil {
+	if _, err := h.Connect.Complete(r.Context(), q.Get("code"), state, p.UserID); err != nil {
 		h.LogErr("web google connect: complete", err)
 		h.ErrorPage(w, r, connectStatus(err), "Connect failed", connectMessage(err), err)
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, returnTo), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, target.ReturnTo), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+}
+
+// SECURITY: a connect may only land in a project of an org the signed-in user still belongs to, the same gate RequireProject applies when the connect starts.
+func (h *GoogleConnectHandler) stillMember(w http.ResponseWriter, r *http.Request, target credential.ConnectTarget) bool {
+	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: target.OrgID, UserID: target.UserID})
+	if _, err := h.Orgs.MembershipOf(ctx, target.OrgID, target.UserID); err != nil {
+		h.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
+		return false
+	}
+	proj, err := h.Projects.ByID(ctx, target.ProjectID)
+	if err != nil || proj.OrgID != target.OrgID {
+		h.ErrorPage(w, r, http.StatusNotFound, "Project not found", "No project with that id in this organization.", err)
+		return false
+	}
+	return true
 }
 
 // GetPicker renders the Google Picker for a connected account.
@@ -128,7 +157,7 @@ func (h *GoogleConnectHandler) GetPicker(w http.ResponseWriter, r *http.Request)
 		h.ErrorPage(w, r, http.StatusNotFound, "Not available", "This deployment has no Google Picker API key configured.")
 		return
 	}
-	st, err := decodePickerState(h.SecretBytes(), r.URL.Query().Get("state"))
+	st, err := decodePickerState(h.Key(web.PurposeGooglePicker), r.URL.Query().Get("state"))
 	if err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad picker link", "Open the Picker from the spreadsheets page.")
 		return

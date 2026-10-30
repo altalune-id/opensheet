@@ -572,3 +572,36 @@ func TestValidate_QueueCredentialErrorsAreTyped(t *testing.T) {
 		t.Fatal("helpers must reject unrelated errors")
 	}
 }
+
+func TestLoad_CookieSecureFollowsBaseURLUnlessSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		yaml    string
+		env     string
+		want    bool
+	}{
+		{name: "https default", baseURL: "https://app.example.com", want: true},
+		{name: "http default", baseURL: "http://localhost:5150", want: false},
+		{name: "blank yaml value is the default", baseURL: "https://app.example.com", yaml: `""`, want: true},
+		{name: "explicit yaml false wins", baseURL: "https://app.example.com", yaml: "false", want: false},
+		{name: "explicit env false wins", baseURL: "https://app.example.com", env: "false", want: false},
+		{name: "explicit env true wins", baseURL: "http://localhost:5150", env: "true", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			withGenesisFallback(t)
+			body := "http:\n  baseURL: \"" + tt.baseURL + "\"\n"
+			if tt.yaml != "" {
+				body += "  cookieSecure: " + tt.yaml + "\n"
+			}
+			if tt.env != "" {
+				t.Setenv("OPENSHEET_HTTP_COOKIE_SECURE", tt.env)
+			}
+			cfg, err := Load(writeTempYAML(t, "cfg.yaml", body))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, cfg.HTTP.CookieSecure)
+		})
+	}
+}

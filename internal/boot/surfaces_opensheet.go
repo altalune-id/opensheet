@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"slices"
 
+	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/queue"
 	"altalune.id/opensheet/internal/published"
 	"altalune.id/opensheet/internal/sheet"
@@ -17,6 +18,16 @@ const (
 	mountTodo            = published.Todo
 	mountWebhooksConsole = published.WebhooksConsole
 )
+
+// https://developers.google.com/identity/protocols/oauth2/web-server
+const googleConsentOrigin = "https://accounts.google.com"
+
+func opensheetFormAction(cfg *config.Config) []string {
+	if cfg.Google.OAuth.ClientID == "" {
+		return nil
+	}
+	return []string{googleConsentOrigin}
+}
 
 func publishedMCPDomains() []string { return []string{"org.v1", "project.v1"} }
 

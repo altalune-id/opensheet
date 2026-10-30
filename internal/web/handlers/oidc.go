@@ -47,7 +47,7 @@ func (h *AuthHandler) GetOIDCStart(w http.ResponseWriter, r *http.Request) {
 	if hint == "" {
 		prompt = "select_account"
 	}
-	if len(h.stateSecret) == 0 {
+	if !h.hasSecret() {
 		h.LogErr("web auth: oidc start", errors.New("no state secret"))
 		h.signInFailed(w, r, http.StatusInternalServerError, signInUnavailable)
 		return
@@ -74,8 +74,8 @@ func (h *AuthHandler) GetOIDCStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	web.SetCookie(w, web.CookieOpts{
-		Name: oidcStateCookie, Value: web.SignCookie(h.stateSecret, base64.RawURLEncoding.EncodeToString(raw)),
-		BasePath: h.Cfg.HTTP.BasePath, CookieSecure: h.cookieSecure(r), MaxAge: int(oidcStateTTL.Seconds()),
+		Name: oidcStateCookie, Value: web.SignCookie(h.Key(web.PurposeOIDCState), base64.RawURLEncoding.EncodeToString(raw)),
+		BasePath: h.Cfg.HTTP.BasePath, CookieSecure: h.SecureCookie(r), MaxAge: int(oidcStateTTL.Seconds()),
 	})
 	http.Redirect(w, r, target, http.StatusFound) //nolint:gosec // G710: the authorization endpoint of the issuer's own discovery.
 }
@@ -84,7 +84,7 @@ func (h *AuthHandler) GetOIDCStart(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) GetOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	st, ok := h.readOIDCState(r)
-	web.ClearCookie(w, oidcStateCookie, h.Cfg.HTTP.BasePath, h.cookieSecure(r))
+	web.ClearCookie(w, oidcStateCookie, h.Cfg.HTTP.BasePath, h.SecureCookie(r))
 	if !ok {
 		h.signInFailed(w, r, http.StatusBadRequest, signInExpired)
 		return
@@ -104,10 +104,10 @@ func (h *AuthHandler) readOIDCState(r *http.Request) (oidcState, bool) {
 	if err != nil {
 		return oidcState{}, false
 	}
-	if len(h.stateSecret) == 0 {
+	if !h.hasSecret() {
 		return oidcState{}, false
 	}
-	value, err := web.VerifyCookie(h.stateSecret, c.Value)
+	value, err := web.VerifyCookie(h.Key(web.PurposeOIDCState), c.Value)
 	if err != nil {
 		return oidcState{}, false
 	}
@@ -156,10 +156,10 @@ func (h *AuthHandler) signInFailed(w http.ResponseWriter, r *http.Request, statu
 
 func (h *AuthHandler) lastUser(r *http.Request) string {
 	c, err := r.Cookie(lastUserCookie)
-	if err != nil || len(h.stateSecret) == 0 {
+	if err != nil || !h.hasSecret() {
 		return ""
 	}
-	value, err := web.VerifyCookie(h.stateSecret, c.Value)
+	value, err := web.VerifyCookie(h.Key(web.PurposeLastUser), c.Value)
 	if err != nil {
 		return ""
 	}
@@ -172,14 +172,10 @@ func (h *AuthHandler) lastUser(r *http.Request) string {
 
 func (h *AuthHandler) setLastUser(w http.ResponseWriter, r *http.Request, email string) {
 	email, err := user.NormalizeEmail(email)
-	if err != nil || len(h.stateSecret) == 0 {
+	if err != nil || !h.hasSecret() {
 		return
 	}
 	web.SetCookie(w, web.CookieOpts{
-		Name: lastUserCookie, Value: web.SignCookie(h.stateSecret, email), BasePath: h.Cfg.HTTP.BasePath, CookieSecure: h.cookieSecure(r), MaxAge: int(lastUserTTL.Seconds()),
+		Name: lastUserCookie, Value: web.SignCookie(h.Key(web.PurposeLastUser), email), BasePath: h.Cfg.HTTP.BasePath, CookieSecure: h.SecureCookie(r), MaxAge: int(lastUserTTL.Seconds()),
 	})
-}
-
-func (h *AuthHandler) cookieSecure(r *http.Request) bool {
-	return h.Cfg.HTTP.CookieSecure || r.TLS != nil
 }

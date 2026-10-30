@@ -27,6 +27,7 @@ const (
 	reasonStale     = "issued outside the freshness window"
 	reasonReturnTo  = "returnTo is not a rooted relative path"
 	reasonNoCode    = "callback carried no authorization code"
+	reasonUser      = "issued to another user"
 )
 
 type state struct {

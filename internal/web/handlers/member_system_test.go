@@ -75,7 +75,7 @@ func TestPostRemoveMember_SystemProtected_Returns409(t *testing.T) {
 	if err := sessions.Save(ctx, sid, principal, time.Now().Add(web.SessionTTL)); err != nil {
 		t.Fatal(err)
 	}
-	cookieValue := web.SignCookie(secret, sid)
+	cookieValue := web.SignCookie(web.DeriveKey(secret, web.PurposeSession), sid)
 
 	deps, err := handlers.NewDeps(handlers.Deps{
 		Cfg:      cfg,

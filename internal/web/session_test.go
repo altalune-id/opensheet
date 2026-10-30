@@ -7,6 +7,32 @@ import (
 	"altalune.id/opensheet/internal/web"
 )
 
+func TestDeriveKey_SeparatesPurposes(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	purposes := []string{web.PurposeSession, web.PurposeInvite, web.PurposeOnboard, web.PurposeOIDCState, web.PurposeLastUser}
+	for _, signer := range purposes {
+		key := web.DeriveKey(secret, signer)
+		if len(key) != 32 {
+			t.Fatalf("%s: key length %d, want 32", signer, len(key))
+		}
+		signed := web.SignCookie(key, "value")
+		if _, err := web.VerifyCookie(web.DeriveKey(secret, signer), signed); err != nil {
+			t.Fatalf("%s: does not verify under its own purpose: %v", signer, err)
+		}
+		if _, err := web.VerifyCookie(secret, signed); err == nil {
+			t.Fatalf("%s: verifies under the root secret", signer)
+		}
+		for _, verifier := range purposes {
+			if verifier == signer {
+				continue
+			}
+			if _, err := web.VerifyCookie(web.DeriveKey(secret, verifier), signed); err == nil {
+				t.Fatalf("signed for %s verifies as %s", signer, verifier)
+			}
+		}
+	}
+}
+
 func TestSignVerifyCookie_Roundtrip(t *testing.T) {
 	secret := []byte("supersecret-1234567890abcdef")
 	sig := web.SignCookie(secret, "sid123")

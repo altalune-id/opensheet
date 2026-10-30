@@ -41,6 +41,7 @@ func (s *AuthService) Whoami(ctx context.Context, _ *connect.Request[authv1.Whoa
 		Email:  p.Email,
 		Name:   p.Name,
 		Scopes: append([]string(nil), p.Scopes...),
+		Source: string(p.Source),
 	}
 	if p.ActiveProjectID != uuid.Nil {
 		resp.ActiveProjectId = p.ActiveProjectID.String()

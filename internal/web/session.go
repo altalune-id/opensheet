@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,18 @@ const InviteCookieName = "opensheet_invite"
 // SessionTTL is the maximum age of a session id cookie.
 const SessionTTL = 12 * time.Hour
 
+// Purposes label the keys DeriveKey gives each signed cookie.
+const (
+	PurposeSession   = "session"
+	PurposeInvite    = "invite"
+	PurposeOnboard   = "onboard"
+	PurposeOIDCState = "oidc-state"
+	PurposeLastUser  = "last-user"
+
+	PurposeGoogleConnect = "google-connect"
+	PurposeGooglePicker  = "google-picker"
+)
+
 // ErrBadCookie is returned when a cookie fails HMAC verification.
 var ErrBadCookie = errors.New("web: cookie signature invalid")
 
@@ -30,6 +43,15 @@ func NewSID() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// DeriveKey returns the 32-byte HKDF-SHA256 key for purpose derived from secret.
+func DeriveKey(secret []byte, purpose string) []byte {
+	key, err := hkdf.Key(sha256.New, secret, nil, purpose, sha256.Size)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 // SignCookie returns "value|hmac" where hmac is base64-url-encoded HMAC-SHA256(value) keyed on secret.

@@ -251,7 +251,10 @@ func whoami(ctx context.Context, in invocation, bootClient ClientBootFn, out io.
 		if err != nil {
 			return err
 		}
-		if p != nil && p.URL == "" {
+		if p == nil {
+			return &NotSignedInError{Profile: in.profile, URL: in.baseURL(nil)}
+		}
+		if p.URL == "" {
 			return printWhoami(out, format, in.profile, "", p.Principal)
 		}
 	}
@@ -289,7 +292,7 @@ func principalOfWhoami(w *authv1.WhoamiResponse) principalView {
 	return principalView{
 		UserID: w.GetUserId(), Email: w.GetEmail(), Name: w.GetName(),
 		ActiveOrgID: w.GetActiveOrgId(), ActiveOrgSlug: w.GetActiveOrgSlug(), ActiveProjectID: w.GetActiveProjectId(),
-		Scopes: w.GetScopes(),
+		Scopes: w.GetScopes(), Source: w.GetSource(),
 	}
 }
 

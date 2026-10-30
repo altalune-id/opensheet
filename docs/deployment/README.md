@@ -213,10 +213,16 @@ podman run -d --name opensheet-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres
 export OPENSHEET_MODE=cloud OPENSHEET_DB_DRIVER=postgres OPENSHEET_DB_ALLOW_BYPASS_RLS=true \
   OPENSHEET_DB_DSN='postgres://postgres:dev@127.0.0.1:5432/postgres?sslmode=disable' \
   OPENSHEET_SECURITY_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  OPENSHEET_GENESIS_EMAIL=you@example.com OPENSHEET_HTTP_BASE_URL=http://localhost:5150
+  OPENSHEET_GENESIS_EMAIL=you@example.com \
+  OPENSHEET_HTTP_ADDR=:5150 OPENSHEET_HTTP_BASE_URL=http://localhost:5150 \
+  OPENSHEET_MCP_ENABLED=true
 ```
 
-Then follow the registration order above (issuer, placeholders, register, real credentials).
+`OPENSHEET_HTTP_ADDR` and `OPENSHEET_HTTP_BASE_URL` must name the same port. `OPENSHEET_MCP_ENABLED` is off by
+default; without it the `/mcp` resource server in step 2 has no document to read.
+`OPENSHEET_GENESIS_EMAIL` must be the email the first operator signs in with at Othra. Then follow the
+registration order above (issuer, placeholders, register, real credentials); the first `/login`
+lands on `/onboard`, which takes the one-time token from the boot log.
 
 A user is matched by `(issuer, subject)`. A first sign-in from a new issuer relinks an existing
 user only when the issuer marks the email verified and the row is unlinked or linked at another

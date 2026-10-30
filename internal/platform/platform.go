@@ -37,14 +37,14 @@ type Kernel struct {
 	Verifier tokens.Verifier
 	Mail     mailer.Mailer
 	AltAuth  *oidcrp.Client
-	// OIDCStateSecret signs the sign-in state and last-user cookies; never empty while AltAuth is set.
-	OIDCStateSecret []byte
-	Tracer          trace.Tracer
-	Meter           metric.Meter
-	Notify          []apperror.ReportSink
-	Nano            NanoIDFunc
-	Caps            capabilities.Capabilities
-	Outbox          outbox.Store
+	// StateSecret is the resolved http.stateSecret every cookie-signing key derives from.
+	StateSecret []byte
+	Tracer      trace.Tracer
+	Meter       metric.Meter
+	Notify      []apperror.ReportSink
+	Nano        NanoIDFunc
+	Caps        capabilities.Capabilities
+	Outbox      outbox.Store
 	// Queue is always non-nil: Disabled(log) when queue.enabled is false.
 	Queue *queue.Client
 

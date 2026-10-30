@@ -196,18 +196,18 @@ func probeCookie(t *testing.T, srv *boot.Server, p session.Principal) *http.Cook
 	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid, p, time.Now().Add(time.Hour)))
 	return &http.Cookie{
 		Name:  web.SessionCookieName,
-		Value: web.SignCookie(srv.Platform.OIDCStateSecret, sid),
+		Value: web.SignCookie(web.DeriveKey(srv.Platform.StateSecret, web.PurposeSession), sid),
 	}
 }
 
-// TestBootServer_SessionCookiesUseTheResolvedStateSecret pins one HMAC key across boot and the web handlers, so a cookie signed with the raw cfg.HTTP.StateSecret string cannot authenticate.
-func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
+// TestBootServer_SessionCookiesUseTheSessionKey pins the session cookie to the key derived from the resolved secret for its purpose, so neither the raw secret nor the config string authenticates.
+func TestBootServer_SessionCookiesUseTheSessionKey(t *testing.T) {
 	raw := bytes.Repeat([]byte{0x5A}, 32)
 	encoded := base64.RawURLEncoding.EncodeToString(raw)
 	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(c *config.Config) {
 		c.HTTP.StateSecret = encoded
 	})
-	require.Equal(t, raw, srv.Platform.OIDCStateSecret, "boot must decode http.stateSecret once and share those bytes")
+	require.Equal(t, raw, srv.Platform.StateSecret, "boot must decode http.stateSecret once and share those bytes")
 
 	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
 		Email: "secret-probe@example.com", Name: "Secret Probe", Source: user.SourceLocal,
@@ -225,8 +225,12 @@ func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
 		srv.Web.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	require.Equal(t, http.StatusOK, status(srv.Platform.OIDCStateSecret),
-		"a cookie signed with the resolved secret must load the session")
+	require.Equal(t, http.StatusOK, status(web.DeriveKey(raw, web.PurposeSession)),
+		"a cookie signed with the session key must load the session")
+	require.Equal(t, http.StatusSeeOther, status(raw),
+		"a cookie signed with the undivided secret must not authenticate")
+	require.Equal(t, http.StatusSeeOther, status(web.DeriveKey(raw, web.PurposeInvite)),
+		"a value signed for another purpose must not authenticate")
 	require.Equal(t, http.StatusSeeOther, status([]byte(encoded)),
 		"a cookie signed with the raw config string must not authenticate")
 }

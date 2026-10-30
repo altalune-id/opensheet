@@ -18,6 +18,7 @@ import (
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/web"
 	webhandlers "altalune.id/opensheet/internal/web/handlers"
 )
 
@@ -51,7 +52,7 @@ func TestResolveStateSecret_ExplicitBase64Std(t *testing.T) {
 	assert.Equal(t, raw, got)
 }
 
-// TestResolveStateSecret_ExplicitHex pins the one documented format story: the same 64-hex value keys both security.encryptionKey and http.stateSecret.
+// TestResolveStateSecret_ExplicitHex pins the shared format: http.stateSecret and security.encryptionKey both decode 64 hex characters to the same 32 bytes.
 func TestResolveStateSecret_ExplicitHex(t *testing.T) {
 	t.Parallel()
 	raw := bytes.Repeat([]byte{0x3C}, 32)
@@ -63,8 +64,8 @@ func TestResolveStateSecret_ExplicitHex(t *testing.T) {
 	assert.Equal(t, raw, got)
 
 	sealed, err := sealer.ParseKey(cfg.HTTP.StateSecret)
-	require.NoError(t, err, "a hex state secret must also parse as a sealer key")
-	assert.Equal(t, got, sealed, "both secrets must decode one hex value to the same bytes")
+	require.NoError(t, err, "a hex value must parse as a sealer key too")
+	assert.Equal(t, got, sealed, "both parsers must decode one hex value to the same bytes")
 }
 
 func TestResolveStateSecret_TooShortErrors(t *testing.T) {
@@ -96,8 +97,8 @@ func TestNewWebDeps_CarriesTheResolvedStateSecret(t *testing.T) {
 
 	deps, err := newWebDeps(cfg, capabilities.Capabilities{}, session.NewMemoryStore(), discardLogger(), secret)
 	require.NoError(t, err)
-	assert.Equal(t, secret, deps.SecretBytes())
-	assert.NotEqual(t, []byte(cfg.HTTP.StateSecret), deps.SecretBytes(),
+	assert.Equal(t, web.DeriveKey(secret, web.PurposeSession), deps.Key(web.PurposeSession))
+	assert.NotEqual(t, web.DeriveKey([]byte(cfg.HTTP.StateSecret), web.PurposeSession), deps.Key(web.PurposeSession),
 		"web Deps must not re-key off the raw config string")
 }
 
@@ -209,4 +210,13 @@ func TestAPIResource_ResolvedOnceAndWarnsOnABadAudience(t *testing.T) {
 	cfg.Tokens.Audience = "https://app.example.com/api"
 	cfg.Tokens.Issuer = ""
 	assert.Nil(t, apiResource(cfg, discardLogger()))
+}
+
+func TestMCPTokensConfig_IntrospectionBudgetFallsBackToTokens(t *testing.T) {
+	t.Parallel()
+	cfg := config.Defaults()
+	cfg.Tokens.Introspection.MaxPerMinute = 300
+	assert.Equal(t, 300, mcpTokensConfig(cfg).Introspection.MaxPerMinute)
+	cfg.MCP.Introspection.MaxPerMinute = 60
+	assert.Equal(t, 60, mcpTokensConfig(cfg).Introspection.MaxPerMinute)
 }

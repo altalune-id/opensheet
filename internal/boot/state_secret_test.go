@@ -21,8 +21,8 @@ import (
 	"altalune.id/opensheet/internal/web"
 )
 
-// TestBootServer_EveryStateUsesTheResolvedSecret pins one key under the sign-in state cookie and the Google connect state; the session cookie and the picker state take it from the same web Deps, pinned by TestBootServer_SessionCookiesUseTheResolvedStateSecret.
-func TestBootServer_EveryStateUsesTheResolvedSecret(t *testing.T) {
+// TestBootServer_EveryStateUsesItsOwnDerivedKey pins the sign-in state and the Google connect state to their own purpose keys, so a value signed for the session or an invite never verifies as either.
+func TestBootServer_EveryStateUsesItsOwnDerivedKey(t *testing.T) {
 	raw := bytes.Repeat([]byte{0x6B}, 32)
 	encoded := base64.RawURLEncoding.EncodeToString(raw)
 	srv, _ := newScopeProbeServer(t, config.ModeCloud, func(c *config.Config) {
@@ -30,7 +30,7 @@ func TestBootServer_EveryStateUsesTheResolvedSecret(t *testing.T) {
 		c.Google.OAuth.ClientID = "google-client"
 		c.Google.OAuth.ClientSecret = "google-secret"
 	})
-	key := srv.Platform.OIDCStateSecret
+	key := srv.Platform.StateSecret
 	require.Equal(t, raw, key, "boot must decode http.stateSecret once and share those bytes")
 
 	rec := httptest.NewRecorder()
@@ -42,21 +42,31 @@ func TestBootServer_EveryStateUsesTheResolvedSecret(t *testing.T) {
 		}
 	}
 	require.NotNil(t, state, "status=%d body=%s", rec.Code, rec.Body.String())
-	_, err := web.VerifyCookie(key, state.Value)
-	require.NoError(t, err, "the sign-in state must be signed with the resolved secret")
-	_, err = web.VerifyCookie([]byte(encoded), state.Value)
-	require.Error(t, err)
+	_, err := web.VerifyCookie(web.DeriveKey(key, web.PurposeOIDCState), state.Value)
+	require.NoError(t, err, "the sign-in state must be signed with the oidc-state key")
+	for _, other := range [][]byte{key, []byte(encoded), web.DeriveKey(key, web.PurposeSession)} {
+		_, err = web.VerifyCookie(other, state.Value)
+		require.Error(t, err)
+	}
 
 	payload, err := json.Marshal(map[string]any{
 		"o": uuid.New(), "p": uuid.New(), "u": uuid.New(), "n": "nonce", "i": time.Now().UTC(), "r": "/projects",
 	})
 	require.NoError(t, err)
 	value := base64.RawURLEncoding.EncodeToString(payload)
-	returnTo, err := srv.Connect.ReturnTo(session.Sign(key, value))
-	require.NoError(t, err, "the Google connect state must verify with the resolved secret")
-	assert.Equal(t, "/projects", returnTo)
-	_, err = srv.Connect.ReturnTo(session.Sign([]byte(encoded), value))
-	require.Error(t, err, "a connect state signed with the raw config string must not verify")
+	target, err := srv.Connect.Target(session.Sign(web.DeriveKey(key, web.PurposeGoogleConnect), value))
+	require.NoError(t, err, "the Google connect state must verify with the google-connect key")
+	assert.Equal(t, "/projects", target.ReturnTo)
+	for name, other := range map[string][]byte{
+		"raw secret":    key,
+		"config string": []byte(encoded),
+		"session key":   web.DeriveKey(key, web.PurposeSession),
+		"invite key":    web.DeriveKey(key, web.PurposeInvite),
+		"picker key":    web.DeriveKey(key, web.PurposeGooglePicker),
+	} {
+		_, err = srv.Connect.Target(session.Sign(other, value))
+		require.Error(t, err, "a connect state signed with the %s must not verify", name)
+	}
 }
 
 // TestBootServer_RefusesAShortStateSecretWithOIDC is the boot-time half of resolveStateSecret's length rule: sign-in never starts on a key too short to sign its state.

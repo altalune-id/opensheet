@@ -171,7 +171,7 @@ func newSheetsFixture(t *testing.T, tweak ...func(*capabilities.Capabilities)) *
 	connector, err := gworkspace.NewConnector(testOAuthConfig(google.tokenURL), nil)
 	require.NoError(t, err)
 	connect := credential.NewConnectWorkflow(credStore, sl, connector,
-		base.Deps.SecretBytes(), nil, discardLogger(), passthroughUnexpected())
+		base.Deps.Key(web.PurposeGoogleConnect), nil, discardLogger(), passthroughUnexpected())
 
 	base.Deps.Caps = caps
 	uid := uuid.New()
@@ -301,6 +301,7 @@ type fakeSheetsAPI struct {
 	metaStatus   int
 	tabs         []string
 	noRefresh    bool
+	tokenHits    int
 	writes       []sheetWrite
 
 	url      string
@@ -353,6 +354,7 @@ func newFakeSheetsAPI(t *testing.T) *fakeSheetsAPI {
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
+		f.tokenHits++
 		noRefresh := f.noRefresh
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -411,6 +413,12 @@ func (f *fakeSheetsAPI) hideDocument() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rowsStatus, f.metaStatus = http.StatusNotFound, http.StatusNotFound
+}
+
+func (f *fakeSheetsAPI) tokenCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tokenHits
 }
 
 func (f *fakeSheetsAPI) dropRefreshToken() {
@@ -710,7 +718,7 @@ func TestOpensheetHandlers_HtmxAndScriptsCarryTheRequestNonce(t *testing.T) {
 		{"sheets page", http.MethodGet, f.path("/sheets"), ""},
 		{"sheets fragment", http.MethodPost, f.path("/sheets"), url.Values{"spreadsheet_id": {sp.ID.String()}}.Encode()},
 		{"sheet page", http.MethodGet, f.path("/sheets/" + sh.ID.String()), ""},
-		{"picker page", http.MethodGet, "/credentials/google/picker?state=" + url.QueryEscape(handlers.PickerStateFor(f.Deps.SecretBytes(), f.Org.Slug, f.Project.Slug, c.ID)), ""},
+		{"picker page", http.MethodGet, "/credentials/google/picker?state=" + url.QueryEscape(handlers.PickerStateFor(f.Deps.Key(web.PurposeGooglePicker), f.Org.Slug, f.Project.Slug, c.ID)), ""},
 	}
 	reHx := regexp.MustCompile(`<[a-z]+[^>]*\shx-(?:get|post)="[^"]*"[^>]*>`)
 	reScript := regexp.MustCompile(`(?s)(<script[^>]*>).*?</script>`)
@@ -1296,7 +1304,7 @@ func (f *sheetsFixture) startState(t *testing.T) string {
 
 func (f *sheetsFixture) pickerPath(t *testing.T, credID uuid.UUID) string {
 	t.Helper()
-	state := handlers.PickerStateFor(f.Deps.SecretBytes(), f.Org.Slug, f.Project.Slug, credID)
+	state := handlers.PickerStateFor(f.Deps.Key(web.PurposeGooglePicker), f.Org.Slug, f.Project.Slug, credID)
 	return "/credentials/google/picker?state=" + url.QueryEscape(state)
 }
 
@@ -1519,4 +1527,98 @@ func TestSheetHandler_BulkPublishNamesTheRemedyPerRow(t *testing.T) {
 	items, err := f.Sheets.List(f.ctx())
 	require.NoError(t, err)
 	assert.Empty(t, items)
+}
+
+func (f *sheetsFixture) callbackFor(state string) string {
+	return "/credentials/google/callback?code=abc&scope=" +
+		url.QueryEscape(strings.Join(gworkspace.Scopes(), " ")) + "&state=" + url.QueryEscape(state)
+}
+
+func (f *sheetsFixture) callbackAs(t *testing.T, p session.Principal, state string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	f.mux(t).ServeHTTP(rec, f.authedRequest(t, http.MethodGet, f.callbackFor(state), "", p))
+	return rec
+}
+
+func (f *sheetsFixture) assertNoCredentialIn(t *testing.T, orgID, projectID uuid.UUID) {
+	t.Helper()
+	items, err := f.Creds.List(setTenantProject(context.Background(), orgID, projectID, uuid.New()))
+	require.NoError(t, err)
+	assert.Empty(t, items, "a refused callback must not store a grant")
+}
+
+func TestGoogleConnectHandler_CallbackWithoutASessionGoesToLogin(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	state := f.startState(t)
+
+	rec := httptest.NewRecorder()
+	f.mux(t).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, f.callbackFor(state), nil))
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/login", rec.Header().Get("Location"))
+	f.assertNoCredentialIn(t, f.Org.ID, f.Project.ID)
+}
+
+func TestGoogleConnectHandler_CallbackRefusesAStateStartedByAnotherUser(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	other := uuid.New()
+	_, err := f.Orgs.AddMember(setTenant(context.Background(), f.Org.ID, f.Principal.UserID), f.Org.ID, other, org.RoleMember)
+	require.NoError(t, err)
+	raw, err := f.Connect.Start(context.Background(), f.Org.ID, f.Project.ID, other, f.path("/credentials"))
+	require.NoError(t, err)
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+
+	rec := f.callbackAs(t, f.Principal, u.Query().Get("state"))
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "Connect link expired", "the handler must refuse before the workflow runs")
+	assert.Zero(t, f.Google.tokenCalls(), "the code must never reach Google")
+	f.assertNoCredentialIn(t, f.Org.ID, f.Project.ID)
+}
+
+func TestGoogleConnectHandler_CallbackRefusesAnExMember(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	leaver := session.Principal{UserID: uuid.New(), ActiveOrgID: f.Org.ID, ActiveProjectID: f.Project.ID}
+	ownerCtx := setTenant(context.Background(), f.Org.ID, f.Principal.UserID)
+	_, err := f.Orgs.AddMember(ownerCtx, f.Org.ID, leaver.UserID, org.RoleMember)
+	require.NoError(t, err)
+	raw, err := f.Connect.Start(context.Background(), f.Org.ID, f.Project.ID, leaver.UserID, f.path("/credentials"))
+	require.NoError(t, err)
+	u, err := url.Parse(raw)
+	require.NoError(t, err)
+	require.NoError(t, f.Orgs.RemoveMember(ownerCtx, f.Org.ID, leaver.UserID))
+
+	rec := f.callbackAs(t, leaver, u.Query().Get("state"))
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	f.assertNoCredentialIn(t, f.Org.ID, f.Project.ID)
+}
+
+func TestGoogleConnectHandler_CallbackRefusesAProjectOutsideTheStatesOrg(t *testing.T) {
+	t.Parallel()
+	f := newSheetsFixture(t)
+	stranger := uuid.New()
+	victim := f.seedOrg(t, "victim", stranger)
+	victimProj, err := f.Projects.Create(setTenant(context.Background(), victim.ID, stranger), victim.ID, "secret", "Secret")
+	require.NoError(t, err)
+
+	for name, ids := range map[string][2]uuid.UUID{
+		"another org's project":          {victim.ID, victimProj.ID},
+		"own org, another org's project": {f.Org.ID, victimProj.ID},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := f.Connect.Start(context.Background(), ids[0], ids[1], f.Principal.UserID, f.path("/credentials"))
+			require.NoError(t, err)
+			u, err := url.Parse(raw)
+			require.NoError(t, err)
+
+			rec := f.callbackAs(t, f.Principal, u.Query().Get("state"))
+			require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			assert.Zero(t, f.Google.tokenCalls(), "the code must never reach Google")
+			f.assertNoCredentialIn(t, victim.ID, victimProj.ID)
+			f.assertNoCredentialIn(t, f.Org.ID, victimProj.ID)
+		})
+	}
 }
