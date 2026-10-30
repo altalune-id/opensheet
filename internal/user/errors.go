@@ -206,3 +206,49 @@ func IsInvalidNameError(err error) bool {
 	_, ok := errors.AsType[*InvalidNameError](err)
 	return ok
 }
+
+// EmailUnverifiedError signals an OIDC sign-in whose email the issuer has not verified, for a subject not yet linked.
+type EmailUnverifiedError struct{}
+
+func (*EmailUnverifiedError) Error() string {
+	return "user: oidc email not verified"
+}
+
+// ToAppError maps EmailUnverifiedError to the canonical PermissionDenied envelope.
+func (*EmailUnverifiedError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeUserEmailUnverified,
+		"The identity provider has not verified this email",
+		codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeUserEmailUnverified},
+	)
+}
+
+// IsEmailUnverifiedError reports whether err's tree contains an *EmailUnverifiedError.
+func IsEmailUnverifiedError(err error) bool {
+	_, ok := errors.AsType[*EmailUnverifiedError](err)
+	return ok
+}
+
+// IdentityConflictError signals an OIDC sign-in whose verified email belongs to a user linked to another subject at the same issuer.
+type IdentityConflictError struct{}
+
+func (*IdentityConflictError) Error() string {
+	return "user: oidc email is linked to another subject at this issuer"
+}
+
+// ToAppError maps IdentityConflictError to the canonical PermissionDenied envelope.
+func (*IdentityConflictError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeUserIdentityConflict,
+		"This email belongs to another account at the identity provider",
+		codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeUserIdentityConflict},
+	)
+}
+
+// IsIdentityConflictError reports whether err's tree contains an *IdentityConflictError.
+func IsIdentityConflictError(err error) bool {
+	_, ok := errors.AsType[*IdentityConflictError](err)
+	return ok
+}

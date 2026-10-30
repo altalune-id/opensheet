@@ -139,6 +139,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("genesis.breakGlass", false)
 
 	v.SetDefault("oidc.scopes", []string{"openid", "email", "profile"})
+	v.SetDefault("oidc.endSessionOnLogout", true)
 
 	v.SetDefault("i18n.defaultLocale", "en-US")
 
@@ -153,8 +154,6 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("google.timeout", "15s")
 
-	v.SetDefault("tokens.audience", "urn:opensheet:api")
-	v.SetDefault("tokens.supportedAlgs", []string{"RS256", "ES256"})
 	v.SetDefault("tokens.clockSkew", "60s")
 }
 

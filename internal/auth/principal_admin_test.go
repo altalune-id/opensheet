@@ -50,7 +50,7 @@ func TestOIDCLogin_CarriesIsAdmin(t *testing.T) {
 				nil,
 				nil,
 			)
-			p, err := o.Execute(t.Context(), OIDCClaims{Issuer: "https://idp", Subject: "sub", Email: "a@x.co"})
+			p, err := o.Execute(t.Context(), OIDCClaims{Issuer: "https://idp", Subject: "sub", Email: "a@x.co", EmailVerified: true})
 			require.NoError(t, err)
 			require.Equal(t, tc.isAdmin, p.IsAdmin, "admin status must survive into the session")
 		})

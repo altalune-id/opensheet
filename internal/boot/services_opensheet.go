@@ -37,7 +37,7 @@ type opensheetServices struct {
 	SnapshotListener *sheet.SnapshotListener
 }
 
-func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities, stateSecret []byte) (opensheetServices, error) {
+func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities) (opensheetServices, error) {
 	pool := k.Pool
 	pgConn := k.PgConn
 	log := k.Log
@@ -122,7 +122,7 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 		credentialStore,
 		credSealer,
 		connector,
-		stateSecret,
+		k.OIDCStateSecret,
 		nil,
 		log,
 		reporter.Unexpected,

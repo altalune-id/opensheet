@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/altalune-id/oidcrp"
+
+	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/controlplane"
 	mcpinternal "altalune.id/opensheet/internal/mcp"
@@ -24,30 +27,29 @@ import (
 const mcpServerName = "opensheet"
 
 type mcpSurface struct {
-	Handler         http.Handler
-	Metadata        http.Handler
-	MetadataPath    string
-	ChallengeRoutes map[string]http.Handler
-	Server          *rootmcp.Server
+	Handler      http.Handler
+	Metadata     http.Handler
+	MetadataPath string
+	Server       *rootmcp.Server
 }
 
-// SECURITY: the JWT link is built on a second tokens.Verifier pinned to mcp.audience, never the kernel's control-plane verifier, so a token minted for one resource is refused at the other (RFC 8707).
-func buildMCPSurface(ctx context.Context, cfg *config.Config, log *slog.Logger, s *Services, apiSrv *controlplane.Server) (mcpSurface, error) {
+// SECURITY: the token link is built on a second tokens.Verifier pinned to mcp.audience, never the kernel's control-plane verifier, so a token minted for one resource is refused at the other (RFC 8707).
+func buildMCPSurface(cfg *config.Config, log *slog.Logger, s *Services, apiSrv *controlplane.Server, keys *oidcrp.KeySource) (mcpSurface, error) {
 	if !cfg.MCP.Enabled {
 		return mcpSurface{}, nil
 	}
-	surface, err := mcpinternal.NewSurface(cfg.MCP.Audience)
+	resource, err := tokens.NewResource(cfg.MCP.Audience)
 	if err != nil {
 		return mcpSurface{}, fmt.Errorf("boot: mcp surface: %w", err)
 	}
-	verifier, err := tokens.NewVerifier(ctx, mcpTokensConfig(cfg))
+	verifier, err := tokens.NewVerifier(mcpTokensConfig(cfg), keys)
 	if err != nil {
 		return mcpSurface{}, fmt.Errorf("boot: mcp verifier: %w", err)
 	}
 	chain := authn.Chain{
 		s.KeyAuthn,
 		user.NewAuthenticator(
-			tokens.NewAuthenticator(verifier),
+			tokens.NewAuthenticator(verifier, credentialScheme(s.KeyAuthn.Scheme(), cfg.MCP.Introspection)),
 			s.UserStore,
 			user.WithTenantResolution(
 				orgStoreForOnboard{store: s.OrgStore},
@@ -74,30 +76,18 @@ func buildMCPSurface(ctx context.Context, cfg *config.Config, log *slog.Logger, 
 		srv.AddUIResource(blogListResource())
 	}
 
-	challenge, err := mcpinternal.ChallengeRoutes(cfg.HTTP.BasePath, cfg.MCP.ChallengePrefix, cfg.MCP.ChallengeToken)
-	if err != nil {
-		return mcpSurface{}, fmt.Errorf("boot: mcp challenge: %w", err)
-	}
-	if len(challenge) == 0 {
-		// NOTE: the authorization server re-checks the proof on a schedule, so a missing token
-		// fails admission long after boot looks healthy; say so now rather than at a support desk.
-		log.Warn("boot: mcp challenge token unset — host control cannot be verified",
-			slog.String("set", "OPENSHEET_MCP_CHALLENGE_TOKEN"))
-	}
-
 	log.Info("boot: mcp surface mounted",
 		slog.String("audience", cfg.MCP.Audience),
-		slog.String("metadata", surface.MetadataPath),
+		slog.String("metadata", resource.MetadataPath),
 		slog.Int("tools", len(registry.Names())),
 		slog.Bool("ui", cfg.MCP.AppsUI))
 
-	guard := mcpinternal.Authenticate(chain, s.KeyAuthn.Scheme().Authn(), surface.MetadataURL, log)
+	guard := mcpinternal.Authenticate(chain, resource, log)
 	return mcpSurface{
-		Handler:         guard(srv.Handler()),
-		Metadata:        mcpinternal.MetadataHandler(surface.Resource, []string{cfg.Tokens.Issuer}, registeredScopes(registry)),
-		MetadataPath:    surface.MetadataPath,
-		ChallengeRoutes: challenge,
-		Server:          srv,
+		Handler:      guard(srv.Handler()),
+		Metadata:     resource.MetadataHandler(cfg.Tokens.Issuer, registeredScopes(registry)),
+		MetadataPath: resource.MetadataPath,
+		Server:       srv,
 	}, nil
 }
 
@@ -114,7 +104,17 @@ func blogListResource() rootmcp.UIResource {
 func mcpTokensConfig(cfg *config.Config) tokens.Config {
 	c := cfg.Tokens
 	c.Audience = cfg.MCP.Audience
+	c.Introspection = cfg.MCP.Introspection
 	return c
+}
+
+// SECURITY: the one scheme per resource; the API key prefix comes from the scheme that mints keys, so a dotted key never reads as a JWT.
+func credentialScheme(keys apikey.Scheme, introspection tokens.IntrospectionConfig) authn.Scheme {
+	scheme := keys.Authn()
+	if introspection.Enabled() {
+		scheme.TokenPrefix = tokens.PersonalTokenPrefix
+	}
+	return scheme
 }
 
 func registeredScopes(reg *rootmcp.Registry) []string {

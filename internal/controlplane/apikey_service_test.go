@@ -44,12 +44,17 @@ func newAPIKeyFixture(t *testing.T) *apikeyFixture {
 
 func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
 	t.Helper()
+	return newAPIKeyFixtureFor(t, manager, session.SourceOIDC)
+}
+
+func newAPIKeyFixtureFor(t *testing.T, manager bool, src session.Source) *apikeyFixture {
+	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reporter := apperror.NewReporter(log, false)
 
 	orgID := uuid.New()
-	principal := session.Principal{UserID: uuid.New(), Email: "a@b", ActiveOrgID: orgID}
+	principal := session.Principal{UserID: uuid.New(), Email: "a@b", ActiveOrgID: orgID, Source: src}
 	managers := fakes.NewMembers()
 	if manager {
 		managers.SeatManager(orgID, principal.UserID)
@@ -64,13 +69,15 @@ func newAPIKeyFixtureAs(t *testing.T, manager bool) *apikeyFixture {
 	kernel := &platform.Kernel{
 		Log:      log,
 		Reporter: reporter,
-		Verifier: stubVerifier{principal: principal},
+		Verifier: stubVerifier{principal: fullTokenGrant(principal)},
 	}
 
 	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc})
-	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier)}
+	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = keySvc
-	srv.KeyPrefix = apikey.DefaultPrefix
+	resource, err := tokens.NewResource("https://app.example.com/api")
+	require.NoError(t, err)
+	srv.Resource = &resource
 
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
@@ -304,6 +311,32 @@ func TestAPIKey_Create_RequiresAnOwnerOrAdminPerson(t *testing.T) {
 		f := newAPIKeyFixture(t)
 		require.NoError(t, create(f, withBearer))
 	})
+}
+
+// SECURITY: key management stays console-only, so a bearer token is refused without an insufficient_scope hint naming a scope nobody can be granted.
+func TestAPIKey_CreateAndRevoke_RefuseABearerToken(t *testing.T) {
+	f := newAPIKeyFixtureFor(t, true, session.SourceToken)
+	create := connect.NewRequest(&apikeyv1.CreateRequest{
+		ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)),
+		ProjectId: f.project.ID.String(),
+		Name:      "k",
+		Scopes:    []string{authn.ScopeSheetsRead},
+	})
+	withBearer(create.Header())
+	_, createErr := f.client().Create(t.Context(), create)
+
+	revoke := connect.NewRequest(&apikeyv1.RevokeRequest{ProjectId: f.project.ID.String(), Id: uuid.NewString()})
+	withBearer(revoke.Header())
+	_, revokeErr := f.client().Revoke(t.Context(), revoke)
+
+	for name, err := range map[string]error{"Create": createErr, "Revoke": revokeErr} {
+		require.Equal(t, connect.CodePermissionDenied, connectCode(err), "%s: err=%v", name, err)
+		var cerr *connect.Error
+		require.ErrorAs(t, err, &cerr)
+		require.Empty(t, cerr.Meta().Get("WWW-Authenticate"), "%s must not ask for a scope", name)
+		require.NotContains(t, err.Error(), authn.ScopeAPIKeysWrite, name)
+	}
+	require.Empty(t, f.store.All(), "a refused mint must persist nothing")
 }
 
 func TestAPIKey_Create_RetiredScope_ReturnsInvalidArgument(t *testing.T) {

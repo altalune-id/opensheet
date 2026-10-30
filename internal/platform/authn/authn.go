@@ -18,10 +18,16 @@ const (
 	ShapeUnknown Shape = iota
 	ShapeAPIKey
 	ShapeJWT
+	ShapePersonalToken
 )
 
 // Scheme classifies raw credentials; its zero value recognizes JWTs only.
-type Scheme struct{ Prefix string }
+type Scheme struct {
+	// Prefix starts every API key this app mints.
+	Prefix string
+	// TokenPrefix starts every opaque personal token the issuer mints; empty refuses them.
+	TokenPrefix string
+}
 
 // Looks classifies raw by shape alone, without touching a store.
 func (s Scheme) Looks(raw string) Shape {
@@ -30,6 +36,9 @@ func (s Scheme) Looks(raw string) Shape {
 	}
 	if s.Prefix != "" && strings.HasPrefix(raw, s.Prefix) {
 		return ShapeAPIKey
+	}
+	if s.TokenPrefix != "" && strings.HasPrefix(raw, s.TokenPrefix) {
+		return ShapePersonalToken
 	}
 	if strings.Count(raw, ".") == 2 && !strings.ContainsAny(raw, " \t") {
 		return ShapeJWT
@@ -45,15 +54,24 @@ type Authenticator interface {
 // Chain tries each Authenticator in order and returns the first success.
 type Chain []Authenticator
 
-// Authenticate implements Authenticator. SECURITY: every failure collapses to one opaque error, whatever the cause.
+// Authenticate implements Authenticator. SECURITY: every refusal collapses to one opaque error; only an *UnavailableError passes through, so an outage never reads as a bad credential.
 func (c Chain) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
-	var causes []error
+	var (
+		causes      []error
+		unavailable *UnavailableError
+	)
 	for _, a := range c {
 		p, err := a.Authenticate(ctx, raw)
 		if err == nil {
 			return p, nil
 		}
+		if u, ok := errors.AsType[*UnavailableError](err); ok && unavailable == nil {
+			unavailable = u
+		}
 		causes = append(causes, err)
+	}
+	if unavailable != nil {
+		return session.Principal{}, unavailable
 	}
 	return session.Principal{}, &UnauthorizedError{causes: errors.Join(causes...)}
 }

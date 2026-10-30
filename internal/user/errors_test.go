@@ -166,3 +166,9 @@ func TestIsInvalidNameError(t *testing.T) {
 	assert.False(t, user.IsInvalidNameError(errors.New("plain")))
 	assert.False(t, user.IsInvalidNameError(nil))
 }
+
+func TestOIDCRefusalErrors_KeepTheEmailOutOfLogs(t *testing.T) {
+	for _, err := range []error{&user.EmailUnverifiedError{}, &user.IdentityConflictError{}} {
+		assert.NotContains(t, err.Error(), "email=", "an error message reaches the logs")
+	}
+}

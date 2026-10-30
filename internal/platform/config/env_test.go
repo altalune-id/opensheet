@@ -17,7 +17,7 @@ func TestEnvVarName(t *testing.T) {
 		{"http.addr", "OPENSHEET_HTTP_ADDR"},
 		{"http.baseURL", "OPENSHEET_HTTP_BASE_URL"},
 		{"telemetry.otlp.endpoint", "OPENSHEET_TELEMETRY_OTLP_ENDPOINT"},
-		{"tokens.jwksURL", "OPENSHEET_TOKENS_JWKS_URL"},
+		{"tokens.introspection.clientID", "OPENSHEET_TOKENS_INTROSPECTION_CLIENT_ID"},
 		{"db.autoMigrate", "OPENSHEET_DB_AUTO_MIGRATE"},
 		{"db.AutoMigrate", "OPENSHEET_DB_AUTO_MIGRATE"},
 		{"api.openapi.requireBasicAuth", "OPENSHEET_API_OPENAPI_REQUIRE_BASIC_AUTH"},
@@ -100,7 +100,8 @@ func TestWalkEnvKeys_IncludesKnownLeaves(t *testing.T) {
 		{"OPENSHEET_HTTP_STATE_SECRET", "http.stateSecret", "string"},
 		{"OPENSHEET_TELEMETRY_OTLP_ENDPOINT", "telemetry.otlp.endpoint", "string"},
 		{"OPENSHEET_TOKENS_CLOCK_SKEW", "tokens.clockSkew", "duration"},
-		{"OPENSHEET_TOKENS_SUPPORTED_ALGS", "tokens.supportedAlgs", "[]string"},
+		{"OPENSHEET_TOKENS_INTROSPECTION_CLIENT_SECRET", "tokens.introspection.clientSecret", "string"},
+		{"OPENSHEET_OIDC_CLI_CLIENT_ID", "oidc.cliClientID", "string"},
 		{"OPENSHEET_OIDC_REDIRECT_PORT", "oidc.redirectPort", "int"},
 	}
 	for _, want := range expect {
@@ -131,7 +132,8 @@ func TestWalkEnvKeys_Defaults(t *testing.T) {
 		{"OPENSHEET_HTTP_ADDR", ":5150"},
 		{"OPENSHEET_DB_DRIVER", "sqlite"},
 		{"OPENSHEET_LOG_LEVEL", "info"},
-		{"OPENSHEET_TOKENS_AUDIENCE", "urn:opensheet:api"},
+		{"OPENSHEET_TOKENS_CLOCK_SKEW", "60s"},
+		{"OPENSHEET_OIDC_END_SESSION_ON_LOGOUT", "true"},
 	}
 	for _, tc := range withDefaults {
 		got, ok := byEnv[tc.env]

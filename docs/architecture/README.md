@@ -62,7 +62,7 @@ scoping, so the guard checks they are the same object.
 - A surface never reaches a `Store`. It calls a `Service`.
 - A `Service` never imports a surface, or knows one exists.
 - A `Store` implements an interface the `Service` declares — dependencies point inward.
-- Root packages (`mcp/`, `authl/`, `worker/`, …) never import `internal/`. Forks copy them verbatim.
+- Root packages (`mcp/`, `worker/`, …) never import `internal/`. Forks copy them verbatim.
 
 The last two are enforced by depguard in `.golangci.yaml`.
 

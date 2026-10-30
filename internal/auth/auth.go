@@ -13,10 +13,11 @@ type Credentials struct {
 
 // OIDCClaims is the third-party identity claim set consumed by LoginOIDC.
 type OIDCClaims struct {
-	Issuer  string
-	Subject string
-	Email   string
-	Name    string
+	Issuer        string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Name          string
 }
 
 // Principal is the session identity returned by login workflows.

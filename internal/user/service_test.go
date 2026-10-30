@@ -30,7 +30,7 @@ func TestEnsureFromOIDC_CreatesWhenMissing(t *testing.T) {
 	t.Parallel()
 	store := fakes.NewUser()
 	s := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
-	claims := user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "alice@example.com", Name: "Alice"}
+	claims := user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "alice@example.com", EmailVerified: true, Name: "Alice"}
 	u, err := s.EnsureFromOIDC(context.Background(), claims)
 	require.NoError(t, err)
 	assert.Equal(t, "alice@example.com", u.Email)
@@ -45,7 +45,7 @@ func TestEnsureFromOIDC_RefreshesExistingName(t *testing.T) {
 	require.NoError(t, store.Save(context.Background(), existing))
 
 	s := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
-	claims := user.Claims{Issuer: "iss", Subject: "sub", Email: "alice@example.com", Name: "New Name"}
+	claims := user.Claims{Issuer: "iss", Subject: "sub", Email: "alice@example.com", EmailVerified: true, Name: "New Name"}
 	u, err := s.EnsureFromOIDC(context.Background(), claims)
 	require.NoError(t, err)
 	assert.Equal(t, "New Name", u.Name)
@@ -55,7 +55,7 @@ func TestEnsureFromOIDC_FallsBackToEmailLocalPartWhenNameEmpty(t *testing.T) {
 	t.Parallel()
 	store := fakes.NewUser()
 	s := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
-	claims := user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "somebody@altalune.id", Name: ""}
+	claims := user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "somebody@altalune.id", EmailVerified: true, Name: ""}
 	u, err := s.EnsureFromOIDC(context.Background(), claims)
 	require.NoError(t, err)
 	assert.Equal(t, "somebody", u.Name, "must synthesize name from email local part when IdP omits name")
@@ -65,7 +65,7 @@ func TestEnsureFromOIDC_RejectsMissingIssuer(t *testing.T) {
 	t.Parallel()
 	store := fakes.NewUser()
 	s := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
-	_, err := s.EnsureFromOIDC(context.Background(), user.Claims{Subject: "sub", Email: "a@b.co", Name: "n"})
+	_, err := s.EnsureFromOIDC(context.Background(), user.Claims{Subject: "sub", Email: "a@b.co", EmailVerified: true, Name: "n"})
 	assert.Error(t, err, "expected error for missing issuer")
 }
 

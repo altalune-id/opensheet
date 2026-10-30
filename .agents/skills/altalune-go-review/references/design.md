@@ -40,7 +40,7 @@ the owners in this codebase; a second copy of anything they hold is a finding.
 - **Wrong layer.** A surface reaching a `Store`, a `Service` knowing about a surface, a root
   package importing `internal/`, domain policy inside a platform package —
   [`architecture`](../../../../docs/architecture/README.md#rules-each-layer-must-not-break).
-- **Fork cost.** A signature change in a verbatim-copied package (`authl/ httpclient/ logger/
+- **Fork cost.** A signature change in a verbatim-copied package (`httpclient/ logger/
 mailer/ mcp/ nanoid/ reqid/ scheduler/ telemetry/ worker/ internal/platform/`) needs a reason
   and tests first. Load `go-release` for exported API changes.
 

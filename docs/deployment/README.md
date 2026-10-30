@@ -132,12 +132,13 @@ multiple replicas need: [`workers`](workers.md).
 ## MCP
 
 `/mcp` (S7) is off by default. The env block, the enforced enable order (`tokens.issuer` →
-`http.baseURL` → `mcp.enabled` → `mcp.challengeToken`, each omission a boot error), the audience
+`http.baseURL` → `mcp.enabled`, each omission a boot error), the audience
 rules — default `baseURL + basePath + /mcp`, widened only by `mcp.audienceOverride` — and
 `bash scripts/verify-mcp-smoke.sh`: [`mcp`](../mcp/README.md#setup).
 
-Deployment-side: the proxy must pass `/.well-known/oauth-protected-resource<basePath>/mcp` and the
-challenge path through — both are unauthenticated and both are how a host discovers the endpoint. A proxy
+Deployment-side: the proxy must pass `/.well-known/oauth-protected-resource<basePath>/mcp` and
+`…/api` through — both are unauthenticated, a host discovers the endpoint through them and Othra
+verifies each resource server by reading them. A proxy
 terminating on a different public URL needs `OPENSHEET_MCP_AUDIENCE` plus `OPENSHEET_MCP_AUDIENCE_OVERRIDE=true`.
 
 ## Observability
@@ -171,11 +172,51 @@ them.
 
 ## OIDC
 
-1. In the authorization server's console, create an OAuth client — `confidential` for servers,
-   `public` for CLI-only. Copy client ID + secret.
-2. Register redirect URIs — `https://<host>/oauth/callback` (web, under `http.basePath`) and
-   `http://127.0.0.1:0/callback` (CLI loopback, RFC 8252).
-3. Create a resource server for `urn:opensheet:api`.
-4. Set `oidc.issuer`, `oidc.clientID`, `oidc.clientSecret`, `oidc.resource: urn:opensheet:api`,
-   `tokens.audience: urn:opensheet:api`, `tokens.issuer` and `tokens.jwksURL`.
-5. Restart — log in at `/login`.
+Sign-in, CLI login and bearer tokens all come from one Othra project, whose issuer is
+`https://<othra>/p/<handle>`. Register in this order, because Othra reads the app's RFC 9728
+documents before it accepts a resource server:
+
+1. Start the app with `http.baseURL`, `oidc.issuer` and `tokens.issuer` set to the project issuer
+   (they must be equal). `tokens.audience` and `mcp.audience` derive from `http.baseURL`, and the
+   two documents are now served at `/.well-known/oauth-protected-resource{basePath}/api` and
+   `…/mcp`. `selfhosted` boots without client credentials; `cloud` refuses to boot without
+   `oidc.clientID` and `oidc.clientSecret`, so set any non-empty placeholder for both until step 5.
+2. In Othra, create two resource servers: `https://<host><basePath>/api` (the control plane) and
+   `https://<host><basePath>/mcp`, each with the scopes its document lists. The documents never
+   list a retired scope such as `apikeys:write`: key management stays in the console.
+3. Create a web client (confidential) with redirect URI `https://<host><basePath>/oauth/callback`
+   and post-logout URI `https://<host><basePath>/`, and a CLI client (native, public) with redirect
+   URI `http://127.0.0.1/callback` (RFC 8252; any port matches). Mark both first-party.
+4. Link both clients to both resource servers with their scopes.
+5. Set `oidc.clientID`, `oidc.clientSecret` and `oidc.cliClientID`, and restart.
+6. Optional: to accept `othra_pt_` personal tokens, set `tokens.introspection.*` (and
+   `mcp.introspection.*`) to each resource server's public id and introspection secret.
+7. Open `/login`. On a fresh install the first sign-in goes to `/onboard`, which needs the one-time
+   URL boot logs as `boot: setup required — open this one-time onboarding URL url=…/onboard?token=…`
+   (or a pinned `onboard.setupToken`).
+
+Signing out also ends the Othra session through RP-Initiated Logout, back to the post-logout URI;
+set `oidc.endSessionOnLogout=false` to keep the Othra session.
+
+While Othra or the database is unreachable, a bearer token that cannot be checked answers
+`Unavailable` (Connect) or `503` (MCP) with code `TKN002` and no `WWW-Authenticate` challenge, so a
+client keeps its token and retries.
+
+### Cloud mode locally
+
+`mode=cloud` runs on Postgres only; SQLite is refused at boot. A throwaway local setup:
+
+```bash
+podman run -d --name opensheet-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
+export OPENSHEET_MODE=cloud OPENSHEET_DB_DRIVER=postgres OPENSHEET_DB_ALLOW_BYPASS_RLS=true \
+  OPENSHEET_DB_DSN='postgres://postgres:dev@127.0.0.1:5432/postgres?sslmode=disable' \
+  OPENSHEET_SECURITY_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  OPENSHEET_GENESIS_EMAIL=you@example.com OPENSHEET_HTTP_BASE_URL=http://localhost:5150
+```
+
+Then follow the registration order above (issuer, placeholders, register, real credentials).
+
+A user is matched by `(issuer, subject)`. A first sign-in from a new issuer relinks an existing
+user only when the issuer marks the email verified and the row is unlinked or linked at another
+issuer. An unverified email for an unknown subject is refused (`USR006`), and so is a verified
+email whose user is linked to another subject at the same issuer (`USR007`).

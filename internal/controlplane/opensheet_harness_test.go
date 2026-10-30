@@ -76,7 +76,9 @@ type osHarness struct {
 }
 
 func humanPrincipal(orgID uuid.UUID) session.Principal {
-	return session.Principal{UserID: uuid.New(), Email: "a@b", Source: session.SourceToken, ActiveOrgID: orgID}
+	return session.Principal{
+		UserID: uuid.New(), Email: "a@b", Source: session.SourceToken, ActiveOrgID: orgID, Scopes: authn.MintableScopes(),
+	}
 }
 
 func keyPrincipal(orgID uuid.UUID) session.Principal {
@@ -145,7 +147,6 @@ func buildOSHarness(t *testing.T, p session.Principal, aerr error, realKeys bool
 	srv.Authn = authn.Chain{stubAuthenticator{principal: p, err: aerr}}
 	if realKeys {
 		srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), stubAuthenticator{principal: p, err: aerr}}
-		srv.KeyPrefix = apikey.DefaultPrefix
 	}
 	srv.APIKeys = keySvc
 	ts := httptest.NewServer(srv.Handler(""))

@@ -32,7 +32,7 @@ type User struct {
 
 // New builds a User with the given email, name, and source; invariants apply.
 func New(email, name, source string) (*User, error) {
-	e, err := normalizeEmail(email)
+	e, err := NormalizeEmail(email)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (u *User) Rename(name string) error {
 
 // ChangeEmail updates the address; the same invariants New applies.
 func (u *User) ChangeEmail(email string) error {
-	e, err := normalizeEmail(email)
+	e, err := NormalizeEmail(email)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,8 @@ func (u *User) AcceptTerms(now time.Time) {
 	u.TermsAcceptedAt = &t
 }
 
-func normalizeEmail(s string) (string, error) {
+// NormalizeEmail trims and lowercases s and refuses an address without a local part and a domain.
+func NormalizeEmail(s string) (string, error) {
 	e := strings.ToLower(strings.TrimSpace(s))
 	if e == "" {
 		return "", &InvalidEmailError{Reason: "empty"}

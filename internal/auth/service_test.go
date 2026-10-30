@@ -58,7 +58,7 @@ func TestService_LoginLocal_NoLocalConfigured(t *testing.T) {
 func TestService_LoginOIDC_Unavailable(t *testing.T) {
 	t.Parallel()
 	s := auth.NewService(nil, nil, newTestLogger(), noopUnexpected())
-	_, err := s.LoginOIDC(context.Background(), auth.OIDCClaims{Issuer: "i", Subject: "s", Email: "a@b.co"})
+	_, err := s.LoginOIDC(context.Background(), auth.OIDCClaims{Issuer: "i", Subject: "s", Email: "a@b.co", EmailVerified: true})
 	if !auth.IsOIDCUnavailableError(err) {
 		t.Errorf("want OIDCUnavailableError, got %T: %v", err, err)
 	}

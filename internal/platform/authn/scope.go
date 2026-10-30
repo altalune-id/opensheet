@@ -2,7 +2,7 @@ package authn
 
 import "slices"
 
-// The scope catalog. NOTE: these strings are a wire contract with every minted key and with authl's Resource Server catalog.
+// The scope catalog. NOTE: these strings are a wire contract with every minted key and with the scopes registered on opensheet's resource servers in Othra.
 const (
 	ScopeSheetsRead        = "sheets:read"
 	ScopeSheetsWrite       = "sheets:write"

@@ -77,10 +77,10 @@ func TestPostgres_EnsureFromOIDC_EmailChangedAtIDP(t *testing.T) {
 	svc := user.NewService(store, user.GenesisConfig{}, newTestLogger(), noopUnexpected())
 	ctx := t.Context()
 
-	first, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "old@x.id", Name: "A"})
+	first, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "old@x.id", EmailVerified: true, Name: "A"})
 	require.NoError(t, err)
 
-	second, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "new@x.id", Name: "A"})
+	second, err := svc.EnsureFromOIDC(ctx, user.Claims{Issuer: "https://idp", Subject: "sub-1", Email: "new@x.id", EmailVerified: true, Name: "A"})
 	require.NoError(t, err, "a changed IdP email must resolve via users_idp_idx, not collide on it")
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, "new@x.id", second.Email)

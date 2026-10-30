@@ -405,18 +405,21 @@ func (a *Authenticator) AuthorizeProject(ctx context.Context, raw, scope string,
 	return p, nil
 }
 
-// SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier.
+// SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError and a store failure is *authn.UnavailableError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier.
 func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error) {
 	if a.scheme.Authn().Looks(raw) != authn.ShapeAPIKey {
 		return nil, &authn.UnauthorizedError{}
 	}
 	sum := sha256.Sum256([]byte(raw))
 	k, err := a.store.BySecretHash(ctx, sum)
+	if err != nil && !IsNotFoundError(err) {
+		return nil, &authn.UnavailableError{Cause: err}
+	}
 	if err != nil || k == nil || !k.Usable(time.Now().UTC()) {
 		return nil, &authn.UnauthorizedError{}
 	}
 	if err := a.requireLiveOwner(ctx, k); err != nil {
-		return nil, &authn.UnauthorizedError{}
+		return nil, ownerRefusal(err)
 	}
 	if a.usage != nil {
 		a.usage.Record(k.ID, tenant.Context{OrgID: k.OrgID, ProjectID: k.ProjectID}, time.Now().UTC())
@@ -433,6 +436,14 @@ func (a *Authenticator) requireLiveOwner(ctx context.Context, k *APIKey) error {
 		return &authn.UnauthorizedError{}
 	}
 	return requireOwner(tenant.WithOrg(ctx, k.OrgID), a.members, k.OrgID, k.CreatedBy, k.Scopes)
+}
+
+// NOTE: a typed refusal (no membership, not a manager) is a 401; an untyped error is a store failure.
+func ownerRefusal(err error) error {
+	if _, ok := apperror.AsAppError(err); ok || authn.IsUnauthorizedError(err) {
+		return &authn.UnauthorizedError{}
+	}
+	return &authn.UnavailableError{Cause: err}
 }
 
 // SECURITY: a key is not a person, so UserID stays nil and no secret travels with the principal.

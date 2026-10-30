@@ -1,10 +1,13 @@
 package authn_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
 
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 )
 
 func TestSchemeLooks(t *testing.T) {
@@ -26,6 +29,20 @@ func TestSchemeLooks(t *testing.T) {
 				t.Fatalf("Looks(%q) = %v, want %v", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSchemeLooksPersonalTokenOnlyWithItsPrefix(t *testing.T) {
+	with := authn.Scheme{Prefix: "key_", TokenPrefix: "othra_pt_"}
+	if got := with.Looks("othra_pt_abc"); got != authn.ShapePersonalToken {
+		t.Fatalf("Looks(personal token) = %v, want ShapePersonalToken", got)
+	}
+	if got := with.Looks("key_abc"); got != authn.ShapeAPIKey {
+		t.Fatalf("Looks(api key) = %v, want ShapeAPIKey", got)
+	}
+	without := authn.Scheme{Prefix: "key_"}
+	if got := without.Looks("othra_pt_abc"); got != authn.ShapeUnknown {
+		t.Fatalf("a personal token without introspection = %v, want ShapeUnknown", got)
 	}
 }
 
@@ -52,6 +69,37 @@ func TestCredentialFromHeader(t *testing.T) {
 			h.Set(tt.header, tt.value)
 			if got := authn.CredentialFromHeader(h); got != tt.want {
 				t.Fatalf("CredentialFromHeader = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+type failingAuth struct{ err error }
+
+func (f failingAuth) Authenticate(context.Context, string) (session.Principal, error) {
+	return session.Principal{}, f.err
+}
+
+func TestChainSeparatesAnOutageFromARefusal(t *testing.T) {
+	outage := &authn.UnavailableError{Cause: errors.New("issuer unreachable")}
+	refused := failingAuth{err: errors.New("bad signature")}
+	tests := []struct {
+		name            string
+		chain           authn.Chain
+		wantUnavailable bool
+	}{
+		{"every link refuses", authn.Chain{refused, refused}, false},
+		{"one link is down", authn.Chain{refused, failingAuth{err: outage}}, true},
+		{"a later link succeeds past an outage", authn.Chain{failingAuth{err: outage}, stubAuth{p: tokenPrincipal()}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.chain.Authenticate(t.Context(), "aaa.bbb.ccc")
+			if got := authn.IsUnavailableError(err); got != tt.wantUnavailable {
+				t.Fatalf("IsUnavailableError(%v) = %v, want %v", err, got, tt.wantUnavailable)
+			}
+			if tt.wantUnavailable && authn.IsUnauthorizedError(err) {
+				t.Fatalf("an outage must not read as a refusal: %v", err)
 			}
 		})
 	}

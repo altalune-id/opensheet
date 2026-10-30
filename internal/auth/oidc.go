@@ -15,10 +15,11 @@ import (
 
 // EnsureClaims mirrors user.Claims without hard-importing the user module.
 type EnsureClaims struct {
-	Issuer  string
-	Subject string
-	Email   string
-	Name    string
+	Issuer        string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Name          string
 }
 
 // OnboardRequest mirrors user.OnboardWorkflow's inputs.

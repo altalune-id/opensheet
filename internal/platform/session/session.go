@@ -22,13 +22,15 @@ type Principal struct {
 	UserID uuid.UUID
 	// KeyID is the API key id when this principal is a key rather than a person.
 	// SECURITY: a key principal keeps UserID == uuid.Nil, so it is never mistaken for a signed-in human.
-	KeyID           uuid.UUID
-	Email           string
-	Name            string
-	Source          Source
-	IDPIssuer       string
-	IDPSubject      string
-	IDToken         string
+	KeyID      uuid.UUID
+	Email      string
+	Name       string
+	Source     Source
+	IDPIssuer  string
+	IDPSubject string
+	IDToken    string
+	// ClientID is the OAuth client a token principal's access token was issued to.
+	ClientID        string `json:"-"`
 	Scopes          []string
 	ActiveOrgID     uuid.UUID
 	ActiveProjectID uuid.UUID
@@ -37,10 +39,7 @@ type Principal struct {
 	// AllProjects grants a key principal every project of its org, including ones created later.
 	AllProjects bool `json:"-"`
 	// ResourceIDs narrows a key principal to these resources; empty means every resource in its projects.
-	ResourceIDs []uuid.UUID `json:"-"`
-	// ClaimedOrgID is the org_id a bearer token asserted.
-	// SECURITY: a hint, never authority; only a membership check may promote it to ActiveOrgID.
-	ClaimedOrgID    uuid.UUID `json:"-"`
+	ResourceIDs     []uuid.UUID `json:"-"`
 	IsAdmin         bool
 	Locale          string
 	TermsAcceptedAt time.Time

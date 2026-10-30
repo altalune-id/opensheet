@@ -205,10 +205,9 @@ func TestMCPMetadataStaysRootAnchoredUnderBasePath(t *testing.T) {
 
 	var hit []string
 	h := web.NewServer(web.ServerOpts{
-		BasePath:           "/app",
-		MCPHandler:         echo("mcp"),
-		MCPMetadataHandler: echo("metadata"),
-		MCPMetadataPath:    metadataPath,
+		BasePath:         "/app",
+		MCPHandler:       echo("mcp"),
+		ResourceMetadata: map[string]http.Handler{metadataPath: echo("metadata")},
 		Chains: web.SurfaceChains{
 			Console: []web.Middleware{marker("console", &hit)},
 			MCP:     []web.Middleware{marker("mcp", &hit)},

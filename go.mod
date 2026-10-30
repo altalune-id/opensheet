@@ -1,15 +1,14 @@
 module altalune.id/opensheet
 
-go 1.26.0
-
-toolchain go1.26.10
+go 1.26.10
 
 require (
 	connectrpc.com/connect v1.21.1
 	connectrpc.com/otelconnect v0.12.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/a-h/templ v0.3.1070
-	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/altalune-id/oauthrs v0.0.0-20261029230029-52821b6937ec
+	github.com/altalune-id/oidcrp v0.0.0-20261029230018-81e927225965
 	github.com/dop251/goja v0.0.0-20260917113740-793a2a65c13b
 	github.com/go-jet/jet/v2 v2.16.1
 	github.com/go-playground/validator/v10 v10.30.5
@@ -88,7 +87,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

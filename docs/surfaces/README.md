@@ -30,7 +30,8 @@ outside world on a tenant's behalf. Seven, on two axes.
 | S7  | **mcp**           | `internal/mcp/` + `mcp/` (root) | `/mcp`               | ingress    | an MCP host acting for a person or agent |
 
 Every mount is prefixed by `http.basePath` when one is set. The one exception is the RFC 9728
-metadata document, which the well-known URI anchors at the host root ([`mcp`](../mcp/README.md)).
+metadata documents of the control plane and MCP, which the well-known URI anchors at the host root
+([`mcp`](../mcp/README.md)).
 
 The package is `internal/dataplane/`, never `internal/data/`: `data` names a layer, not a
 domain, and reads as persistence next to `internal/platform/db`. Layer-named packages are
@@ -41,14 +42,14 @@ rejected everywhere else in this repo and this one is no exception.
 One chain per surface, built in `boot.surfaceChains` (`internal/boot/http.go`) and carried as
 `web.SurfaceChains{Console, Control, Data, Ingest, MCP, Probes}`. There is no global chain.
 
-| Chain     | Serves                                                                   | On top of `edge`                                     |
-| --------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `Console` | S1, and every unmatched path under `basePath`                            | CSP, `Recover`, `Session`, `Tenant`, i18n, SSR gates |
-| `Control` | S2                                                                       | nothing — Connect owns its own error shape           |
-| `Data`    | S3                                                                       | `RecoverJSON`                                        |
-| `Ingest`  | S4                                                                       | `RecoverJSON`                                        |
-| `MCP`     | S7 `/mcp`                                                                | `RecoverJSON`                                        |
-| `Probes`  | `/healthz`, `/readyz`, `/robots.txt`, S7's metadata and challenge routes | `Recover`, no error template                         |
+| Chain     | Serves                                                                | On top of `edge`                                     |
+| --------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
+| `Console` | S1, and every unmatched path under `basePath`                         | CSP, `Recover`, `Session`, `Tenant`, i18n, SSR gates |
+| `Control` | S2                                                                    | nothing — Connect owns its own error shape           |
+| `Data`    | S3                                                                    | `RecoverJSON`                                        |
+| `Ingest`  | S4                                                                    | `RecoverJSON`                                        |
+| `MCP`     | S7 `/mcp`                                                             | `RecoverJSON`                                        |
+| `Probes`  | `/healthz`, `/readyz`, `/robots.txt`, the S2 and S7 RFC 9728 metadata | `Recover`, no error template                         |
 
 `edge` is `RequestID` + `RequestLog` + `OTel` and every chain starts with it. S5 and S6 have
 no chain: neither is an inbound HTTP route.

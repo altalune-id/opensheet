@@ -34,6 +34,7 @@ import (
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -65,7 +66,7 @@ type Server struct {
 	Projects *project.Service
 	Invites  *invite.Service
 
-	// APIKeys is set by boot after New returns, mirroring Authn/KeyPrefix below.
+	// APIKeys is set by boot after New returns, mirroring Authn below.
 	APIKeys *apikey.Service
 
 	AuthSvc    *AuthService
@@ -77,8 +78,9 @@ type Server struct {
 	SpreadsheetSvc *SpreadsheetService
 	SheetSvc       *SheetService
 
-	Authn     authn.Chain
-	KeyPrefix string
+	Authn authn.Chain
+	// Resource is the control plane's protected resource, named in every 401 and 403 challenge; nil sends none.
+	Resource *tokens.Resource
 
 	OpenAPIEnabled   bool
 	OpenAPIBasicAuth *BasicAuth
@@ -206,8 +208,8 @@ func (s *Server) handlerOptionsFor(table authn.ScopeTable) []connect.HandlerOpti
 	}
 	ics = append(ics,
 		interceptor.Wrap(s.unexpected()),
-		translateAuthnErrors(),
-		authn.Interceptor(s.Authn, authn.Scheme{Prefix: s.KeyPrefix}, table),
+		translateAuthnErrors(s.Resource),
+		authn.Interceptor(s.Authn, table),
 		interceptor.Tenant(),
 	)
 	return []connect.HandlerOption{

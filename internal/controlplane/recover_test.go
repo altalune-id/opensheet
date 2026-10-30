@@ -41,7 +41,7 @@ func (s *recoverTestSink) count() int {
 type alwaysOKVerifier struct{}
 
 func (alwaysOKVerifier) Verify(_ context.Context, _ string) (session.Principal, error) {
-	return session.Principal{}, nil
+	return session.Principal{Source: session.SourceOIDC}, nil
 }
 
 func TestServer_HandlerOptions_RecoversPanicAndReportsUnexpected(t *testing.T) {
@@ -55,7 +55,7 @@ func TestServer_HandlerOptions_RecoversPanicAndReportsUnexpected(t *testing.T) {
 			Reporter: reporter,
 			Verifier: alwaysOKVerifier{},
 		},
-		Authn: authn.Chain{tokens.NewAuthenticator(alwaysOKVerifier{})},
+		Authn: authn.Chain{tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{})},
 	}
 
 	const procedure = "/test.PanicService/Panic"

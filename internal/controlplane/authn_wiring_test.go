@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -46,12 +47,11 @@ func TestServer_HandlerOptions_EnforcesKeyScopes(t *testing.T) {
 	store.Seed(adminKey)
 
 	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
-	chain := authn.Chain{keyAuthn, tokens.NewAuthenticator(alwaysOKVerifier{})}
+	chain := authn.Chain{keyAuthn, tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 
 	s := &Server{
-		Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
-		Authn:     chain,
-		KeyPrefix: apikey.DefaultPrefix,
+		Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+		Authn:  chain,
 	}
 
 	// SheetService.Delete requires ScopeSheetsAdmin in controlplane.ScopeTable().
@@ -113,11 +113,10 @@ func TestServer_HandlerOptions_RejectsUnscopedProcedure(t *testing.T) {
 	}
 	store.Seed(key)
 
-	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(alwaysOKVerifier{})}
+	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	s := &Server{
-		Kernel:    &platform.Kernel{Log: log, Reporter: reporter},
-		Authn:     chain,
-		KeyPrefix: apikey.DefaultPrefix,
+		Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+		Authn:  chain,
 	}
 
 	const procedure = "/test.UndeclaredService/DoSomething"
@@ -158,9 +157,8 @@ func TestServer_HandlerOptions_AcceptsAnyConfiguredKeyPrefix(t *testing.T) {
 
 			keyAuthn := apikey.NewAuthenticator(store, nil, scheme, fakes.NewMembers())
 			s := &Server{
-				Kernel:    &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
-				Authn:     authn.Chain{keyAuthn},
-				KeyPrefix: keyAuthn.Scheme().Prefix(),
+				Kernel: &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
+				Authn:  authn.Chain{keyAuthn},
 			}
 
 			const procedure = sheetv1connect.SheetServiceDeleteProcedure
@@ -180,6 +178,123 @@ func TestServer_HandlerOptions_AcceptsAnyConfiguredKeyPrefix(t *testing.T) {
 			client := connect.NewClient[sheetv1.DeleteRequest, sheetv1.DeleteResponse](http.DefaultClient, ts.URL+procedure)
 			if _, err := client.CallUnary(t.Context(), req); err != nil {
 				t.Fatalf("api.keyPrefix %q: a key this deployment minted was refused at the boundary: %v", configured, err)
+			}
+		})
+	}
+}
+
+type scopedTokenVerifier struct{ scopes []string }
+
+func (v scopedTokenVerifier) Verify(context.Context, string) (session.Principal, error) {
+	return session.Principal{Source: session.SourceToken, UserID: uuid.New(), Scopes: v.scopes}, nil
+}
+
+// TestServer_HandlerOptions_EnforcesTokenScopes proves a token principal is held to the same scope table as a key.
+func TestServer_HandlerOptions_EnforcesTokenScopes(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reporter := apperror.NewReporter(log, false)
+	const procedure = sheetv1connect.SheetServiceDeleteProcedure
+
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		want   connect.Code
+	}{
+		{"a token without the scope is denied", []string{authn.ScopeSheetsRead}, connect.CodePermissionDenied},
+		{"a token with the scope is admitted", []string{authn.ScopeSheetsAdmin}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{
+				Kernel: &platform.Kernel{Log: log, Reporter: reporter},
+				Authn:  authn.Chain{tokens.NewAuthenticator(scopedTokenVerifier{scopes: tc.scopes}, authn.Scheme{Prefix: apikey.DefaultPrefix})},
+			}
+			handler := connect.NewUnaryHandlerSimple(procedure,
+				func(context.Context, *sheetv1.DeleteRequest) (*sheetv1.DeleteResponse, error) {
+					return &sheetv1.DeleteResponse{}, nil
+				}, s.handlerOptions()...)
+			mux := http.NewServeMux()
+			mux.Handle(procedure, handler)
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+
+			client := connect.NewClient[sheetv1.DeleteRequest, sheetv1.DeleteResponse](http.DefaultClient, ts.URL+procedure)
+			req := connect.NewRequest(&sheetv1.DeleteRequest{ProjectId: uuid.NewString(), SheetId: uuid.NewString()})
+			req.Header().Set("Authorization", "Bearer aaa.bbb.ccc")
+			_, err := client.CallUnary(t.Context(), req)
+			if tc.want == 0 {
+				if err != nil {
+					t.Fatalf("a token holding the scope was refused: %v", err)
+				}
+				return
+			}
+			if connect.CodeOf(err) != tc.want {
+				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+		})
+	}
+}
+
+type failingTokenVerifier struct{ err error }
+
+func (v failingTokenVerifier) Verify(context.Context, string) (session.Principal, error) {
+	return session.Principal{}, v.err
+}
+
+// TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated proves a client keeps its token through an issuer or database outage.
+func TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	resource, err := tokens.NewResource("https://app.example.com/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const procedure = sheetv1connect.SheetServiceDeleteProcedure
+	scheme := authn.Scheme{Prefix: apikey.DefaultPrefix}
+	downStore := fakes.NewAPIKey()
+	downStore.BySecretHashErr = errors.New("connection refused")
+	keyAuthn := apikey.NewAuthenticator(downStore, nil, apikey.Scheme{}, fakes.NewMembers())
+	tokenChain := func(err error) authn.Chain {
+		return authn.Chain{keyAuthn, tokens.NewAuthenticator(failingTokenVerifier{err: err}, scheme)}
+	}
+
+	for _, tc := range []struct {
+		name          string
+		chain         authn.Chain
+		bearer        string
+		want          connect.Code
+		wantChallenge bool
+	}{
+		{"an issuer outage", tokenChain(&authn.UnavailableError{Cause: errors.New("issuer unreachable")}), "aaa.bbb.ccc", connect.CodeUnavailable, false},
+		{"an api key during a store outage", tokenChain(nil), apikey.DefaultPrefix + "whatever", connect.CodeUnavailable, false},
+		{"a refused token", tokenChain(&tokens.InvalidTokenError{Reason: "signature"}), "aaa.bbb.ccc", connect.CodeUnauthenticated, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{
+				Kernel:   &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
+				Authn:    tc.chain,
+				Resource: &resource,
+			}
+			mux := http.NewServeMux()
+			mux.Handle(procedure, connect.NewUnaryHandlerSimple(procedure,
+				func(context.Context, *sheetv1.DeleteRequest) (*sheetv1.DeleteResponse, error) {
+					t.Fatal("the handler ran for a credential that was not verified")
+					return nil, nil
+				}, s.handlerOptions()...))
+			ts := httptest.NewServer(mux)
+			t.Cleanup(ts.Close)
+
+			client := connect.NewClient[sheetv1.DeleteRequest, sheetv1.DeleteResponse](http.DefaultClient, ts.URL+procedure)
+			req := connect.NewRequest(&sheetv1.DeleteRequest{ProjectId: uuid.NewString(), SheetId: uuid.NewString()})
+			req.Header().Set("Authorization", "Bearer "+tc.bearer)
+			_, err := client.CallUnary(t.Context(), req)
+			if connect.CodeOf(err) != tc.want {
+				t.Fatalf("code = %v, want %v (err: %v)", connect.CodeOf(err), tc.want, err)
+			}
+			var cerr *connect.Error
+			if !errors.As(err, &cerr) {
+				t.Fatalf("err = %T, want *connect.Error", err)
+			}
+			if got := cerr.Meta().Get("WWW-Authenticate") != ""; got != tc.wantChallenge {
+				t.Fatalf("WWW-Authenticate present = %v, want %v", got, tc.wantChallenge)
 			}
 		})
 	}
