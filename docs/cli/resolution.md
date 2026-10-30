@@ -64,7 +64,10 @@ Token, first hit wins (`internal/cli/token.go`, `internal/cli/profile.go`):
 - A profile's token goes only to the profile's own URL. Another URL fails with
   `ProfileHostMismatchError` (exit `2`) and nothing is sent.
 - A local profile, or none, on a remote command fails with `NotSignedInError` (exit `2`), hinting
-  `auth login --url`.
+  `auth login --url`, with `<server>` when no URL is known.
+- No profile on an in-process command fails with `NotSignedInError` (exit `2`), hinting
+  `auth login` without `--url`. A remote profile there fails the same way, naming the profile's
+  server: the command needs a sign-in on the machine that holds the database.
 - The access token is refreshed (RFC 6749 Section 6) when it expires within 60 seconds, or when
   the issuer sent no `expires_in` but a refresh token. The refresh runs under the lock and re-reads the profile first,
   so a second process uses the token the first one stored. Othra revokes the whole grant when a

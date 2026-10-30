@@ -28,8 +28,11 @@ func resolveLocal(cmd *cobra.Command) (Principal, error) {
 	if err != nil {
 		return Principal{}, err
 	}
-	if p == nil || p.URL != "" {
-		return Principal{}, &NotSignedInError{Profile: name}
+	if p == nil {
+		return Principal{}, &NotSignedInError{Profile: name, Local: true}
+	}
+	if p.URL != "" {
+		return Principal{}, &NotSignedInError{Profile: name, RemoteURL: p.URL}
 	}
 	v := p.Principal
 	return Principal{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -139,10 +140,18 @@ func TestResolveLocal_UsesOnlyALocalProfile(t *testing.T) {
 		t.Fatalf("principal = %+v", p)
 	}
 
-	if _, err := resolveLocal(parsedRoot(t, cfg, "--profile", "prod")); !IsNotSignedInError(err) {
+	_, err = resolveLocal(parsedRoot(t, cfg, "--profile", "prod"))
+	if !IsNotSignedInError(err) {
 		t.Fatalf("a remote profile's ids belong to another server; err = %v", err)
 	}
-	if _, err := resolveLocal(parsedRoot(t, cfg, "--profile", "nobody")); !IsNotSignedInError(err) {
+	if !strings.Contains(err.Error(), "https://app.example.com") || strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("err = %v, want it to name the server and offer no sign-in that cannot help", err)
+	}
+	_, err = resolveLocal(parsedRoot(t, cfg, "--profile", "nobody"))
+	if !IsNotSignedInError(err) {
 		t.Fatalf("err = %v, want NotSignedInError", err)
+	}
+	if !strings.Contains(err.Error(), "run `opensheet auth login --profile nobody` without --url") {
+		t.Fatalf("err = %v, want the local sign-in hint: an in-process command needs a sign-in on this server", err)
 	}
 }

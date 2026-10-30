@@ -46,6 +46,9 @@ func TestWhoami_AfterLogoutWithNoServerURLIsNotSignedIn(t *testing.T) {
 	if !IsNotSignedInError(err) || ExitCodeFor(err) != ExitUnauth {
 		t.Fatalf("err = %v (exit %d), want NotSignedInError exiting 2", err, ExitCodeFor(err))
 	}
+	if !strings.Contains(err.Error(), "run `opensheet auth login --url <server> --profile prod`") {
+		t.Fatalf("err = %v, want the remote sign-in hint: a local login here would open a local database", err)
+	}
 }
 
 func TestWhoami_LocalProfilePrintsTheStoredPrincipal(t *testing.T) {

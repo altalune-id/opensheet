@@ -67,15 +67,23 @@ func IsSessionExpiredError(err error) bool {
 	return ok
 }
 
-// NotSignedInError reports a profile holding no credential for the command: a remote sign-in for URL, or a local one when URL is empty.
+// NotSignedInError reports a profile holding no credential for the command: no sign-in for URL, none anywhere when URL is empty, none on this server when Local is set, or a sign-in at RemoteURL that an in-process command cannot use.
 type NotSignedInError struct {
-	Profile string
-	URL     string
+	Profile   string
+	URL       string
+	Local     bool
+	RemoteURL string
 }
 
 func (e *NotSignedInError) Error() string {
-	if e.URL == "" {
+	if e.RemoteURL != "" {
+		return fmt.Sprintf("profile %s is signed in to %s, but this command runs against the local database; run it on that server, signed in there", e.Profile, e.RemoteURL)
+	}
+	if e.Local {
 		return fmt.Sprintf("not signed in on this server (profile %s); run `opensheet auth login --profile %s` without --url", e.Profile, e.Profile)
+	}
+	if e.URL == "" {
+		return fmt.Sprintf("not signed in (profile %s); run `opensheet auth login --url <server> --profile %s`", e.Profile, e.Profile)
 	}
 	return fmt.Sprintf("profile %s is not signed in to %s; run `opensheet auth login --url %s --profile %s` or pass --token",
 		e.Profile, e.URL, e.URL, e.Profile)
