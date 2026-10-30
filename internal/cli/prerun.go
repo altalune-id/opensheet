@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 
 	"github.com/spf13/cobra"
@@ -17,34 +18,27 @@ func withCfg(cmd *cobra.Command) (*config.Config, error) {
 	return cfg, nil
 }
 
-//nolint:unparam // requireAuth is part of the documented CLI plumbing surface.
-func withPrincipal(cmd *cobra.Command, bootClient ClientBootFn, requireAuth bool) (Principal, error) {
-	cfg, err := withCfg(cmd)
-	if err != nil {
+func withPrincipal(cmd *cobra.Command) (Principal, error) {
+	if _, err := withCfg(cmd); err != nil {
 		return Principal{}, err
 	}
-	p, err := Resolve(cmd.Context(), cmd, cfg, bootClient)
-	if err != nil {
-		if !requireAuth && errors.Is(err, ErrNotSignedIn) {
-			return Principal{}, nil
-		}
-		return Principal{}, err
-	}
-	cmd.SetContext(ctxWithPrincipal(cmd.Context(), p))
-	return p, nil
+	return resolveLocal(cmd)
 }
 
-// TODO(future-tokens): fall back to a token minted from the session file once tokens.Issuer.Mint lands.
 func connFromCmd(cmd *cobra.Command, bootClient ClientBootFn) (*controlplane.Client, error) {
-	cfg, err := withCfg(cmd)
+	in, err := invocationFrom(cmd)
 	if err != nil {
 		return nil, err
 	}
-	tok, _, err := readToken(cmd)
+	r, err := resolveRemote(cmd.Context(), in, operatorHTTPClient())
 	if err != nil {
 		return nil, err
 	}
-	client, err := bootClient(cmd.Context(), cfg, tok)
+	return dial(cmd.Context(), bootClient, in.cfg, r.url, r.token)
+}
+
+func dial(ctx context.Context, bootClient ClientBootFn, cfg *config.Config, baseURL, token string) (*controlplane.Client, error) {
+	client, err := bootClient(ctx, cfg, baseURL, token)
 	if err != nil {
 		return nil, err
 	}

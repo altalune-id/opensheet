@@ -96,7 +96,7 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 | `oidc.issuer`                       | `""`                    | `required, mode:cloud`            | The Othra project issuer (`https://<othra>/p/<handle>`). Enables the OIDC button.         |
 | `oidc.clientID`                     | `""`                    | `required, mode:cloud`            | Confidential Othra client for the web flow.                                               |
 | `oidc.clientSecret`                 | `""`                    | `required, mode:cloud, secret`    | Paired with `clientID`.                                                                   |
-| `oidc.cliClientID`                  | `""`                    | `-`                               | Native public Othra client for `auth login`, redirect `http://127.0.0.1/callback`.        |
+| `oidc.cliClientID`                  | `""`                    | `-`                               | Native public Othra client for `auth login`; the API's RFC 9728 document names it.        |
 | `oidc.redirectPort`                 | `0`                     | `-`                               | Loopback port `auth login` binds; `0` picks a free one.                                   |
 | `oidc.endSessionOnLogout`           | `true`                  | `-`                               | Signing out also ends the Othra session (RP-Initiated Logout).                            |
 | `http.baseURL`                      | `""`                    | `required`                        | Public URL. Both resource identifiers derive from it.                                     |

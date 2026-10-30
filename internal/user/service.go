@@ -285,7 +285,10 @@ func (s *Service) refreshFromClaims(ctx context.Context, u *User, claims Claims)
 		return u, nil
 	}
 	if err := s.store.Save(ctx, u); err != nil {
-		if IsAlreadyExistsError(err) {
+		if dup, ok := errors.AsType[*AlreadyExistsError](err); ok {
+			if dup.Field == "email" {
+				return nil, &IdentityConflictError{Cause: err}
+			}
 			return nil, err
 		}
 		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: refresh", err)

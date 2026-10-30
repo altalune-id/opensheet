@@ -105,8 +105,8 @@ func (o *OIDCLogin) Execute(ctx context.Context, claims OIDCClaims) (session.Pri
 
 	if o.allowSignup != nil {
 		if err := o.allowSignup(ctx, claims.Email); err != nil {
-			if apperr, ok := apperror.AsAppError(err); ok {
-				return session.Principal{}, apperr
+			if _, ok := apperror.AsAppError(err); ok {
+				return session.Principal{}, err
 			}
 			return session.Principal{}, o.unexpected(ctx, "auth.OIDCLogin.Execute: allowSignup", err)
 		}
@@ -114,8 +114,8 @@ func (o *OIDCLogin) Execute(ctx context.Context, claims OIDCClaims) (session.Pri
 
 	u, _, err := o.ensureFromOIDC(ctx, EnsureClaims(claims))
 	if err != nil {
-		if apperr, ok := apperror.AsAppError(err); ok {
-			return session.Principal{}, apperr
+		if _, ok := apperror.AsAppError(err); ok {
+			return session.Principal{}, err
 		}
 		return session.Principal{}, o.unexpected(ctx, "auth.OIDCLogin.Execute: ensureFromOIDC", err)
 	}
@@ -133,8 +133,8 @@ func (o *OIDCLogin) Execute(ctx context.Context, claims OIDCClaims) (session.Pri
 		case o.isSignupRequired != nil && o.isSignupRequired(err):
 			// NOTE: login succeeds with a zero active tenant; the caller routes to /signup/complete.
 		default:
-			if apperr, ok := apperror.AsAppError(err); ok {
-				return session.Principal{}, apperr
+			if _, ok := apperror.AsAppError(err); ok {
+				return session.Principal{}, err
 			}
 			return session.Principal{}, o.unexpected(ctx, "auth.OIDCLogin.Execute: onboard", err)
 		}

@@ -1,6 +1,10 @@
 package authn
 
-import "errors"
+import (
+	"errors"
+
+	"altalune.id/opensheet/internal/platform/session"
+)
 
 // UnauthorizedError is the single opaque authentication failure.
 type UnauthorizedError struct{ causes error }
@@ -21,10 +25,16 @@ func IsUnauthorizedError(err error) bool {
 	return errors.As(err, &target)
 }
 
-// InsufficientScopeError names the scope the credential was missing.
-type InsufficientScopeError struct{ Scope string }
+// InsufficientScopeError names the scope the credential was missing, empty when the procedure declares none, and the source of the principal refused.
+type InsufficientScopeError struct {
+	Scope  string
+	Source session.Source
+}
 
 func (e *InsufficientScopeError) Error() string {
+	if e.Scope == "" {
+		return "authn: procedure declares no scope"
+	}
 	return "authn: credential lacks scope " + e.Scope
 }
 

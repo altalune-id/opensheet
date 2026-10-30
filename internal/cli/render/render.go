@@ -7,6 +7,8 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"altalune.id/opensheet/internal/platform/config"
 )
 
 // Format names one of the three canonical CLI output modes.
@@ -19,7 +21,7 @@ const (
 )
 
 // EnvVar is the environment variable read when --output is unset.
-const EnvVar = "OPENSHEET_OUTPUT"
+const EnvVar = config.EnvPrefix + "_OUTPUT"
 
 // Detect picks the output format: --output flag > OPENSHEET_OUTPUT env > TTY heuristic; unknown falls back to text.
 func Detect(cmd *cobra.Command) Format {

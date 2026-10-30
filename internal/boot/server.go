@@ -312,7 +312,8 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		sup.Register(listener)
 	}
 
-	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
+	apiRes := apiResource(cfg, log)
+	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs, apiRes)
 	dataHandler := buildDataHandler(cfg, caps, log, svcs)
 
 	mcpSurf, err := buildMCPSurface(cfg, log, svcs, apiSrv, tokenKeys)
@@ -356,6 +357,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		APIHandler:  apiHandler,
 		DataHandler: dataHandler,
 		MCP:         mcpSurf,
+		APIResource: apiRes,
 		Bundle:      bundle,
 		DefaultLoc:  defaultLoc,
 	})

@@ -15,7 +15,7 @@ func stubServerBoot(_ context.Context, _ *config.Config, _ ...boot.Option) (*boo
 	return &boot.Server{}, nil
 }
 
-func stubClientBoot(_ context.Context, cfg *config.Config, _ string) (*boot.Client, error) {
+func stubClientBoot(_ context.Context, cfg *config.Config, _, _ string) (*boot.Client, error) {
 	return &boot.Client{Cfg: cfg}, nil
 }
 
@@ -53,7 +53,7 @@ func TestRoot_VersionSubcommand(t *testing.T) {
 
 func TestRoot_PersistentFlagsRegistered(t *testing.T) {
 	root := NewRootCmd(stubServerBoot, stubClientBoot)
-	want := []string{"config", "token", "token-file", "output", "org", "project", "no-interactive", "log-level", "log-format"}
+	want := []string{"config", "url", "token", "token-file", "profile", "output", "org", "project", "no-interactive", "log-level", "log-format"}
 	for _, name := range want {
 		if f := root.PersistentFlags().Lookup(name); f == nil {
 			t.Errorf("persistent flag --%s must be registered", name)
@@ -96,10 +96,7 @@ func TestRoot_KnownSubcommandsRegistered(t *testing.T) {
 
 func TestRoot_AuthSubcommandsRegistered(t *testing.T) {
 	root := NewRootCmd(stubServerBoot, stubClientBoot)
-	var authCmd *bytes.Buffer
-	_ = authCmd
-	// Locate the auth group and verify its children.
-	names := map[string]bool{"login": false, "logout": false, "whoami": false, "token": false}
+	names := map[string]bool{"login": false, "logout": false, "whoami": false}
 	for _, c := range root.Commands() {
 		if c.Name() != "auth" {
 			continue
@@ -126,5 +123,56 @@ func TestRoot_ConfigLoadedViaPreRun(t *testing.T) {
 	root.SetArgs([]string{"version"})
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("execute: %v", err)
+	}
+}
+
+func TestRoot_OperatorCommandsRefuseRemoteFlags(t *testing.T) {
+	setSelfhostedEnv(t)
+	cases := [][]string{
+		{"migrate", "status", "--url", "https://app.example.com"},
+		{"org", "list", "--token", "tok"},
+		{"project", "list", "--token-file", "/dev/null"},
+		{"invite", "list", "--url", "https://app.example.com"},
+		{"serve", "--token", "tok"},
+		{"init", "--email", "a@b.co", "--url", "https://app.example.com"},
+		{"scheduler", "list", "--url", "https://app.example.com"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			booted := false
+			bootServer := func(context.Context, *config.Config, ...boot.Option) (*boot.Server, error) {
+				booted = true
+				return &boot.Server{}, nil
+			}
+			root := NewRootCmd(bootServer, stubClientBoot)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs(args)
+			err := root.ExecuteContext(context.Background())
+			if !IsRemoteFlagError(err) {
+				t.Fatalf("err = %v, want a RemoteFlagError", err)
+			}
+			if ExitCodeFor(err) != ExitInvalidArg {
+				t.Fatalf("exit = %d, want %d", ExitCodeFor(err), ExitInvalidArg)
+			}
+			if booted {
+				t.Fatal("the database was booted before the remote flag was refused")
+			}
+		})
+	}
+}
+
+func TestRoot_OperatorCommandsKeepProfile(t *testing.T) {
+	setSelfhostedEnv(t)
+	root := NewRootCmd(stubServerBoot, stubClientBoot)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"--profile", "ops", "org", "list"})
+	err := root.ExecuteContext(context.Background())
+	if IsRemoteFlagError(err) {
+		t.Fatalf("--profile picks the local sign-in and must stay allowed: %v", err)
+	}
+	if !IsNotSignedInError(err) {
+		t.Fatalf("err = %v, want NotSignedInError for the empty ops profile", err)
 	}
 }

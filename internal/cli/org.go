@@ -11,25 +11,25 @@ import (
 )
 
 // TODO(future-proto): switch to bootClient.Conn once api/org/v1 lands.
-func newOrgCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newOrgCmd(bootServer ServerBootFn) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "org",
 		Short:   "Manage organizations",
 		GroupID: "tenancy",
 	}
 	cmd.AddCommand(
-		newOrgListCmd(bootServer, bootClient),
-		newOrgCreateCmd(bootServer, bootClient),
+		newOrgListCmd(bootServer),
+		newOrgCreateCmd(bootServer),
 	)
 	return cmd
 }
 
-func newOrgListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newOrgListCmd(bootServer ServerBootFn) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List orgs the caller is a member of",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}
@@ -63,13 +63,13 @@ func newOrgListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Comm
 	}
 }
 
-func newOrgCreateCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newOrgCreateCmd(bootServer ServerBootFn) *cobra.Command {
 	var slug, name string
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new organization",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}

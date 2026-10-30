@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"altalune.id/opensheet/internal/platform/tokens"
@@ -72,5 +73,38 @@ func TestResourceMetadataAndChallengesAgree(t *testing.T) {
 	want := `Bearer resource_metadata="` + r.MetadataURL + `", error="insufficient_scope", scope="posts:write"`
 	if got := r.InsufficientScope("posts:write"); got != want {
 		t.Fatalf("InsufficientScope = %q, want %q", got, want)
+	}
+}
+
+func TestCLIMetadataHandlerAddsTheCLIClientID(t *testing.T) {
+	r, err := tokens.NewResource("https://app.example.com/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(cliClientID, method string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		r.CLIMetadataHandler("https://idp.example.com/p/app", []string{"apikeys:read"}, cliClientID).
+			ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, r.MetadataURL, nil))
+		return rec
+	}
+
+	rec := serve("cli-client", http.MethodGet)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("status = %d, content type = %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc[tokens.CLIClientIDMember] != "cli-client" || doc["resource"] != r.Identifier || doc["bearer_methods_supported"] == nil {
+		t.Fatalf("document = %v", doc)
+	}
+
+	plain := serve("", http.MethodGet)
+	if strings.Contains(plain.Body.String(), tokens.CLIClientIDMember) {
+		t.Fatalf("no CLI client configured, yet the document names one: %s", plain.Body.String())
+	}
+	if got := serve("cli-client", http.MethodPost); got.Code != http.StatusMethodNotAllowed || got.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("POST status = %d, Allow = %q", got.Code, got.Header().Get("Allow"))
 	}
 }

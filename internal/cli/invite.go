@@ -12,26 +12,26 @@ import (
 )
 
 // TODO(future-proto): switch to bootClient.Conn once api/invite/v1 lands.
-func newInviteCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newInviteCmd(bootServer ServerBootFn) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "invite",
 		Short:   "Manage invitations to the active org",
 		GroupID: "tenancy",
 	}
 	cmd.AddCommand(
-		newInviteListCmd(bootServer, bootClient),
-		newInviteSendCmd(bootServer, bootClient),
-		newInviteRevokeCmd(bootServer, bootClient),
+		newInviteListCmd(bootServer),
+		newInviteSendCmd(bootServer),
+		newInviteRevokeCmd(bootServer),
 	)
 	return cmd
 }
 
-func newInviteListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newInviteListCmd(bootServer ServerBootFn) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List pending invites for the active org",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}
@@ -74,13 +74,13 @@ func newInviteListCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.C
 	}
 }
 
-func newInviteSendCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newInviteSendCmd(bootServer ServerBootFn) *cobra.Command {
 	var email, role string
 	cmd := &cobra.Command{
 		Use:   "send",
 		Short: "Send an invite to a new member of the active org",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}
@@ -107,7 +107,7 @@ func newInviteSendCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.C
 	return cmd
 }
 
-func newInviteRevokeCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
+func newInviteRevokeCmd(bootServer ServerBootFn) *cobra.Command {
 	return &cobra.Command{
 		Use:   "revoke <id>",
 		Short: "Revoke a pending invite",
@@ -117,7 +117,7 @@ func newInviteRevokeCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra
 			if err != nil {
 				return fmt.Errorf("invite revoke: %q is not a uuid: %w", args[0], err)
 			}
-			p, err := withPrincipal(cmd, bootClient, true)
+			p, err := withPrincipal(cmd)
 			if err != nil {
 				return err
 			}

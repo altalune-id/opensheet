@@ -186,8 +186,10 @@ documents before it accepts a resource server:
    list a retired scope such as `apikeys:write`: key management stays in the console.
 3. Create a web client (confidential) with redirect URI `https://<host><basePath>/oauth/callback`
    and post-logout URI `https://<host><basePath>/`, and a CLI client (native, public) with redirect
-   URI `http://127.0.0.1/callback` (RFC 8252; any port matches). Mark both first-party.
-4. Link both clients to both resource servers with their scopes.
+   URI `http://127.0.0.1/callback` (RFC 8252; any port matches) and refresh tokens on, so
+   `auth login --url` gets `offline_access`. Mark both first-party.
+4. Link the web client to both resource servers, and the CLI client to the control plane, with
+   their scopes. The CLI needs `apikeys:read` for `Whoami`.
 5. Set `oidc.clientID`, `oidc.clientSecret` and `oidc.cliClientID`, and restart.
 6. Optional: to accept `othra_pt_` personal tokens, set `tokens.introspection.*` (and
    `mcp.introspection.*`) to each resource server's public id and introspection secret.

@@ -129,9 +129,8 @@ resource-pinned key fails it outright. Steps:
 
 - **CLI** is dual-mode, and so is its scope. In-process commands (`org`, `project`, `invite`) build
   `tenant.Context` from the principal `cli.Resolve` returns — the session file, or a token verified through
-  `Whoami` — and enter it with `tenant.Into`. The remote `blog` commands are a data-plane client instead:
-  `--org` / `--project` (or `OPENSHEET_ORG` / `OPENSHEET_PROJECT`, or the profile) become path slugs, and the API key
-  still has to agree with them.
+  `Whoami` — and enter it with `tenant.Into`. Remote commands (`todo`) send a token and the server
+  derives the org from the principal. No command is a data-plane client.
 - **Ingest** is credential-free machine push under `/hooks/{provider}/`. Provider identity _is_ the
   authorization (R4), and the surface establishes **no** tenant scope of its own — the template ships no
   providers. A provider handler must derive its org from the verified payload and enter it explicitly.

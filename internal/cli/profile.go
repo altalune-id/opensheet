@@ -1,79 +1,138 @@
 package cli
 
 import (
+	"context"
 	"errors"
-	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"altalune.id/opensheet/httpclient"
+	"altalune.id/opensheet/internal/platform/config"
 )
 
-// SECURITY: profiles are keyed by URL because a device credential issued by one instance must never be offered to another.
-type profile struct {
-	URL     string `json:"url"`
-	Org     string `json:"org,omitempty"`
-	Project string `json:"project,omitempty"`
-	Device  string `json:"device,omitempty"`
-}
+const (
+	defaultProfile = "default"
+	issuerTimeout  = 30 * time.Second
+	responseLimit  = 1 << 20
+)
 
-// HostMismatchError reports a saved profile's URL not matching the URL requested. SECURITY: a saved credential is bound to the host that issued it.
-type HostMismatchError struct {
-	Saved  string
-	Wanted string
-}
-
-func (e *HostMismatchError) Error() string {
-	return fmt.Sprintf("cli: saved credential for %q is not sent to %q", e.Saved, e.Wanted)
-}
-
-// IsHostMismatchError reports whether err is a HostMismatchError.
-func IsHostMismatchError(err error) bool {
-	var target *HostMismatchError
-	return errors.As(err, &target)
-}
-
-// SECURITY: a saved credential is offered only when its URL matches, or when a pre-URL-keying profile is adopted.
-func credentialFor(url string, p profile, explicitToken string) (string, error) {
-	if explicitToken != "" {
-		return explicitToken, nil
+// NOTE: precedence is --profile > OPENSHEET_PROFILE > "default".
+func profileName(cmd *cobra.Command) string {
+	if f := cmd.Root().PersistentFlags().Lookup("profile"); f != nil && f.Changed {
+		if v := strings.TrimSpace(f.Value.String()); v != "" {
+			return v
+		}
 	}
-	if p.URL != "" && p.URL != url {
-		return "", &HostMismatchError{Saved: p.URL, Wanted: url}
+	if v := strings.TrimSpace(os.Getenv(envVar("PROFILE"))); v != "" {
+		return v
 	}
-	return p.Device, nil
+	return defaultProfile
 }
 
-// NOTE: a legacy session file with no profiles map is adopted for url, never treated as a mismatch.
-func loadProfile(path, url string) (profile, error) {
-	sf, err := loadSessionFile(path)
+func sessionStore(cmd *cobra.Command) (profileStore, error) {
+	cfg := configFromCtx(cmd.Context())
+	if cfg == nil || cfg.Session.Path == "" {
+		return profileStore{}, errors.New("cli: session.path is not set")
+	}
+	return profileStore{path: cfg.Session.Path}, nil
+}
+
+// SECURITY: the operator chose every URL this client reaches, so private hosts are allowed; redirects are never followed.
+func operatorHTTPClient() *http.Client {
+	c := httpclient.New(
+		httpclient.WithAllowPrivateHosts(true),
+		httpclient.WithTimeout(issuerTimeout),
+		httpclient.WithResponseBodyLimit(responseLimit),
+	)
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
+}
+
+type invocation struct {
+	cfg     *config.Config
+	store   profileStore
+	profile string
+	url     string
+	token   string
+}
+
+func invocationFrom(cmd *cobra.Command) (invocation, error) {
+	cfg, err := withCfg(cmd)
 	if err != nil {
-		return profile{}, err
+		return invocation{}, err
 	}
-	if sf == nil {
-		return profile{}, nil
+	store, err := sessionStore(cmd)
+	if err != nil {
+		return invocation{}, err
 	}
-	if p, ok := sf.Profiles[url]; ok {
-		return p, nil
+	token, err := resolveToken(cmd)
+	if err != nil {
+		return invocation{}, err
 	}
-	if len(sf.Profiles) > 0 {
-		return profile{}, nil
-	}
-	adopted := profile{URL: url}
-	sf.Profiles = map[string]profile{url: adopted}
-	if err := saveSessionFile(path, sf); err != nil {
-		return profile{}, err
-	}
-	return adopted, nil
+	return invocation{cfg: cfg, store: store, profile: profileName(cmd), url: explicitURL(cmd), token: token}, nil
 }
 
-func saveProfile(path string, p profile) error {
-	sf, err := loadSessionFile(path)
+// NOTE: precedence is --url > OPENSHEET_URL > the profile's URL > config http.baseURL.
+func (in invocation) baseURL(p *profile) string {
+	if in.url != "" {
+		return in.url
+	}
+	if p != nil && p.URL != "" {
+		return p.URL
+	}
+	if in.cfg != nil {
+		return strings.TrimSpace(in.cfg.HTTP.BaseURL)
+	}
+	return ""
+}
+
+type remote struct {
+	url         string
+	token       string
+	fromProfile bool
+}
+
+// SECURITY: precedence is --token > --token-file > OPENSHEET_TOKEN > the profile's token, sent only to the profile's own URL.
+func resolveRemote(ctx context.Context, in invocation, httpClient *http.Client) (remote, error) {
+	if in.token != "" {
+		return in.explicitRemote()
+	}
+	p, err := in.store.load(in.profile)
 	if err != nil {
-		return err
+		return remote{}, err
 	}
-	if sf == nil {
-		sf = &sessionFile{}
+	url := in.baseURL(p)
+	if url == "" {
+		return remote{}, &MissingURLError{}
 	}
-	if sf.Profiles == nil {
-		sf.Profiles = make(map[string]profile)
+	if err := checkServerURL(url); err != nil {
+		return remote{}, err
 	}
-	sf.Profiles[p.URL] = p
-	return saveSessionFile(path, sf)
+	src := tokenSource{store: in.store, name: in.profile, httpClient: httpClient, now: time.Now}
+	access, err := src.accessToken(ctx, url)
+	if err != nil {
+		return remote{}, err
+	}
+	return remote{url: url, token: access, fromProfile: true}, nil
+}
+
+// NOTE: an explicit token reads the session file only for a URL, and only when none was given, so a broken file never blocks it.
+func (in invocation) explicitRemote() (remote, error) {
+	var p *profile
+	if in.url == "" {
+		p, _ = in.store.load(in.profile)
+	}
+	url := in.baseURL(p)
+	if url == "" {
+		return remote{}, &MissingURLError{}
+	}
+	// SECURITY: RFC 6750 Section 5.3: a bearer token never travels over plain http to a remote host.
+	if err := checkServerURL(url); err != nil {
+		return remote{}, err
+	}
+	return remote{url: url, token: in.token}, nil
 }

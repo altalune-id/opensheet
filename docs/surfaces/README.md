@@ -31,7 +31,8 @@ outside world on a tenant's behalf. Seven, on two axes.
 
 Every mount is prefixed by `http.basePath` when one is set. The one exception is the RFC 9728
 metadata documents of the control plane and MCP, which the well-known URI anchors at the host root
-([`mcp`](../mcp/README.md)).
+([`mcp`](../mcp/README.md)). The control plane's document also names `cli_client_id`
+(`oidc.cliClientID`), the native client `auth login --url` signs in with ([`cli`](../cli/commands.md)).
 
 The package is `internal/dataplane/`, never `internal/data/`: `data` names a layer, not a
 domain, and reads as persistence next to `internal/platform/db`. Layer-named packages are

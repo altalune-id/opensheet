@@ -43,8 +43,11 @@ const (
 	introspectorSecret = "rs-secret"
 	mcpProtocolHeader  = "application/json, text/event-stream"
 
+	cliClientID = "cli-client"
+
 	projectListProcedure     = "/api/project.v1.ProjectService/ListProjects"
 	spreadsheetListProcedure = "/api/spreadsheet.v1.SpreadsheetService/List"
+	whoamiProcedure          = "/api/auth.v1.AuthService/Whoami"
 )
 
 type tokenIssuer struct {
@@ -85,7 +88,7 @@ func newMCPFixture(t *testing.T, opts mcpOpts) *mcpFixture {
 	issuer := newTokenIssuer(t)
 	cfg := newSmokeCfg(t)
 	cfg.Mode = config.ModeCloud
-	cfg.OIDC = config.OIDCConfig{Issuer: issuer.url, ClientID: "mcp-client", ClientSecret: "mcp-secret"}
+	cfg.OIDC = config.OIDCConfig{Issuer: issuer.url, ClientID: "mcp-client", ClientSecret: "mcp-secret", CLIClientID: cliClientID}
 	cfg.HTTP.CSP.Enabled = true
 	cfg.API.Enabled = true
 	cfg.API.KeyPrefix = apikey.DefaultPrefix
@@ -357,8 +360,8 @@ func TestMCP_ControlPlaneEnforcesScopesOnTokens(t *testing.T) {
 
 	unauth := f.connectRPC(t, "not.a.token", projectListProcedure, map[string]any{})
 	require.Equal(t, http.StatusUnauthorized, unauth.Code)
-	require.Equal(t, `Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`"`, unauth.Header().Get("WWW-Authenticate"),
-		"a 401 on Connect must point the client at the API's RFC 9728 document")
+	require.Equal(t, `Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`", error="invalid_token"`, unauth.Header().Get("WWW-Authenticate"),
+		"a 401 for a presented token on Connect must say invalid_token and point at the API's RFC 9728 document")
 }
 
 // TestMCP_EachResourceServesItsOwnMetadata pins the two RFC 9728 documents Othra verifies before it mints tokens.
@@ -371,6 +374,7 @@ func TestMCP_EachResourceServesItsOwnMetadata(t *testing.T) {
 			Resource             string   `json:"resource"`
 			AuthorizationServers []string `json:"authorization_servers"`
 			ScopesSupported      []string `json:"scopes_supported"`
+			CLIClientID          string   `json:"cli_client_id"`
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
 		require.Equal(t, resource, doc.Resource)
@@ -379,7 +383,29 @@ func TestMCP_EachResourceServesItsOwnMetadata(t *testing.T) {
 		for _, scope := range doc.ScopesSupported {
 			require.True(t, authn.Mintable(scope), "%s advertises %q, which no client may register", path, scope)
 		}
+		if path == apiMetadataPath {
+			require.Equal(t, cliClientID, doc.CLIClientID, "the CLI learns its client id from the API document")
+			require.Contains(t, doc.ScopesSupported, authn.ScopeAPIKeysRead, "the CLI needs apikeys:read for Whoami")
+			continue
+		}
+		require.Empty(t, doc.CLIClientID, "the CLI signs in for the API, never for MCP")
 	}
+}
+
+// TestMCP_WhoamiNamesTheActiveProject gives a remote CLI the project its token principal acts in.
+func TestMCP_WhoamiNamesTheActiveProject(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	tok := f.issuer.mint(t, controlAudience, []string{authn.ScopeAPIKeysRead})
+
+	rec := f.connectRPC(t, tok, whoamiProcedure, map[string]any{})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var who struct {
+		Email           string `json:"email"`
+		ActiveProjectID string `json:"activeProjectId"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &who))
+	require.Equal(t, tokenEmail, who.Email)
+	require.Equal(t, f.projectID, who.ActiveProjectID)
 }
 
 // TestMCP_KeyScopeIsCheckedPerTool keeps the same rule true of the other credential class, and proves the surface reaches the shared Connect handlers rather than a second implementation.

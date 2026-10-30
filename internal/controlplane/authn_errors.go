@@ -10,6 +10,7 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tokens"
 )
 
@@ -28,6 +29,9 @@ func translateAuthnErrors(resource *tokens.Resource) connect.UnaryInterceptorFun
 					codes.PermissionDenied,
 					&apperrorv1.ErrorDetail{Code: apperror.CodeForbidden},
 				).WithCause(err)
+				if scope.Scope == "" || scope.Source != session.SourceToken {
+					return nil, ae
+				}
 				return nil, withChallenge(connect.CodePermissionDenied, ae, resource, func(r *tokens.Resource) string {
 					return r.InsufficientScope(scope.Scope)
 				})
@@ -55,7 +59,7 @@ func translateAuthnErrors(resource *tokens.Resource) connect.UnaryInterceptorFun
 					codes.Unauthenticated,
 					&apperrorv1.ErrorDetail{Code: apperror.CodeUnauthenticated},
 				).WithCause(err)
-				return nil, withChallenge(connect.CodeUnauthenticated, ae, resource, (*tokens.Resource).Challenge)
+				return nil, withChallenge(connect.CodeUnauthenticated, ae, resource, unauthorizedChallenge(req))
 			}
 			return resp, err
 		}
@@ -70,4 +74,12 @@ func withChallenge(code connect.Code, ae *apperror.AppError, resource *tokens.Re
 	cerr := connect.NewError(code, ae)
 	cerr.Meta().Set("WWW-Authenticate", challenge(resource))
 	return cerr
+}
+
+// SECURITY: RFC 6750 Section 3.1: only the error code tells "no token" from "token refused"; why it was refused stays masked.
+func unauthorizedChallenge(req connect.AnyRequest) func(*tokens.Resource) string {
+	if authn.CredentialFromHeader(req.Header()) == "" {
+		return (*tokens.Resource).Challenge
+	}
+	return (*tokens.Resource).InvalidToken
 }

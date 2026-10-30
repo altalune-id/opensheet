@@ -12,6 +12,10 @@ Rules: [`surfaces`](../surfaces/README.md) · Scope strings: [`scopes`](../scope
 | `{basePath}/mcp`                                      | `MCP`    | bearer     |
 | `/.well-known/oauth-protected-resource{basePath}/mcp` | `Probes` | none       |
 
+The control plane's document, `/.well-known/oauth-protected-resource{basePath}/api`, adds a
+`cli_client_id` member for `auth login --url`; the MCP document never does, as the CLI signs in for
+`/api` only.
+
 Streamable HTTP, stateless, JSON. `MCP` chain = `edge` + `RecoverJSON` — no session, no i18n,
 no SSR gate (R5).
 

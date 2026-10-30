@@ -28,12 +28,14 @@ func TestWhoami_MissingAuth_ReturnsUnauthenticated(t *testing.T) {
 func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 	userID := uuid.New()
 	orgID := uuid.New()
+	projectID := uuid.New()
 	p := session.Principal{
-		UserID:      userID,
-		Email:       "alice@example.com",
-		Name:        "Alice",
-		ActiveOrgID: orgID,
-		Scopes:      []string{"todo.read", "todo.write", authn.ScopeAPIKeysRead},
+		UserID:          userID,
+		Email:           "alice@example.com",
+		Name:            "Alice",
+		ActiveOrgID:     orgID,
+		ActiveProjectID: projectID,
+		Scopes:          []string{"todo.read", "todo.write", authn.ScopeAPIKeysRead},
 	}
 	h := newHarness(t, p)
 
@@ -65,6 +67,9 @@ func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 	}
 	if resp.Msg.ActiveOrgId != orgID.String() {
 		t.Errorf("active_org_id = %q", resp.Msg.ActiveOrgId)
+	}
+	if resp.Msg.ActiveProjectId != projectID.String() {
+		t.Errorf("active_project_id = %q, want %q", resp.Msg.ActiveProjectId, projectID.String())
 	}
 	if resp.Msg.ActiveOrgSlug != "acme" {
 		t.Errorf("active_org_slug = %q, want acme", resp.Msg.ActiveOrgSlug)

@@ -14,7 +14,7 @@ Worked example: `internal/dataplane/blog.go`, ported through `internal/boot/shim
 6. Mutations read `ifMatchVersion(r.Header.Get("If-Match"))`. A missing header is `PreconditionRequiredError` (428), an unparseable one `BadRequestError` (400), and a stale version surfaces as 412 through `blog.IsStaleVersionError` in `statusFor`.
 7. Creates honour `Idempotency-Key`: `h.idem.reserve`, then `defer h.idem.release`, then `h.idem.store` once the write succeeded.
 8. Route it in `NewHandler` and add the matching row to `VerbTable()` in `internal/dataplane/registry.go`.
-9. If the CLI should walk it, extend `internal/dataplane/client.go` and `internal/cli/blog.go` — R11 says the CLI is a client of the plane, not a second owner of the verb.
+9. If the CLI should walk it, add a data-plane client in `internal/dataplane/` and a command in `internal/cli/` — R11 says the CLI is a client of the plane, not a second owner of the verb. opensheet ships neither.
 10. `make check`.
 
 ## Tenancy
