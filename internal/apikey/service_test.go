@@ -82,13 +82,15 @@ func TestAuthenticateRejectsRevokedKey(t *testing.T) {
 	assert.False(t, apikey.IsNotFoundError(err), "a revoked key must not surface as a distinguishable NotFoundError")
 }
 
-func TestAuthenticateCollapsesStoreOutage(t *testing.T) {
+func TestAuthenticateReportsAStoreOutageAsUnavailable(t *testing.T) {
 	store := fakes.NewAPIKey()
 	store.BySecretHashErr = errors.New("connection refused")
 	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
 
-	_, err := auth.Authenticate(t.Context(), apikey.DefaultPrefix+"whatever")
-	assert.True(t, authn.IsUnauthorizedError(err), "a store outage must collapse to the same opaque error as a bad credential, got %T: %v", err, err)
+	p, err := auth.Authenticate(t.Context(), apikey.DefaultPrefix+"whatever")
+	assert.True(t, authn.IsUnavailableError(err), "a store outage must not read as a bad key, got %T: %v", err, err)
+	assert.False(t, authn.IsUnauthorizedError(err), "got %T: %v", err, err)
+	assert.Equal(t, session.Principal{}, p)
 }
 
 func TestAuthenticateReturnsAnIdenticalErrorForEveryRejectionCause(t *testing.T) {
@@ -130,13 +132,6 @@ func TestAuthenticateReturnsAnIdenticalErrorForEveryRejectionCause(t *testing.T)
 				k.ExpiresAt = &past
 				store.Seed(k)
 				return plaintext
-			},
-		},
-		{
-			name: "store outage",
-			setup: func(_ *testing.T, store *fakes.APIKey) string {
-				store.BySecretHashErr = errors.New("connection refused")
-				return apikey.DefaultPrefix + "whatever"
 			},
 		},
 	}

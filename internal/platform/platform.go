@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/altalune-id/oidcrp"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"altalune.id/opensheet/authl"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/db"
@@ -36,13 +36,15 @@ type Kernel struct {
 	Sealer   sealer.Sealer
 	Verifier tokens.Verifier
 	Mail     mailer.Mailer
-	AltAuth  *authl.Client
-	Tracer   trace.Tracer
-	Meter    metric.Meter
-	Notify   []apperror.ReportSink
-	Nano     NanoIDFunc
-	Caps     capabilities.Capabilities
-	Outbox   outbox.Store
+	AltAuth  *oidcrp.Client
+	// OIDCStateSecret signs the sign-in state and last-user cookies; never empty while AltAuth is set.
+	OIDCStateSecret []byte
+	Tracer          trace.Tracer
+	Meter           metric.Meter
+	Notify          []apperror.ReportSink
+	Nano            NanoIDFunc
+	Caps            capabilities.Capabilities
+	Outbox          outbox.Store
 	// Queue is always non-nil: Disabled(log) when queue.enabled is false.
 	Queue *queue.Client
 

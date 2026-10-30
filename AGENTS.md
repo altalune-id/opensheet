@@ -5,10 +5,11 @@ Guide for AI coding agents (Claude Code, Codex, Cursor, …). Read before touchi
 ## What opensheet is
 
 Multitenant Go template — Templ + HTMX + Connect-RPC on one HTTP listener. Downstream
-services fork it and swap the domain modules. Signatures under `authl/`, `httpclient/`,
+services fork it and swap the domain modules. Signatures under `httpclient/`,
 `logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`, `slug/`, `telemetry/`, `worker/`
 and `internal/platform/` are copied verbatim into forks — a signature change costs every
-fork churn, so land tests first. `mcp/` is held to that boundary by the `mcp-purity`
+fork churn, so land tests first. The OIDC relying party and resource server come from the
+`github.com/altalune-id/oidcrp` and `oauthrs` modules; never copy them into the tree. `mcp/` is held to that boundary by the `mcp-purity`
 depguard rule: stdlib and the MCP Go SDK only.
 
 ## Read first
@@ -133,7 +134,7 @@ scoped API keys.
   [`docs/multitenancy/opensheet.md`](docs/multitenancy/opensheet.md).
 - **API keys** — the template's keys with `api.keyPrefix` set to `osk_`; `ResourceIDs` name
   sheets. The scope catalog is opensheet's: `sheets:*`, `spreadsheets:*`, `credentials:*`,
-  `cache:purge`. These strings are the wire contract with authl's Resource Server catalog.
+  `cache:purge`. These strings are the wire contract with the scopes registered on opensheet's resource servers in Othra.
 - **Error codes** — CRD, SPR, SHT and GSH are in [`docs/errors/opensheet.md`](docs/errors/opensheet.md).
   Append-only.
 - **Config** — opensheet's keys and its stricter Postgres rules:

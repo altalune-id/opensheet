@@ -196,7 +196,7 @@ func probeCookie(t *testing.T, srv *boot.Server, p session.Principal) *http.Cook
 	require.NoError(t, srv.Platform.Sessions.Save(context.Background(), sid, p, time.Now().Add(time.Hour)))
 	return &http.Cookie{
 		Name:  web.SessionCookieName,
-		Value: web.SignCookie(srv.StateSecret, sid),
+		Value: web.SignCookie(srv.Platform.OIDCStateSecret, sid),
 	}
 }
 
@@ -207,7 +207,7 @@ func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
 	srv, _ := newScopeProbeServer(t, config.ModeSelfhosted, func(c *config.Config) {
 		c.HTTP.StateSecret = encoded
 	})
-	require.Equal(t, raw, srv.StateSecret, "boot must decode http.stateSecret once and share those bytes")
+	require.Equal(t, raw, srv.Platform.OIDCStateSecret, "boot must decode http.stateSecret once and share those bytes")
 
 	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
 		Email: "secret-probe@example.com", Name: "Secret Probe", Source: user.SourceLocal,
@@ -225,7 +225,7 @@ func TestBootServer_SessionCookiesUseTheResolvedStateSecret(t *testing.T) {
 		srv.Web.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	require.Equal(t, http.StatusOK, status(srv.StateSecret),
+	require.Equal(t, http.StatusOK, status(srv.Platform.OIDCStateSecret),
 		"a cookie signed with the resolved secret must load the session")
 	require.Equal(t, http.StatusSeeOther, status([]byte(encoded)),
 		"a cookie signed with the raw config string must not authenticate")
@@ -421,7 +421,8 @@ func stubIssuer(t *testing.T) string {
 			"jwks_uri": "` + ts.URL + `/jwks",
 			"response_types_supported": ["code"],
 			"subject_types_supported": ["public"],
-			"id_token_signing_alg_values_supported": ["RS256"]
+			"id_token_signing_alg_values_supported": ["RS256"],
+			"code_challenge_methods_supported": ["S256"]
 		}`))
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {

@@ -2,8 +2,6 @@ package boot_test
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"maps"
@@ -15,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/altalune-id/oidcrp/oidcrptest"
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/opensheet/internal/apikey"
@@ -33,79 +32,42 @@ import (
 )
 
 const (
-	mcpPath           = "/mcp"
-	mcpAudience       = "http://127.0.0.1/mcp"
-	controlAudience   = "http://127.0.0.1/api"
-	tokenSubject      = "mcp-agent-subject"
-	tokenEmail        = "mcp-agent@example.com"
-	mcpMetadataPath   = "/.well-known/oauth-protected-resource/mcp"
-	mcpProtocolHeader = "application/json, text/event-stream"
+	mcpPath            = "/mcp"
+	mcpAudience        = "http://127.0.0.1/mcp"
+	controlAudience    = "http://127.0.0.1/api"
+	tokenSubject       = "mcp-agent-subject"
+	tokenEmail         = "mcp-agent@example.com"
+	mcpMetadataPath    = "/.well-known/oauth-protected-resource/mcp"
+	apiMetadataPath    = "/.well-known/oauth-protected-resource/api"
+	introspectorID     = "rs-public-id"
+	introspectorSecret = "rs-secret"
+	mcpProtocolHeader  = "application/json, text/event-stream"
 
-	projectListProcedure = "/api/project.v1.ProjectService/ListProjects"
+	projectListProcedure     = "/api/project.v1.ProjectService/ListProjects"
+	spreadsheetListProcedure = "/api/spreadsheet.v1.SpreadsheetService/List"
 )
 
 type tokenIssuer struct {
-	url  string
-	priv ed25519.PrivateKey
+	idp *oidcrptest.IDP
+	url string
 }
 
 func newTokenIssuer(t *testing.T) *tokenIssuer {
 	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(nil)
-	require.NoError(t, err)
-
-	iss := &tokenIssuer{priv: priv}
-	mux := http.NewServeMux()
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-	iss.url = ts.URL
-
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"issuer": "` + ts.URL + `",
-			"authorization_endpoint": "` + ts.URL + `/authorize",
-			"token_endpoint": "` + ts.URL + `/token",
-			"jwks_uri": "` + ts.URL + `/jwks",
-			"response_types_supported": ["code"],
-			"subject_types_supported": ["public"],
-			"id_token_signing_alg_values_supported": ["EdDSA"]
-		}`))
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","use":"sig","kid":"k1","x":"` +
-			base64.RawURLEncoding.EncodeToString(pub) + `"}]}`))
-	})
-	return iss
+	idp := oidcrptest.New(t)
+	idp.User.Subject = tokenSubject
+	idp.Introspector(introspectorID, introspectorSecret)
+	return &tokenIssuer{idp: idp, url: idp.Issuer()}
 }
 
 func (i *tokenIssuer) mint(t *testing.T, audience string, scopes []string) string {
 	t.Helper()
-	now := time.Now()
-	claims := map[string]any{
-		"iss":   i.url,
-		"sub":   tokenSubject,
-		"aud":   audience,
-		"iat":   now.Unix(),
-		"exp":   now.Add(time.Hour).Unix(),
-		"email": tokenEmail,
-		"scope": strings.Join(scopes, " "),
-	}
-	header, err := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "JWT", "kid": "k1"})
-	require.NoError(t, err)
-	payload, err := json.Marshal(claims)
-	require.NoError(t, err)
-
-	signing := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
-	sig := ed25519.Sign(i.priv, []byte(signing))
-	return signing + "." + base64.RawURLEncoding.EncodeToString(sig)
+	return i.idp.AccessToken(map[string]any{"aud": audience, "scope": strings.Join(scopes, " ")})
 }
 
 type mcpOpts struct {
-	enabled        bool
-	appsUI         bool
-	challengeToken string
+	enabled bool
+	appsUI  bool
 }
 
 type mcpFixture struct {
@@ -123,17 +85,15 @@ func newMCPFixture(t *testing.T, opts mcpOpts) *mcpFixture {
 	issuer := newTokenIssuer(t)
 	cfg := newSmokeCfg(t)
 	cfg.Mode = config.ModeCloud
-	cfg.OIDC = config.OIDCConfig{Issuer: stubIssuer(t), ClientID: "mcp-client", ClientSecret: "mcp-secret"}
+	cfg.OIDC = config.OIDCConfig{Issuer: issuer.url, ClientID: "mcp-client", ClientSecret: "mcp-secret"}
 	cfg.HTTP.CSP.Enabled = true
 	cfg.API.Enabled = true
 	cfg.API.KeyPrefix = apikey.DefaultPrefix
-	cfg.Tokens = tokens.Config{Issuer: issuer.url, Audience: controlAudience}
-	cfg.MCP = config.MCPConfig{
-		Enabled: opts.enabled, AppsUI: opts.appsUI, Audience: mcpAudience,
-		ChallengeToken: opts.challengeToken,
-	}
+	introspection := tokens.IntrospectionConfig{ClientID: introspectorID, ClientSecret: introspectorSecret}
+	cfg.Tokens = tokens.Config{Issuer: issuer.url, Audience: controlAudience, Introspection: introspection}
+	cfg.MCP = config.MCPConfig{Enabled: opts.enabled, AppsUI: opts.appsUI, Audience: mcpAudience, Introspection: introspection}
 
-	seed, err := boot.BootServer(context.Background(), cfg)
+	seed, err := boot.BootServer(context.Background(), cfg, boot.WithOIDCHTTPClient(issuer.idp.Client()))
 	require.NoError(t, err)
 	seedUser, err := seed.Users.Create(context.Background(), user.CreateRequest{
 		Email: "mcp-seed@example.com", Name: "MCP Seed", Source: user.SourceOIDC,
@@ -144,14 +104,14 @@ func newMCPFixture(t *testing.T, opts mcpOpts) *mcpFixture {
 	require.NoError(t, seed.Close())
 
 	capture := &captureLog{}
-	srv, err := boot.BootServer(context.Background(), cfg, boot.WithLogger(slog.New(capture)))
+	srv, err := boot.BootServer(context.Background(), cfg, boot.WithLogger(slog.New(capture)), boot.WithOIDCHTTPClient(issuer.idp.Client()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Close() })
 	require.True(t, srv.Onboarded, "the fixture must be past the onboarding gate")
 
 	ctx := context.Background()
 	owner, err := srv.Users.EnsureFromOIDC(ctx, user.Claims{
-		Issuer: issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent",
+		Issuer: issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent",
 	})
 	require.NoError(t, err)
 	o, err := srv.Orgs.Create(ctx, org.CreateRequest{Slug: "mcp-org", Name: "MCP Org", OwnerID: owner.ID})
@@ -313,8 +273,8 @@ func (f *mcpFixture) connect(t *testing.T, credential string) *httptest.Response
 	return rec
 }
 
-// TestMCP_ScopelessJWTCannotCallATool is the S7-vs-S2 guard in R4: the control plane lets a JWT principal skip its scope table because a signed-in human carries their own authority, but an MCP JWT is a delegated grant an agent holds, so every tool is scope-checked, JWT included.
-func TestMCP_ScopelessJWTCannotCallATool(t *testing.T) {
+// TestMCP_TokenWithoutTheToolScopeGetsAStepUpChallenge is the R4 S7 rule for OAuth tokens: every tool is scope-checked, and a missing scope is an RFC 6750 403 before dispatch, so the host can ask for it.
+func TestMCP_TokenWithoutTheToolScopeGetsAStepUpChallenge(t *testing.T) {
 	f := newMCPFixture(t, mcpOpts{enabled: true})
 
 	tests := []struct {
@@ -330,18 +290,95 @@ func TestMCP_ScopelessJWTCannotCallATool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			token := f.issuer.mint(t, mcpAudience, tt.scopes)
 			rec := f.call(t, token, callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
-			require.Equal(t, http.StatusOK, rec.Code,
-				"the JWT must authenticate, or this guard measures authentication rather than scope; body=%s", rec.Body.String())
-
-			denied := scopeDeniedFor(t, rec, authn.ScopeSheetsRead)
 			if tt.wantDenied {
-				require.True(t, denied,
-					"R4/S7: a JWT holding %v called project_list; an MCP JWT is scope-checked like a key; body=%s", tt.scopes, rec.Body.String())
+				require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+				challenge := rec.Header().Get("WWW-Authenticate")
+				require.Contains(t, challenge, `error="insufficient_scope"`)
+				require.Contains(t, challenge, `scope="`+authn.ScopeSheetsRead+`"`)
+				require.Contains(t, challenge, `resource_metadata="http://127.0.0.1`+mcpMetadataPath+`"`)
 				return
 			}
-			require.False(t, denied,
-				"a JWT holding the tool's scope was denied it; body=%s", rec.Body.String())
+			require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+			require.False(t, scopeDeniedFor(t, rec, authn.ScopeSheetsRead),
+				"a token holding the tool's scope was denied it; body=%s", rec.Body.String())
 		})
+	}
+}
+
+// TestMCP_IDTokenIsNeverAnAccessToken pins RFC 9068's typ check on both resources.
+func TestMCP_IDTokenIsNeverAnAccessToken(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	now := time.Now()
+	for _, aud := range []string{mcpAudience, controlAudience} {
+		idToken := f.issuer.idp.IDToken(map[string]any{
+			"iss": f.issuer.url, "sub": tokenSubject, "aud": aud, "client_id": "test-client", "jti": "j1",
+			"scope": authn.ScopeSheetsRead, "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})
+		require.Equal(t, http.StatusUnauthorized, f.call(t, idToken, listToolsBody()).Code, "an ID token opened /mcp")
+		require.True(t, credentialRejected(f.connect(t, idToken)), "an ID token opened /api")
+	}
+}
+
+// TestMCP_PersonalTokenIsRevokedAtOnce is the introspection path: a personal token works until Othra revokes it, and the next call is refused.
+func TestMCP_PersonalTokenIsRevokedAtOnce(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	const pt = tokens.PersonalTokenPrefix + "boot-test"
+	f.issuer.idp.Opaque(pt, map[string]any{
+		"aud": controlAudience, "sub": tokenSubject, "scope": authn.ScopeSheetsRead, "exp": time.Now().Add(time.Hour).Unix(),
+	})
+
+	require.Equal(t, http.StatusOK, f.connect(t, pt).Code, "a live personal token must reach the control plane")
+	f.issuer.idp.Revoke(pt)
+	require.True(t, credentialRejected(f.connect(t, pt)), "a revoked personal token still opened the control plane")
+}
+
+// TestMCP_APIKeyIsNeverIntrospected keeps an app credential inside the app, even a wrong one.
+func TestMCP_APIKeyIsNeverIntrospected(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	before := f.issuer.idp.Introspections()
+	f.connect(t, f.readKey)
+	f.connect(t, f.readKey+"x")
+	f.call(t, f.readKey+"x", listToolsBody())
+	require.Equal(t, before, f.issuer.idp.Introspections(), "an API key reached the issuer's introspection endpoint")
+}
+
+// TestMCP_ControlPlaneEnforcesScopesOnTokens closes the scope gap: a token principal on Connect is held to the RPC scope table.
+func TestMCP_ControlPlaneEnforcesScopesOnTokens(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	read := f.issuer.mint(t, controlAudience, []string{authn.ScopeSheetsRead})
+
+	require.Equal(t, http.StatusOK, f.connectRPC(t, read, projectListProcedure, map[string]any{}).Code)
+	denied := f.connectRPC(t, read, spreadsheetListProcedure, map[string]any{"projectId": f.projectID})
+	require.Equal(t, http.StatusForbidden, denied.Code, "a token without spreadsheets:read listed spreadsheets; body=%s", denied.Body.String())
+	require.Equal(t,
+		`Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`", error="insufficient_scope", scope="`+authn.ScopeSpreadsheetsRead+`"`,
+		denied.Header().Get("WWW-Authenticate"), "a scope denial on Connect must name the scope to ask for")
+	require.Contains(t, denied.Body.String(), apperror.CodeForbidden, "the body keeps the canonical envelope")
+
+	unauth := f.connectRPC(t, "not.a.token", projectListProcedure, map[string]any{})
+	require.Equal(t, http.StatusUnauthorized, unauth.Code)
+	require.Equal(t, `Bearer resource_metadata="http://127.0.0.1`+apiMetadataPath+`"`, unauth.Header().Get("WWW-Authenticate"),
+		"a 401 on Connect must point the client at the API's RFC 9728 document")
+}
+
+// TestMCP_EachResourceServesItsOwnMetadata pins the two RFC 9728 documents Othra verifies before it mints tokens.
+func TestMCP_EachResourceServesItsOwnMetadata(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	for path, resource := range map[string]string{mcpMetadataPath: mcpAudience, apiMetadataPath: controlAudience} {
+		rec := f.get(t, path, "", "")
+		require.Equal(t, http.StatusOK, rec.Code, "%s: body=%s", path, rec.Body.String())
+		var doc struct {
+			Resource             string   `json:"resource"`
+			AuthorizationServers []string `json:"authorization_servers"`
+			ScopesSupported      []string `json:"scopes_supported"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+		require.Equal(t, resource, doc.Resource)
+		require.Equal(t, []string{f.issuer.url}, doc.AuthorizationServers)
+		require.Contains(t, doc.ScopesSupported, authn.ScopeSheetsRead)
+		for _, scope := range doc.ScopesSupported {
+			require.True(t, authn.Mintable(scope), "%s advertises %q, which no client may register", path, scope)
+		}
 	}
 }
 

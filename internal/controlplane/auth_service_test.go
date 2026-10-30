@@ -9,6 +9,7 @@ import (
 
 	authv1 "altalune.id/opensheet/gen/go/auth/v1"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/session"
 )
 
@@ -32,7 +33,7 @@ func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 		Email:       "alice@example.com",
 		Name:        "Alice",
 		ActiveOrgID: orgID,
-		Scopes:      []string{"todo.read", "todo.write"},
+		Scopes:      []string{"todo.read", "todo.write", authn.ScopeAPIKeysRead},
 	}
 	h := newHarness(t, p)
 
@@ -68,8 +69,8 @@ func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 	if resp.Msg.ActiveOrgSlug != "acme" {
 		t.Errorf("active_org_slug = %q, want acme", resp.Msg.ActiveOrgSlug)
 	}
-	if len(resp.Msg.Scopes) != 2 {
-		t.Errorf("scopes len = %d, want 2", len(resp.Msg.Scopes))
+	if len(resp.Msg.Scopes) != 3 {
+		t.Errorf("scopes len = %d, want 3", len(resp.Msg.Scopes))
 	}
 }
 

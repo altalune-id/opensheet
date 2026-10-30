@@ -3,6 +3,7 @@ package boot
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"altalune.id/opensheet/authl"
+	"github.com/altalune-id/oidcrp"
+
 	"altalune.id/opensheet/httpclient"
 	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
@@ -47,6 +49,8 @@ import (
 
 const setupTokenLen = 32
 
+const oidcTimeout = 10 * time.Second
+
 const (
 	webhookTimeout       = 10 * time.Second
 	webhookResponseLimit = 64 << 10
@@ -69,8 +73,6 @@ type Server struct {
 	Webhooks *webhook.Service
 
 	opensheetServices
-	// SECURITY: StateSecret is the single resolved http.stateSecret — the HMAC key behind every signed cookie and OAuth state.
-	StateSecret []byte
 
 	Onboard *user.OnboardWorkflow
 
@@ -134,7 +136,12 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, err
 	}
 
-	verifier, err := tokens.NewVerifier(ctx, cfg.Tokens)
+	oidcHTTP := o.oidcHTTP
+	if oidcHTTP == nil {
+		oidcHTTP = oidcHTTPClient()
+	}
+	tokenKeys := tokens.NewKeySource(cfg.Tokens, oidcHTTP)
+	verifier, err := tokens.NewVerifier(cfg.Tokens, tokenKeys)
 	if err != nil {
 		_ = pool.Close()
 		_ = shutdownOTel(context.Background())
@@ -148,12 +155,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		return nil, err
 	}
 
-	altAuth, err := buildAltAuth(ctx, cfg, stateSecret)
-	if err != nil {
-		_ = pool.Close()
-		_ = shutdownOTel(context.Background())
-		return nil, fmt.Errorf("boot: authl: %w", err)
-	}
+	altAuth := buildOIDCClient(cfg, oidcHTTP)
 
 	sl, err := buildSealer(cfg, log)
 	if err != nil {
@@ -166,21 +168,22 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{
-		Pool:     pool,
-		PgConn:   pgConn,
-		Log:      log,
-		Reporter: reporter,
-		Sessions: sessions,
-		Sealer:   sl,
-		Verifier: verifier,
-		Mail:     mail,
-		AltAuth:  altAuth,
-		Tracer:   tp.Tracer("altalune.id/opensheet"),
-		Meter:    mp.Meter("altalune.id/opensheet"),
-		Notify:   sinks,
-		Nano:     nanoid.New,
-		Caps:     caps,
-		Outbox:   outbox.NewStore(cfg.DB, pool, pgConn),
+		Pool:            pool,
+		PgConn:          pgConn,
+		Log:             log,
+		Reporter:        reporter,
+		Sessions:        sessions,
+		Sealer:          sl,
+		Verifier:        verifier,
+		Mail:            mail,
+		AltAuth:         altAuth,
+		OIDCStateSecret: stateSecret,
+		Tracer:          tp.Tracer("altalune.id/opensheet"),
+		Meter:           mp.Meter("altalune.id/opensheet"),
+		Notify:          sinks,
+		Nano:            nanoid.New,
+		Caps:            caps,
+		Outbox:          outbox.NewStore(cfg.DB, pool, pgConn),
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {
@@ -216,7 +219,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		abort()
 		return nil, err
 	}
-	svcs.opensheetServices, err = buildOpensheetServices(cfg, kernel, caps, stateSecret)
+	svcs.opensheetServices, err = buildOpensheetServices(cfg, kernel, caps)
 	if err != nil {
 		abort()
 		return nil, err
@@ -312,7 +315,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs)
 	dataHandler := buildDataHandler(cfg, caps, log, svcs)
 
-	mcpSurf, err := buildMCPSurface(ctx, cfg, log, svcs, apiSrv)
+	mcpSurf, err := buildMCPSurface(cfg, log, svcs, apiSrv, tokenKeys)
 	if err != nil {
 		abort()
 		return nil, err
@@ -350,7 +353,6 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		Required:    required,
 		OnComplete:  gate.Complete,
 		SetupToken:  setup,
-		StateSecret: stateSecret,
 		APIHandler:  apiHandler,
 		DataHandler: dataHandler,
 		MCP:         mcpSurf,
@@ -382,7 +384,6 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		APIKeys:            svcs.APIKeys,
 		Webhooks:           svcs.Webhooks,
 		opensheetServices:  svcs.opensheetServices,
-		StateSecret:        stateSecret,
 		Onboarded:          onboarded,
 		Routes:             webRoutes,
 		SetupToken:         setup,
@@ -471,23 +472,18 @@ func oidcRedirectURL(cfg *config.Config) string {
 		strings.TrimRight(cfg.HTTP.BaseURL, "/"), cfg.HTTP.BasePath)
 }
 
-func buildAltAuth(ctx context.Context, cfg *config.Config, secret []byte) (*authl.Client, error) {
+// NOTE: nil without oidc.issuer; private hosts are allowed because the issuer is operator config, like a webhook URL is.
+func buildOIDCClient(cfg *config.Config, client *http.Client) *oidcrp.Client {
 	if cfg.OIDC.Issuer == "" {
-		return nil, nil
+		return nil
 	}
-	redirect := oidcRedirectURL(cfg)
-	return authl.NewClient(ctx, authl.Config{
-		Issuer:           cfg.OIDC.Issuer,
-		ClientID:         cfg.OIDC.ClientID,
-		ClientSecret:     cfg.OIDC.ClientSecret,
-		RedirectURL:      redirect,
-		Scopes:           cfg.OIDC.Scopes,
-		Resource:         cfg.OIDC.Resource,
-		RememberLastUser: true,
-		LastUserCookie:   "opensheet_last_user",
-		StateCookie:      "opensheet_oidc_state",
-		StateSecret:      secret,
-		CookieSecure:     cfg.HTTP.CookieSecure,
+	return oidcrp.New(oidcrp.Config{
+		Issuer:       cfg.OIDC.Issuer,
+		ClientID:     cfg.OIDC.ClientID,
+		ClientSecret: cfg.OIDC.ClientSecret,
+		RedirectURI:  oidcRedirectURL(cfg),
+		Scopes:       cfg.OIDC.Scopes,
+		HTTPClient:   client,
 	})
 }
 
@@ -495,12 +491,19 @@ func resolveStateSecret(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	if cfg.HTTP.StateSecret != "" {
 		return config.ParseStateSecret(cfg.HTTP.StateSecret)
 	}
-	ephemeral, err := authl.GenerateStateSecret()
-	if err != nil {
+	ephemeral := make([]byte, config.StateSecretMinLen)
+	if _, err := rand.Read(ephemeral); err != nil {
 		return nil, fmt.Errorf("mint ephemeral state secret: %w", err)
 	}
 	log.Warn("http.stateSecret is empty — using an ephemeral secret; set OPENSHEET_HTTP_STATE_SECRET to persist")
 	return ephemeral, nil
+}
+
+// SECURITY: oidcrp and oauthrs need a client that never follows a redirect off the issuer.
+func oidcHTTPClient() *http.Client {
+	c := httpclient.New(httpclient.WithAllowPrivateHosts(true), httpclient.WithTimeout(oidcTimeout))
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
 
 func mailerConfig(m config.MailConfig) mailer.Config {

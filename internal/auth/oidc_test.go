@@ -20,8 +20,8 @@ func TestOIDCLogin_MissingClaims(t *testing.T) {
 		claims auth.OIDCClaims
 		claim  string
 	}{
-		{name: "missing issuer", claims: auth.OIDCClaims{Subject: "sub", Email: "a@b.co"}, claim: "iss"},
-		{name: "missing subject", claims: auth.OIDCClaims{Issuer: "iss", Email: "a@b.co"}, claim: "sub"},
+		{name: "missing issuer", claims: auth.OIDCClaims{Subject: "sub", Email: "a@b.co", EmailVerified: true}, claim: "iss"},
+		{name: "missing subject", claims: auth.OIDCClaims{Issuer: "iss", Email: "a@b.co", EmailVerified: true}, claim: "sub"},
 		{name: "missing email", claims: auth.OIDCClaims{Issuer: "iss", Subject: "sub"}, claim: "email"},
 	}
 	for _, tc := range cases {
@@ -57,7 +57,7 @@ func TestOIDCLogin_MissingClaims(t *testing.T) {
 func TestOIDCLogin_Unavailable(t *testing.T) {
 	t.Parallel()
 	o := auth.NewOIDCLogin(nil, nil, newTestLogger(), noopUnexpected())
-	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co"})
+	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co", EmailVerified: true})
 	if !auth.IsOIDCUnavailableError(err) {
 		t.Fatalf("got %T: %v", err, err)
 	}
@@ -78,7 +78,7 @@ func TestOIDCLogin_EnsureError_Wraps(t *testing.T) {
 			return apperror.New(apperror.CodeUnexpectedError, "unexpected", 0).WithCause(cause)
 		},
 	)
-	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co"})
+	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co", EmailVerified: true})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -98,7 +98,7 @@ func TestOIDCLogin_TypedEnsureErrorPropagates(t *testing.T) {
 		newTestLogger(),
 		noopUnexpected(),
 	)
-	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co"})
+	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co", EmailVerified: true})
 	if _, ok := apperror.AsAppError(err); !ok {
 		t.Fatalf("expected AppError wrapping typed producer, got %T: %v", err, err)
 	}
@@ -146,7 +146,7 @@ func TestOIDCLogin_CarriesTermsAcceptedAtIntoPrincipal(t *testing.T) {
 		func(_ context.Context, _ auth.EnsureClaims) (*auth.UserRef, bool, error) { return u, false, nil },
 		nil, newTestLogger(), noopUnexpected(),
 	)
-	p, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "alice@example.com", Name: "Alice"})
+	p, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "alice@example.com", EmailVerified: true, Name: "Alice"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestOIDCLogin_OnboardUnexpectedRoutes(t *testing.T) {
 			return apperror.New(apperror.CodeUnexpectedError, "unexpected", 0).WithCause(cause)
 		},
 	)
-	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co"})
+	_, err := o.Execute(context.Background(), auth.OIDCClaims{Issuer: "iss", Subject: "sub", Email: "a@b.co", EmailVerified: true})
 	if err == nil {
 		t.Fatal("expected error")
 	}

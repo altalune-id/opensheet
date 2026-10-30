@@ -187,12 +187,13 @@ mcp:
   audience: ""
   # env: OPENSHEET_MCP_AUDIENCE_OVERRIDE
   audienceOverride: ""
-  # env: OPENSHEET_MCP_CHALLENGE_PREFIX
-  challengePrefix: ""
-  # env: OPENSHEET_MCP_CHALLENGE_TOKEN
-  challengeToken: ""
   # env: OPENSHEET_MCP_ENABLED
   enabled: ""
+  introspection:
+    # env: OPENSHEET_MCP_INTROSPECTION_CLIENT_ID
+    clientID: ""
+    # [secret] env: OPENSHEET_MCP_INTROSPECTION_CLIENT_SECRET
+    clientSecret: ""
 
 # [required, bootstrap] env: OPENSHEET_MODE
 mode: selfhosted
@@ -209,18 +210,18 @@ oidc:
   buttonLabel: ""
   # env: OPENSHEET_OIDC_BUTTON_LOGO_URL
   buttonLogoURL: ""
+  # env: OPENSHEET_OIDC_CLI_CLIENT_ID
+  cliClientID: ""
   # [required, mode:cloud] env: OPENSHEET_OIDC_CLIENT_ID
   clientID: ""
   # [required, mode:cloud, secret] env: OPENSHEET_OIDC_CLIENT_SECRET
   clientSecret: ""
   # env: OPENSHEET_OIDC_END_SESSION_ON_LOGOUT
-  endSessionOnLogout: ""
+  endSessionOnLogout: true
   # [required, mode:cloud] env: OPENSHEET_OIDC_ISSUER
   issuer: ""
   # env: OPENSHEET_OIDC_REDIRECT_PORT
   redirectPort: ""
-  # env: OPENSHEET_OIDC_RESOURCE
-  resource: ""
   # env: OPENSHEET_OIDC_SCOPES
   scopes: openid,email,profile
 
@@ -312,17 +313,14 @@ tenant:
   tenantScopedTables: ""
 
 tokens:
-  # env: OPENSHEET_TOKENS_ACCEPT_RS256
-  acceptRS256: ""
   # [required, mode:cloud, bootstrap] env: OPENSHEET_TOKENS_AUDIENCE
-  audience: "urn:opensheet:api"
+  audience: ""
   # env: OPENSHEET_TOKENS_CLOCK_SKEW
   clockSkew: 60s
+  introspection:
+    # env: OPENSHEET_TOKENS_INTROSPECTION_CLIENT_ID
+    clientID: ""
+    # [secret] env: OPENSHEET_TOKENS_INTROSPECTION_CLIENT_SECRET
+    clientSecret: ""
   # [required, mode:cloud] env: OPENSHEET_TOKENS_ISSUER
   issuer: ""
-  # env: OPENSHEET_TOKENS_JWKS_CACHE_TTL
-  jwksCacheTTL: ""
-  # [required, mode:cloud] env: OPENSHEET_TOKENS_JWKS_URL
-  jwksURL: ""
-  # env: OPENSHEET_TOKENS_SUPPORTED_ALGS
-  supportedAlgs: RS256,ES256

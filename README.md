@@ -44,7 +44,6 @@ GoReleaser from `.goreleaser.yaml` — see [`CONTRIBUTING.md`](CONTRIBUTING.md#r
 ```
 opensheet/
 ├── api/                # buf-managed proto sources, incl. the (mcp.v1.tool) annotation
-├── authl/              # RFC 8252 OIDC PKCE loopback (exported)
 ├── cmd/opensheet/        # main package
 ├── cmd/protoc-gen-mcp/ # protoc plugin: annotated RPCs → MCP tool registrations
 ├── cmd/…               # build-time tools: comment-lint, i18n-lint, gen-config-example, gen-tenant-tables
@@ -107,7 +106,6 @@ Safe for external Go projects to import:
 
 | Package      | Purpose                                                                                               |
 | ------------ | ----------------------------------------------------------------------------------------------------- |
-| `authl`      | OIDC client + PKCE loopback                                                                           |
 | `reqid`      | UUIDv7 request-ID propagation                                                                         |
 | `nanoid`     | URL-safe short-ID generator of caller-chosen length, plus invite tokens                               |
 | `worker`     | Supervisor + Worker interface + HTTP/Func adapters                                                    |

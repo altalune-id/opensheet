@@ -70,22 +70,21 @@ func wrap(chain []Middleware, h http.Handler) http.Handler {
 
 // ServerOpts bundles the pieces NewServer assembles.
 type ServerOpts struct {
-	AppHandlers        []Register
-	APIHandler         http.Handler
-	DataHandler        http.Handler
-	IngestHandler      http.Handler
-	MCPHandler         http.Handler
-	MCPMetadataHandler http.Handler
-	MCPMetadataPath    string
-	MCPChallengeRoutes map[string]http.Handler
-	RobotsCfg          *robotsConfig
-	BasePath           string
-	HealthOK           func() bool
-	Chains             SurfaceChains
-	Logger             *slog.Logger
-	SessionStore       session.Store
-	Secret             []byte
-	Reporter           apperror.UnexpectedFunc
+	AppHandlers   []Register
+	APIHandler    http.Handler
+	DataHandler   http.Handler
+	IngestHandler http.Handler
+	MCPHandler    http.Handler
+	// ResourceMetadata maps each protected resource's RFC 9728 metadata path to its document.
+	ResourceMetadata map[string]http.Handler
+	RobotsCfg        *robotsConfig
+	BasePath         string
+	HealthOK         func() bool
+	Chains           SurfaceChains
+	Logger           *slog.Logger
+	SessionStore     session.Store
+	Secret           []byte
+	Reporter         apperror.UnexpectedFunc
 }
 
 type robotsConfig = struct{ RobotsTxt string }
@@ -130,13 +129,9 @@ func NewServerWithRoutes(o ServerOpts) (handler http.Handler, routes []string) {
 	if o.IngestHandler != nil {
 		outer.Handle(Path(o.BasePath, "/hooks")+"/", wrap(o.Chains.Ingest, o.IngestHandler))
 	}
-	// NOTE: RFC 9728 inserts the well-known URI between host and path, so the metadata document
-	// sits outside BasePath even when BasePath is set.
-	if o.MCPMetadataHandler != nil && o.MCPMetadataPath != "" {
-		outer.Handle("GET "+o.MCPMetadataPath, wrap(o.Chains.Probes, o.MCPMetadataHandler))
-	}
-	for pattern, h := range o.MCPChallengeRoutes {
-		outer.Handle(pattern, wrap(o.Chains.Probes, h))
+	// NOTE: RFC 9728 inserts the well-known URI between host and path, so a metadata document sits outside BasePath.
+	for path, h := range o.ResourceMetadata {
+		outer.Handle("GET "+path, wrap(o.Chains.Probes, h))
 	}
 	if o.MCPHandler != nil {
 		outer.Handle(Path(o.BasePath, "/mcp"), wrap(o.Chains.MCP, o.MCPHandler))

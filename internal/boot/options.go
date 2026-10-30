@@ -2,6 +2,7 @@ package boot
 
 import (
 	"log/slog"
+	"net/http"
 
 	"altalune.id/opensheet/internal/platform/outbox"
 )
@@ -17,6 +18,7 @@ type options struct {
 	logger        *slog.Logger
 	deliverer     outbox.Deliverer
 	dispatch      outbox.WorkerOpts
+	oidcHTTP      *http.Client
 }
 
 func newOptions() *options { return &options{scheduler: true, consumer: true} }
@@ -43,3 +45,6 @@ func WithDispatch(d outbox.Deliverer, opts outbox.WorkerOpts) Option {
 		o.dispatch = opts
 	}
 }
+
+// WithOIDCHTTPClient replaces the client that reaches the OIDC issuer, for a test issuer with its own certificate.
+func WithOIDCHTTPClient(c *http.Client) Option { return func(o *options) { o.oidcHTTP = c } }

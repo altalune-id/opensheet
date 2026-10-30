@@ -57,6 +57,7 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 		seed         *user.User
 		storeErr     error
 		wantErr      bool
+		wantOutage   bool
 		wantUserID   uuid.UUID
 		wantIsAdmin  bool
 		wantLocale   string
@@ -85,15 +86,16 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "store error fails closed",
+			name: "store error fails closed as an outage",
 			next: stubAuthenticator{p: session.Principal{
 				Source:     session.SourceToken,
 				IDPIssuer:  issuer,
 				IDPSubject: subject,
 			}},
-			seed:     localUser,
-			storeErr: errors.New("db exploded"),
-			wantErr:  true,
+			seed:       localUser,
+			storeErr:   errors.New("db exploded"),
+			wantErr:    true,
+			wantOutage: true,
 		},
 		{
 			name: "api key principal passes through untouched",
@@ -136,8 +138,8 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err,
 					"membership is the only authority for tenancy: a token must never be granted an org its subject does not belong to")
-				var unauthorized *authn.UnauthorizedError
-				assert.ErrorAs(t, err, &unauthorized, "want opaque *authn.UnauthorizedError, got %v", err)
+				assert.Equal(t, tt.wantOutage, authn.IsUnavailableError(err), "a store failure is an outage, an unknown identity a refusal: %v", err)
+				assert.Equal(t, !tt.wantOutage, authn.IsUnauthorizedError(err), "want opaque *authn.UnauthorizedError for a refusal, got %v", err)
 				assert.Equal(t, session.Principal{}, got)
 			} else {
 				require.NoError(t, err)
@@ -147,6 +149,8 @@ func TestAuthenticator_Authenticate(t *testing.T) {
 				}
 				if tt.wantLocale != "" {
 					assert.Equal(t, tt.wantLocale, got.Locale)
+					assert.Equal(t, localUser.Email, got.Email, "the email comes from the local row, never the token")
+					assert.Equal(t, localUser.Name, got.Name, "the name comes from the local row, never the token")
 				}
 			}
 
@@ -178,7 +182,6 @@ type tenantFixture struct {
 	orgA     uuid.UUID
 	orgB     uuid.UUID
 	projectA uuid.UUID
-	foreign  uuid.UUID
 }
 
 func newTenantFixture(t *testing.T) *tenantFixture {
@@ -190,9 +193,8 @@ func newTenantFixture(t *testing.T) *tenantFixture {
 		orgA:     uuid.New(),
 		orgB:     uuid.New(),
 		projectA: uuid.New(),
-		foreign:  uuid.New(),
 	}
-	for _, id := range []uuid.UUID{f.orgA, f.orgB, f.foreign} {
+	for _, id := range []uuid.UUID{f.orgA, f.orgB} {
 		require.NoError(t, f.orgs.Save(t.Context(), &user.OrgRef{ID: id, Slug: id.String(), Name: id.String()}))
 	}
 	require.NoError(t, f.projects.Save(t.Context(), &user.ProjectRef{ID: f.projectA, OrgID: f.orgA, Slug: "p", Name: "P"}))
@@ -227,42 +229,20 @@ func TestAuthenticator_ResolvesTenantFromMembership(t *testing.T) {
 		name string
 		// memberships the local user holds, by fixture field name: "a", "b".
 		member      []string
-		claim       func(f *tenantFixture) uuid.UUID
 		listErr     error
 		noResolver  bool
 		wantErr     bool
-		wantClaimed bool
 		wantOrg     func(f *tenantFixture) uuid.UUID
 		wantProject func(f *tenantFixture) uuid.UUID
 	}{
 		{
-			name:        "single membership and no claim resolves that org and its project",
+			name:        "single membership resolves that org and its project",
 			member:      []string{"a"},
 			wantOrg:     func(f *tenantFixture) uuid.UUID { return f.orgA },
 			wantProject: func(f *tenantFixture) uuid.UUID { return f.projectA },
 		},
 		{
-			name:        "claim the user is a member of is honored",
-			member:      []string{"a", "b"},
-			claim:       func(f *tenantFixture) uuid.UUID { return f.orgB },
-			wantOrg:     func(f *tenantFixture) uuid.UUID { return f.orgB },
-			wantProject: func(f *tenantFixture) uuid.UUID { return uuid.Nil },
-		},
-		{
-			name:        "claim naming an org the user is not a member of is refused",
-			member:      []string{"a"},
-			claim:       func(f *tenantFixture) uuid.UUID { return f.foreign },
-			wantErr:     true,
-			wantClaimed: true,
-		},
-		{
-			name:    "claim naming an org nobody is a member of is refused",
-			member:  nil,
-			claim:   func(f *tenantFixture) uuid.UUID { return f.foreign },
-			wantErr: true, wantClaimed: true,
-		},
-		{
-			name:        "several memberships and no claim stays untenanted",
+			name:        "several memberships stay untenanted",
 			member:      []string{"a", "b"},
 			wantOrg:     func(f *tenantFixture) uuid.UUID { return uuid.Nil },
 			wantProject: func(f *tenantFixture) uuid.UUID { return uuid.Nil },
@@ -279,9 +259,8 @@ func TestAuthenticator_ResolvesTenantFromMembership(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:        "without the resolver a claim grants nothing",
+			name:        "without the resolver a membership grants nothing",
 			member:      []string{"a"},
-			claim:       func(f *tenantFixture) uuid.UUID { return f.orgA },
 			noResolver:  true,
 			wantOrg:     func(f *tenantFixture) uuid.UUID { return uuid.Nil },
 			wantProject: func(f *tenantFixture) uuid.UUID { return uuid.Nil },
@@ -305,9 +284,6 @@ func TestAuthenticator_ResolvesTenantFromMembership(t *testing.T) {
 			f.orgs.ListForUserErr = tt.listErr
 
 			p := session.Principal{Source: session.SourceToken, IDPIssuer: issuer, IDPSubject: subject}
-			if tt.claim != nil {
-				p.ClaimedOrgID = tt.claim(f)
-			}
 
 			opts := []user.AuthenticatorOption{user.WithTenantResolution(f.orgs, f.projects)}
 			if tt.noResolver {
@@ -320,13 +296,9 @@ func TestAuthenticator_ResolvesTenantFromMembership(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err,
 					"membership is the only authority for tenancy: a token must never be granted an org its subject does not belong to")
-				assert.True(t, authn.IsUnauthorizedError(err),
-					"every tenant-resolution failure must still read as unauthorized, got %T: %v", err, err)
+				assert.True(t, authn.IsUnavailableError(err),
+					"a membership lookup failure is an outage, not a bad token, got %T: %v", err, err)
 				assert.Equal(t, session.Principal{}, got, "a refused credential must carry no org at all")
-				if tt.wantClaimed {
-					assert.True(t, user.IsOrgClaimNotMemberError(err),
-						"want *user.OrgClaimNotMemberError, got %T: %v", err, err)
-				}
 				return
 			}
 
@@ -352,11 +324,10 @@ func TestAuthenticator_IsAdminComesFromTheLocalRecordNotTheToken(t *testing.T) {
 
 	a := user.NewAuthenticator(
 		stubAuthenticator{p: session.Principal{
-			Source:       session.SourceToken,
-			IDPIssuer:    issuer,
-			IDPSubject:   subject,
-			IsAdmin:      true,
-			ClaimedOrgID: f.orgA,
+			Source:     session.SourceToken,
+			IDPIssuer:  issuer,
+			IDPSubject: subject,
+			IsAdmin:    true,
 		}},
 		store,
 		user.WithTenantResolution(f.orgs, f.projects),

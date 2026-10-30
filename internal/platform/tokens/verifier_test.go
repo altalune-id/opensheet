@@ -1,191 +1,180 @@
 package tokens_test
 
 import (
-	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/altalune-id/oidcrp/oidcrptest"
 
+	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tokens"
 )
 
-func TestNewVerifier_Disabled(t *testing.T) {
-	v, err := tokens.NewVerifier(context.Background(), tokens.Config{})
+const (
+	apiAudience = "https://app.example.com/api"
+	mcpAudience = "https://app.example.com/mcp"
+)
+
+func newVerifier(t *testing.T, idp *oidcrptest.IDP, cfg tokens.Config) tokens.Verifier {
+	t.Helper()
+	cfg.Issuer = idp.Issuer()
+	if cfg.Audience == "" {
+		cfg.Audience = apiAudience
+	}
+	v, err := tokens.NewVerifier(cfg, tokens.NewKeySource(cfg, idp.Client()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = v.Verify(context.Background(), "anything")
-	if err == nil {
-		t.Fatal("disabled verifier must reject all tokens")
+	return v
+}
+
+func TestNewVerifier_Disabled(t *testing.T) {
+	v, err := tokens.NewVerifier(tokens.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !tokens.IsInvalidTokenError(err) {
-		t.Fatalf("disabled verifier should return *InvalidTokenError, got %T: %v", err, err)
+	if _, err := v.Verify(t.Context(), "aaa.bbb.ccc"); !tokens.IsInvalidTokenError(err) {
+		t.Fatalf("disabled verifier: err = %v, want *InvalidTokenError", err)
+	}
+	if tokens.NewKeySource(tokens.Config{}, nil) != nil {
+		t.Fatal("NewKeySource without an issuer must be nil")
 	}
 }
 
 func TestNewVerifier_MissingAudience(t *testing.T) {
-	_, err := tokens.NewVerifier(context.Background(), tokens.Config{Issuer: "https://x", Audience: ""})
-	if err == nil {
-		t.Fatal("expected error: audience required")
+	if _, err := tokens.NewVerifier(tokens.Config{Issuer: "https://issuer.example.com"}, nil); err == nil {
+		t.Fatal("expected an error: audience required")
 	}
 }
 
-func TestNewVerifier_UnreachableIssuer(t *testing.T) {
-	_, err := tokens.NewVerifier(context.Background(), tokens.Config{Issuer: "https://127.0.0.1:1", Audience: "aud"})
-	if err == nil {
-		t.Fatal("expected discovery error against unreachable issuer")
-	}
-}
+func TestVerify_MapsAnAccessTokenToATokenPrincipal(t *testing.T) {
+	idp := oidcrptest.New(t)
+	v := newVerifier(t, idp, tokens.Config{})
+	raw := idp.AccessToken(map[string]any{"aud": apiAudience, "scope": "posts:read posts:write", "client_id": "cli", "email": "x@example.com"})
 
-func TestNewVerifier_HappyDiscovery(t *testing.T) {
-	var srv *httptest.Server
-	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["EdDSA"]}`,
-			srv.URL, srv.URL+"/jwks")
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"keys":[]}`)
-	})
-	srv = httptest.NewServer(mux)
-	defer srv.Close()
-
-	v, err := tokens.NewVerifier(context.Background(), tokens.Config{
-		Issuer:      srv.URL,
-		Audience:    "urn:test",
-		ClockSkew:   5 * time.Second,
-		AcceptRS256: true,
-	})
+	p, err := v.Verify(t.Context(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = v.Verify(context.Background(), "not-a-jwt")
-	if err == nil {
-		t.Fatal("expected verification failure for malformed token")
+	want := session.Principal{Source: session.SourceToken, IDPIssuer: idp.Issuer(), IDPSubject: idp.User.Subject, ClientID: "cli"}
+	if p.Source != want.Source || p.IDPIssuer != want.IDPIssuer || p.IDPSubject != want.IDPSubject || p.ClientID != want.ClientID {
+		t.Fatalf("principal = %+v, want %+v", p, want)
 	}
-	if !tokens.IsInvalidTokenError(err) {
-		t.Fatalf("malformed token should surface as *InvalidTokenError, got %T: %v", err, err)
+	if len(p.Scopes) != 2 || p.Scopes[0] != "posts:read" || p.Scopes[1] != "posts:write" {
+		t.Fatalf("scopes = %v", p.Scopes)
+	}
+	if p.Email != "" || p.Name != "" {
+		t.Fatalf("a bearer token must not supply the profile: %+v", p)
 	}
 }
 
-type stubIssuer struct {
-	url  string
-	priv ed25519.PrivateKey
-}
-
-func newStubIssuer(t *testing.T) *stubIssuer {
-	t.Helper()
-
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	iss := &stubIssuer{priv: priv}
-
-	mux := http.NewServeMux()
-	var srv *httptest.Server
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["EdDSA"]}`,
-			srv.URL, srv.URL+"/jwks")
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k1","alg":"EdDSA","use":"sig","x":%q}]}`,
-			base64.RawURLEncoding.EncodeToString(pub))
-	})
-	srv = httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	iss.url = srv.URL
-	return iss
-}
-
-func (i *stubIssuer) mint(t *testing.T, audience string, claims map[string]any) string {
-	t.Helper()
-
-	payload := map[string]any{
-		"iss": i.url,
-		"aud": audience,
-		"sub": "sub-1",
-		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(time.Hour).Unix(),
-	}
-	maps.Copy(payload, claims)
-
-	seg := func(v any) string {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return base64.RawURLEncoding.EncodeToString(raw)
-	}
-	signing := seg(map[string]any{"alg": "EdDSA", "typ": "JWT", "kid": "k1"}) + "." + seg(payload)
-	return signing + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(i.priv, []byte(signing)))
-}
-
-func TestVerify_OrgClaimIsAHintNotAuthority(t *testing.T) {
-	iss := newStubIssuer(t)
-	v, err := tokens.NewVerifier(t.Context(), tokens.Config{Issuer: iss.url, Audience: "urn:test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orgID := uuid.New()
-
+func TestVerify_RefusesWhatIsNotAnAccessTokenForThisResource(t *testing.T) {
+	idp := oidcrptest.New(t)
+	v := newVerifier(t, idp, tokens.Config{})
+	now := time.Now()
 	tests := []struct {
-		name        string
-		claims      map[string]any
-		wantErr     bool
-		wantClaimed uuid.UUID
+		name string
+		raw  string
 	}{
-		{
-			name:        "org_id lands on ClaimedOrgID and leaves ActiveOrgID zero",
-			claims:      map[string]any{"org_id": orgID.String()},
-			wantClaimed: orgID,
-		},
-		{
-			name:        "absent org_id claims nothing",
-			claims:      nil,
-			wantClaimed: uuid.Nil,
-		},
-		{
-			name:    "org_id that is not a uuid is refused",
-			claims:  map[string]any{"org_id": "acme-corp"},
-			wantErr: true,
-		},
+		{"typ JWT with a valid aud", idp.IDToken(idp.AccessTokenClaims(map[string]any{"aud": apiAudience}))},
+		{"an ID token used as an access token", idp.IDToken(map[string]any{
+			"iss": idp.Issuer(), "sub": idp.User.Subject, "aud": "test-client", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix(),
+		})},
+		{"an access token for another resource", idp.AccessToken(map[string]any{"aud": mcpAudience})},
+		{"an access token from another issuer", idp.AccessToken(map[string]any{"aud": apiAudience, "iss": "https://other.example.com"})},
+		{"not a token", "garbage"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, err := v.Verify(t.Context(), iss.mint(t, "urn:test", tt.claims))
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected refusal, got principal %+v", p)
-				}
-				if !tokens.IsInvalidTokenError(err) {
-					t.Fatalf("want *InvalidTokenError, got %T: %v", err, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.ClaimedOrgID != tt.wantClaimed {
-				t.Fatalf("ClaimedOrgID = %v, want %v", p.ClaimedOrgID, tt.wantClaimed)
-			}
-			if p.ActiveOrgID != uuid.Nil {
-				t.Fatalf("ActiveOrgID = %v; a token must not name the active tenant", p.ActiveOrgID)
+			if _, err := v.Verify(t.Context(), tt.raw); !tokens.IsInvalidTokenError(err) {
+				t.Fatalf("err = %v, want *InvalidTokenError", err)
 			}
 		})
+	}
+}
+
+func TestVerify_ExpiredTokenIsTyped(t *testing.T) {
+	idp := oidcrptest.New(t)
+	v := newVerifier(t, idp, tokens.Config{})
+	past := time.Now().Add(-time.Hour)
+	raw := idp.AccessToken(map[string]any{"aud": apiAudience, "iat": past.Add(-time.Minute).Unix(), "exp": past.Unix()})
+	if _, err := v.Verify(t.Context(), raw); !tokens.IsExpiredTokenError(err) {
+		t.Fatalf("err = %v, want *ExpiredTokenError", err)
+	}
+}
+
+func TestVerify_PersonalTokenIsIntrospectedAndRevokedAtOnce(t *testing.T) {
+	idp := oidcrptest.New(t)
+	idp.Introspector("rs-api", "rs-secret")
+	v := newVerifier(t, idp, tokens.Config{Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"}})
+	const pt = tokens.PersonalTokenPrefix + "abc"
+	idp.Opaque(pt, map[string]any{"aud": apiAudience, "sub": idp.User.Subject, "scope": "posts:read", "exp": time.Now().Add(time.Hour).Unix()})
+
+	p, err := v.Verify(t.Context(), pt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Source != session.SourceToken || p.IDPSubject != idp.User.Subject || len(p.Scopes) != 1 {
+		t.Fatalf("principal = %+v", p)
+	}
+	idp.Revoke(pt)
+	if _, err := v.Verify(t.Context(), pt); !tokens.IsInvalidTokenError(err) {
+		t.Fatalf("a revoked personal token: err = %v, want *InvalidTokenError", err)
+	}
+	if got := idp.Introspections(); got != 2 {
+		t.Fatalf("introspections = %d, want 2 (no cache)", got)
+	}
+}
+
+func TestVerify_APIKeyIsNeverIntrospected(t *testing.T) {
+	idp := oidcrptest.New(t)
+	idp.Introspector("rs-api", "rs-secret")
+	v := newVerifier(t, idp, tokens.Config{Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"}})
+	for _, raw := range []string{"altk_secretkeymaterial", "othra_other_abc"} {
+		if _, err := v.Verify(t.Context(), raw); !tokens.IsInvalidTokenError(err) {
+			t.Fatalf("Verify(%q) = %v, want *InvalidTokenError", raw, err)
+		}
+	}
+	if got := idp.Introspections(); got != 0 {
+		t.Fatalf("introspections = %d; an app credential must never reach the issuer", got)
+	}
+}
+
+func TestVerify_PersonalTokenRefusedWithoutIntrospection(t *testing.T) {
+	idp := oidcrptest.New(t)
+	idp.Introspector("rs-api", "rs-secret")
+	v := newVerifier(t, idp, tokens.Config{})
+	if _, err := v.Verify(t.Context(), tokens.PersonalTokenPrefix+"abc"); !tokens.IsInvalidTokenError(err) {
+		t.Fatalf("err = %v, want *InvalidTokenError", err)
+	}
+	if got := idp.Introspections(); got != 0 {
+		t.Fatalf("introspections = %d, want 0", got)
+	}
+}
+
+func TestVerify_AnIssuerOutageIsNotARefusal(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(down.Close)
+	cfg := tokens.Config{
+		Issuer: down.URL, Audience: apiAudience,
+		Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"},
+	}
+	v, err := tokens.NewVerifier(cfg, tokens.NewKeySource(cfg, down.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{"aaa.bbb.ccc", tokens.PersonalTokenPrefix + "abc"} {
+		_, err := v.Verify(t.Context(), raw)
+		if !authn.IsUnavailableError(err) {
+			t.Fatalf("Verify(%q) = %v, want *authn.UnavailableError", raw, err)
+		}
+		if tokens.IsInvalidTokenError(err) || tokens.IsExpiredTokenError(err) {
+			t.Fatalf("Verify(%q) = %v: an outage must not read as a bad token", raw, err)
+		}
 	}
 }

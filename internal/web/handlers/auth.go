@@ -8,9 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/altalune-id/oidcrp"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
 
-	"altalune.id/opensheet/authl"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/org"
@@ -30,13 +31,21 @@ type AuthHandler struct {
 	Users    *user.Service
 	Orgs     *org.Service
 	Projects *project.Service
-	AltAuth  *authl.Client
+	AltAuth  *oidcrp.Client
 	Required *atomic.Bool
+
+	stateSecret []byte
 }
 
 // NewAuthHandler wires the handler.
-func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *org.Service, projects *project.Service, ac *authl.Client, required *atomic.Bool) *AuthHandler {
+func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *org.Service, projects *project.Service, ac *oidcrp.Client, required *atomic.Bool) *AuthHandler {
 	return &AuthHandler{Deps: d, Auth: authSvc, Users: users, Orgs: orgs, Projects: projects, AltAuth: ac, Required: required}
+}
+
+// WithStateSecret sets the key that signs the sign-in state and last-user cookies.
+func (h *AuthHandler) WithStateSecret(secret []byte) *AuthHandler {
+	h.stateSecret = secret
+	return h
 }
 
 func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Principal) session.Principal {
@@ -117,7 +126,7 @@ func (h *AuthHandler) GetLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var lastEmail string
 	if h.AltAuth != nil {
-		lastEmail = h.AltAuth.LastKnownUser(r)
+		lastEmail = h.lastUser(r)
 	}
 	Render(w, r, templates.LoginLayout(h.Base(r, "Sign in"), templates.LoginView{
 		ReturnTo:  SanitizeReturnTo(r.URL.Query().Get("return_to")),
@@ -188,49 +197,70 @@ func (h *AuthHandler) pendingInviteDest(r *http.Request) string {
 	return web.Path(h.Cfg.HTTP.BasePath, "/invites/accept") + "?token=" + url.QueryEscape(token)
 }
 
-// OIDCComplete is the authl OnComplete callback — JIT-provisions + writes the session.
-func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r *http.Request, ident *authl.Identity) error {
+// OIDCComplete JIT-provisions the user of a validated ID token and writes the session.
+func (h *AuthHandler) OIDCComplete(ctx context.Context, w http.ResponseWriter, r *http.Request, tok *oidcrp.IDToken, returnTo string) {
 	if h.Auth == nil {
-		http.Error(w, "OIDC not configured", http.StatusInternalServerError)
-		return errors.New("web auth: OIDC callback with nil auth service")
+		h.LogErr("web auth: oidc callback", errors.New("nil auth service"))
+		h.signInFailed(w, r, http.StatusBadGateway, signInUnavailable)
+		return
 	}
 	principal, err := h.Auth.LoginOIDC(ctx, auth.OIDCClaims{
-		Issuer:  h.Cfg.OIDC.Issuer,
-		Subject: ident.Subject,
-		Email:   ident.Email,
-		Name:    ident.Name,
+		Issuer:        h.Cfg.OIDC.Issuer,
+		Subject:       tok.Subject,
+		Email:         tok.Email,
+		EmailVerified: tok.EmailVerified,
+		Name:          tok.Name,
 	})
 	if err != nil {
-		if user.IsNotInvitedError(err) || auth.IsNotInvitedError(err) || isNotInvitedApp(err) {
+		switch {
+		case user.IsNotInvitedError(err) || auth.IsNotInvitedError(err) || isNotInvitedApp(err):
 			h.renderNotInvited(w, r)
-			return nil
+		case user.IsEmailUnverifiedError(err):
+			h.signInFailed(w, r, http.StatusForbidden, signInEmailUnverified, err)
+		case user.IsIdentityConflictError(err):
+			h.signInFailed(w, r, http.StatusForbidden, signInIdentityConflict, err)
+		case isRefusal(err):
+			h.signInFailed(w, r, http.StatusForbidden, signInNotPermitted, err)
+		default:
+			h.LogErr("web auth: oidc onboard", err)
+			h.signInFailed(w, r, http.StatusInternalServerError, signInUnavailable, err)
 		}
-		h.LogErr("web auth: oidc onboard", err)
-		h.ErrorPage(w, r, http.StatusForbidden, "Not permitted", err.Error(), err)
-		return nil
+		return
 	}
-	principal.IDToken = ident.IDToken
+	principal.IDToken = tok.Raw
 	principal = h.reconcileGenesis(ctx, principal)
 	principal = h.resolveActiveTenant(ctx, principal)
 	if err := h.WriteSession(w, r, principal); err != nil {
 		h.LogErr("web auth: oidc write session", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Sign-in failed", "Could not persist session.", err)
-		return nil //nolint:nilerr // response already written via ErrorPage; returning err would double-write via authl.writeErr
+		return
 	}
+	h.setLastUser(w, r, tok.Email)
 	if h.Required != nil && h.Required.Load() {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/onboard/complete"), http.StatusSeeOther)
-		return nil
+		return
 	}
 	if dest := h.pendingInviteDest(r); dest != "" {
 		http.Redirect(w, r, dest, http.StatusSeeOther) //nolint:gosec // G710: dest is a server-built relative path; token comes from an HMAC-verified cookie via pendingInviteDest.
-		return nil
+		return
 	}
 	if h.Cfg.Mode == config.ModeCloud && principal.ActiveOrgID == uuid.Nil {
 		http.Redirect(w, r, web.Path(h.Cfg.HTTP.BasePath, "/signup/complete"), http.StatusSeeOther)
-		return nil
+		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, ""), http.StatusSeeOther)
-	return nil
+	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, returnTo), http.StatusSeeOther) //nolint:gosec // G710: return_to sanitized via ResolveReturnTo → SanitizeReturnTo
+}
+
+func isRefusal(err error) bool {
+	ae, ok := apperror.AsAppError(err)
+	if !ok {
+		return false
+	}
+	switch ae.GRPCCode() {
+	case codes.PermissionDenied, codes.FailedPrecondition, codes.InvalidArgument, codes.Unauthenticated:
+		return true
+	}
+	return false
 }
 
 func isNotInvitedApp(err error) bool {
@@ -255,7 +285,7 @@ func (h *AuthHandler) renderNotInvited(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// PostLogout clears the local session and, when cfg.OIDC.EndSessionOnLogout is set, also terminates the IdP session via RP-Initiated Logout. Off by default so the "Continue with X" hint stays seamless — subsequent OIDC logins reuse the OP session instead of prompting for credentials.
+// PostLogout clears the local session and, when cfg.OIDC.EndSessionOnLogout is set (the default), also ends the issuer session through RP-Initiated Logout.
 func (h *AuthHandler) PostLogout(w http.ResponseWriter, r *http.Request) {
 	var idToken string
 	if p, _, ok := h.LoadSession(r); ok && p.Source == session.SourceOIDC {
@@ -263,8 +293,12 @@ func (h *AuthHandler) PostLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ClearSession(w, r)
 	if h.Cfg.OIDC.EndSessionOnLogout && h.AltAuth != nil && idToken != "" {
-		if endURL := h.AltAuth.EndSessionURL(idToken, h.postLogoutRedirectURL(), ""); endURL != "" {
-			http.Redirect(w, r, endURL, http.StatusSeeOther)
+		endURL, err := h.AltAuth.EndSessionURL(r.Context(), idToken, h.postLogoutRedirectURL(), "")
+		if err != nil {
+			h.LogErr("web auth: end session url", err)
+		}
+		if endURL != "" {
+			http.Redirect(w, r, endURL, http.StatusSeeOther) //nolint:gosec // G710: the end_session_endpoint of the issuer's own discovery.
 			return
 		}
 	}
@@ -279,14 +313,14 @@ func (h *AuthHandler) postLogoutRedirectURL() string {
 	return strings.TrimRight(h.Cfg.HTTP.BaseURL, "/") + h.Cfg.HTTP.BasePath + "/"
 }
 
-// Register wires all routes onto mux; OIDC routes mount only when authl.Client is non-nil.
+// Register wires all routes onto mux; OIDC routes mount only when the relying party is configured.
 func (h *AuthHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /login", h.GetLogin)
 	mux.HandleFunc("POST /login", h.PostLogin)
 	mux.HandleFunc("GET /admin-login", h.GetAdminLogin)
 	mux.HandleFunc("POST /logout", h.PostLogout)
 	if h.AltAuth != nil {
-		mux.Handle("GET /login/oidc", h.AltAuth.StartHandler())
-		mux.Handle("GET /oauth/callback", h.AltAuth.CallbackHandler(h.OIDCComplete))
+		mux.HandleFunc("GET /login/oidc", h.GetOIDCStart)
+		mux.HandleFunc("GET /oauth/callback", h.GetOIDCCallback)
 	}
 }

@@ -81,7 +81,7 @@ func TestMCP_KeyNeverReachesASiblingProject(t *testing.T) {
 	ctx := t.Context()
 
 	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{
-		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent",
+		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent",
 	})
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
@@ -118,7 +118,7 @@ func TestMCP_OrgKeyReachesOnlyItsGrantedProjects(t *testing.T) {
 	ctx := t.Context()
 
 	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{
-		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent",
+		Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent",
 	})
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
@@ -174,7 +174,7 @@ func TestMCP_PersonalTokenActsForItsOwner(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	require.Contains(t, rec.Body.String(), `\"slug\":\"mcp-project\"`, "a member's token must read what the member can; body=%s", rec.Body.String())
 
-	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent"})
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent"})
 	require.NoError(t, err)
 	require.NoError(t, f.srv.Orgs.RemoveMember(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID}), o.ID, member.ID))
 	rec = f.call(t, token, callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
@@ -192,7 +192,7 @@ func TestMCP_MemberListIsAnOrgLevelRead(t *testing.T) {
 	ctx := t.Context()
 	seedForeignTenant(t, f)
 
-	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, Name: "MCP Agent"})
+	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent"})
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
 	require.NoError(t, err)

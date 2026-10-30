@@ -28,10 +28,11 @@ type GenesisConfig struct {
 
 // Claims is the subset of an OIDC identity token used by EnsureFromOIDC.
 type Claims struct {
-	Issuer  string
-	Subject string
-	Email   string
-	Name    string
+	Issuer        string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Name          string
 }
 
 // InviteFinder reports whether an email has any pending invite; used by CheckOIDCSignupEligibility.
@@ -217,27 +218,13 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: byIDP", err)
 	}
 
+	// SECURITY: an unknown subject is matched or bound by its email, so the issuer must vouch for that email.
+	if !claims.EmailVerified {
+		return nil, &EmailUnverifiedError{}
+	}
 	existing, err := s.store.ByEmail(ctx, email)
 	if err == nil {
-		dirty := false
-		name := strings.TrimSpace(claims.Name)
-		if name != "" && existing.Name != name {
-			if err := existing.Rename(name); err != nil {
-				return nil, err
-			}
-			dirty = true
-		}
-		if existing.IDPSubject == "" {
-			existing.IDPIssuer = issuer
-			existing.IDPSubject = subject
-			dirty = true
-		}
-		if dirty {
-			if err := s.store.Save(ctx, existing); err != nil {
-				return nil, s.unexpected(ctx, "user.EnsureFromOIDC: refresh", err)
-			}
-		}
-		return existing, nil
+		return s.relink(ctx, existing, issuer, subject, claims)
 	}
 	if !IsNotFoundError(err) {
 		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: byEmail", err)
@@ -262,6 +249,24 @@ func (s *Service) EnsureFromOIDC(ctx context.Context, claims Claims) (*User, err
 	return u, nil
 }
 
+// SECURITY: a verified email rebinds an unlinked row or one linked at another issuer; another subject at the same issuer is a different person.
+func (s *Service) relink(ctx context.Context, u *User, issuer, subject string, claims Claims) (*User, error) {
+	if u.IDPSubject != "" && u.IDPIssuer == issuer && u.IDPSubject != subject {
+		return nil, &IdentityConflictError{}
+	}
+	if name := strings.TrimSpace(claims.Name); name != "" && u.Name != name {
+		if err := u.Rename(name); err != nil {
+			return nil, err
+		}
+	}
+	u.IDPIssuer = issuer
+	u.IDPSubject = subject
+	if err := s.store.Save(ctx, u); err != nil {
+		return nil, s.unexpected(ctx, "user.EnsureFromOIDC: relink", err)
+	}
+	return u, nil
+}
+
 func (s *Service) refreshFromClaims(ctx context.Context, u *User, claims Claims) (*User, error) {
 	dirty := false
 	if name := strings.TrimSpace(claims.Name); name != "" && u.Name != name {
@@ -270,7 +275,7 @@ func (s *Service) refreshFromClaims(ctx context.Context, u *User, claims Claims)
 		}
 		dirty = true
 	}
-	if email := strings.ToLower(strings.TrimSpace(claims.Email)); email != "" && u.Email != email {
+	if email := strings.ToLower(strings.TrimSpace(claims.Email)); claims.EmailVerified && email != "" && u.Email != email {
 		if err := u.ChangeEmail(email); err != nil {
 			return nil, err
 		}

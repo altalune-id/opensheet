@@ -8,14 +8,19 @@ Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with 
 
 ## Catalog
 
-| Scope           | Level   | Grants                                 |
-| --------------- | ------- | -------------------------------------- |
-| `posts:read`    | project | Read posts and todos; list projects    |
-| `posts:write`   | project | Create, update, publish, unpublish     |
-| `posts:admin`   | project | Delete a post or todo                  |
-| `apikeys:read`  | project | List keys; `Whoami`                    |
-| `apikeys:write` | project | **Retired.** Validates, grants nothing |
-| `members:read`  | org     | List the org's members (`member_list`) |
+| Scope                | Level   | Grants                                                                   |
+| -------------------- | ------- | ------------------------------------------------------------------------ |
+| `sheets:read`        | project | List and get sheets; read published rows; list projects (`project_list`) |
+| `sheets:write`       | project | Write rows through the data plane                                        |
+| `sheets:admin`       | project | Create, update and delete sheets                                         |
+| `spreadsheets:read`  | project | List and get spreadsheets and their tabs                                 |
+| `spreadsheets:write` | project | Register, update and delete spreadsheets                                 |
+| `credentials:read`   | project | List the project's Google credentials                                    |
+| `credentials:write`  | project | Upload a service account, start a Google connect, delete a credential    |
+| `cache:purge`        | project | Purge a sheet's cached rows                                              |
+| `apikeys:read`       | project | List keys; `Whoami`                                                      |
+| `apikeys:write`      | project | **Retired.** Validates, grants nothing                                   |
+| `members:read`       | org     | List the org's members (`member_list`)                                   |
 
 - **Levels.** A `project` scope acts on data inside the projects a key reaches. An `org` scope acts
   on the org itself. A project key refuses an org scope (`APK003`); an org key may hold one; a
@@ -23,10 +28,9 @@ Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with 
 - **Who manages keys.** Org and project keys: an owner or admin person (`org.Service.RequireManager`),
   on every surface. A personal token: its owner, a member of its org. A key never manages keys.
 - **Every new key expires** within `apikey.MaxLifetime` (a year).
-- **No implication.** `posts:admin` does not grant `posts:write`. The check is
+- **No implication.** `sheets:admin` does not grant `sheets:write` or `sheets:read`. The check is
   `slices.Contains`. A key needing read + delete holds both strings.
-- **`posts:*` spans `blog` and `todo`.** A fork splitting them adds its own strings.
-- **`project_list` rides on `posts:read`** rather than a `projects:read` of its own. A new scope
+- **`project_list` rides on `sheets:read`** rather than a `projects:read` of its own. A new scope
   string obliges every operator to extend an external authorization server's catalog and re-attach
   the client before project discovery works at all.
 
@@ -35,27 +39,32 @@ Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with 
 ```mermaid
 flowchart LR
   K["key_… principal"] --> CP & DP & MCP
-  J["JWT principal"] --> CP & MCP
+  J["token principal"] --> CP & MCP
   J -. "401 at the door" .-> DP
   CP["control plane<br/>ScopeTable"] --> OK([checked])
   DP["data plane<br/>+ org/project + ResourceIDs"] --> OK
   MCP["mcp<br/>ScopeTable"] --> OK
-  CP -. "JWT exempt" .-> SKIP([not checked])
 ```
 
-| Surface       | Enforced by                             | Applies to               |
-| ------------- | --------------------------------------- | ------------------------ |
-| control plane | `authn.Interceptor` + `ScopeTable()`    | keys only — JWT exempt   |
-| data plane    | `apikey.Authorize` per route            | keys only — JWT gets 401 |
-| mcp           | `mcp.Server.authorize` + `ScopeTable()` | **everyone, JWT too**    |
-| console       | session membership and role             | —                        |
+| Surface       | Enforced by                             | Applies to                 |
+| ------------- | --------------------------------------- | -------------------------- |
+| control plane | `authn.Interceptor` + `ScopeTable()`    | keys and tokens            |
+| data plane    | `apikey.Authorize` per route            | keys only — a token is 401 |
+| mcp           | `mcp.Server.authorize` + `ScopeTable()` | keys and tokens            |
+| console       | session membership and role             | —                          |
 
-Two asymmetries, both deliberate:
-
-- **Control plane exempts a JWT** — a signed-in human carries their own authority. A procedure
-  missing from the table is **denied**, not admitted; `TestEveryRPCHasAScope` pins it.
-- **MCP exempts nobody** — an MCP token is a delegated grant an agent holds for a person, so
-  its scopes are the limit of that delegation. See [`mcp`](../mcp/README.md).
+- **No credential is exempt.** A token is a delegated grant a client holds for a person, so its
+  scopes are the limit of that delegation, on the control plane and on MCP alike. Only a console
+  session skips the table, and the console never calls `/api/`. A procedure missing from the table
+  is **denied**, not admitted; `TestEveryRPCHasAScope` pins it.
+- **Challenges on Connect.** A 401 carries `WWW-Authenticate: Bearer resource_metadata="…/api"`
+  and a scope denial adds `error="insufficient_scope", scope="<scope>"` (RFC 6750 Section 3).
+- **MCP step-up.** An OAuth token missing a tool's scope gets an RFC 6750 `insufficient_scope`
+  403 naming it. See [`mcp`](../mcp/README.md).
+- **Key management stays in the console.** `apikeys:write` is retired, so no key can hold it; do
+  not register it on the Othra resource server either. `APIKeyService.Create`/`Revoke` are
+  `authn.SessionOnly` in the scope table: every key and token gets `PermissionDenied` with no
+  `insufficient_scope` challenge.
 
 Every surface narrows past the scope with one rule, `session.Principal.Reaches*`: a key reaches
 only the projects it was granted — one for a project key, the grant for an org key or personal

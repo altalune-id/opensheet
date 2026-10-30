@@ -91,19 +91,32 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 
 ## Identity and tokens
 
-| Key                    | Default             | Awareness                         | Meaning                                                            |
-| ---------------------- | ------------------- | --------------------------------- | ------------------------------------------------------------------ |
-| `oidc.issuer`          | `""`                | `required, mode:cloud`            | Login IdP. Its presence is what enables the OIDC button.           |
-| `oidc.clientID`        | `""`                | `required, mode:cloud`            | Confidential client for the web flow.                              |
-| `oidc.clientSecret`    | `""`                | `required, mode:cloud, secret`    | Paired with `clientID`.                                            |
-| `oidc.resource`        | `""`                | `-`                               | RFC 8707 resource sent with the authorization request.             |
-| `http.baseURL`         | `""`                | `required`                        | Public URL. MCP derives its audience from it.                      |
-| `http.stateSecret`     | `""`                | `required, secret, bootstrap`     | Signs OAuth state and the `sid` cookie. Empty mints an ephemeral.  |
-| `tokens.issuer`        | `""`                | `required, mode:cloud`            | Issuer the bearer verifier trusts. **MCP needs it in every mode.** |
-| `tokens.jwksURL`       | `""`                | `required, mode:cloud`            | Key set for that verifier.                                         |
-| `tokens.audience`      | `urn:opensheet:api` | `required, mode:cloud, bootstrap` | Audience the control-plane verifier pins. Not the MCP audience.    |
-| `tokens.clockSkew`     | `60s`               | `-`                               | Leeway on `exp` / `nbf`.                                           |
-| `tokens.supportedAlgs` | `RS256,ES256`       | `-`                               | Everything else is rejected before signature checking.             |
+| Key                                 | Default                 | Awareness                         | Meaning                                                                                   |
+| ----------------------------------- | ----------------------- | --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `oidc.issuer`                       | `""`                    | `required, mode:cloud`            | The Othra project issuer (`https://<othra>/p/<handle>`). Enables the OIDC button.         |
+| `oidc.clientID`                     | `""`                    | `required, mode:cloud`            | Confidential Othra client for the web flow.                                               |
+| `oidc.clientSecret`                 | `""`                    | `required, mode:cloud, secret`    | Paired with `clientID`.                                                                   |
+| `oidc.cliClientID`                  | `""`                    | `-`                               | Native public Othra client for `auth login`, redirect `http://127.0.0.1/callback`.        |
+| `oidc.redirectPort`                 | `0`                     | `-`                               | Loopback port `auth login` binds; `0` picks a free one.                                   |
+| `oidc.endSessionOnLogout`           | `true`                  | `-`                               | Signing out also ends the Othra session (RP-Initiated Logout).                            |
+| `http.baseURL`                      | `""`                    | `required`                        | Public URL. Both resource identifiers derive from it.                                     |
+| `http.stateSecret`                  | `""`                    | `required, secret, bootstrap`     | Signs the sign-in state cookie, the `sid` cookie and the Google connect and picker state. |
+| `tokens.issuer`                     | `""`                    | `required, mode:cloud`            | Issuer the bearer verifier trusts; must equal `oidc.issuer`. **MCP needs it always.**     |
+| `tokens.audience`                   | `baseURL+basePath+/api` | `required, mode:cloud, bootstrap` | The control plane's Othra resource identifier. Not the MCP audience.                      |
+| `tokens.clockSkew`                  | `60s`                   | `-`                               | Leeway on `exp` / `iat` / `nbf`.                                                          |
+| `tokens.introspection.clientID`     | `""`                    | `-`                               | The API resource server's public id; set it to accept `othra_pt_` personal tokens.        |
+| `tokens.introspection.clientSecret` | `""`                    | `secret`                          | Its introspection secret (`othra_rs_…`).                                                  |
+
+- Signing algorithms come from the issuer's discovery document (RS256 for Othra); an access
+  token must carry `typ: at+jwt`, so an ID token is never accepted as one.
+- Each resource serves its RFC 9728 document at `/.well-known/oauth-protected-resource{basePath}/api`
+  and `…/mcp`; Othra reads it before it mints tokens for that resource.
+- Personal tokens are introspected on every call, never cached, so a revoked one stops at once.
+- `cloud` refuses to boot without `oidc.clientID` and `oidc.clientSecret`, yet Othra registers a
+  resource server only after reading its RFC 9728 document. Boot with placeholders first; the
+  registration order is in [`deployment`](../deployment/README.md#oidc).
+- `cloud` needs `db.driver=postgres`; a local recipe is in
+  [`deployment`](../deployment/README.md#cloud-mode-locally).
 
 ## Machine surfaces
 

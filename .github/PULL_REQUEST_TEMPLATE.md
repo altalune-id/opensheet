@@ -19,7 +19,7 @@ feat | fix | chore | refactor | docs | test | perf | build | ci
 
 ## Breaking changes
 
-<!-- Root packages (authl, logger, mailer, nanoid, reqid, telemetry, worker, internal/platform) affected? Migration path? Delete this section if none. -->
+<!-- Root packages (logger, mailer, nanoid, reqid, telemetry, worker, internal/platform) affected? Migration path? Delete this section if none. -->
 
 ## Notes for the reviewer
 

@@ -171,7 +171,8 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		orgStoreForOnboard{store: orgStore},
 		projectStoreForOnboard{store: projectStore},
 	)
-	chain := authn.Chain{keyAuthn, user.NewAuthenticator(tokens.NewAuthenticator(k.Verifier), userStore, tenantResolution)}
+	tokenAuthn := tokens.NewAuthenticator(k.Verifier, credentialScheme(keyScheme, cfg.Tokens.Introspection))
+	chain := authn.Chain{keyAuthn, user.NewAuthenticator(tokenAuthn, userStore, tenantResolution)}
 
 	return &Services{
 		UserStore:    userStore,

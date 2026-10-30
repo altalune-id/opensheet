@@ -30,14 +30,13 @@ listener at all: it either boots the graph in-process or speaks HTTP to a remote
 NOTE: the dispatch surface sends to **tenants**. `internal/platform/notify` sends to
 **operators**. They are never the same code path.
 
-Four names S7 introduces, all detailed in [`mcp`](docs/mcp/README.md):
+Three names S7 introduces, all detailed in [`mcp`](docs/mcp/README.md):
 
-| Term            | Where                                           | What it is                                                                                                               |
-| --------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| tool            | `option (mcp.v1.tool)` on an RPC in `api/*/v1/` | A control-plane RPC republished for an MCP host. A tool and its RPC are one verb reached two ways — never two impls.     |
-| `mcp.audience`  | derived: `baseURL` + `basePath` + `/mcp`        | The RFC 8707 resource id the token verifier pins. `mcp.audienceOverride` accepts one that differs from the mount.        |
-| challenge token | `mcp.challengeToken`                            | Issued by authl (Resource servers → the MCP one → Start), never generated locally. Rotating it breaks the deployment.    |
-| Apps UI         | `mcp.appsUI`, `internal/mcp/ui/`                | Optional: publishes the UI resource and binds `_meta.ui`. Assets are digest-pinned; re-vendor with `make mcp-ui-vendor`. |
+| Term           | Where                                           | What it is                                                                                                               |
+| -------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| tool           | `option (mcp.v1.tool)` on an RPC in `api/*/v1/` | A control-plane RPC republished for an MCP host. A tool and its RPC are one verb reached two ways — never two impls.     |
+| `mcp.audience` | derived: `baseURL` + `basePath` + `/mcp`        | The RFC 8707 resource id the token verifier pins. `mcp.audienceOverride` accepts one that differs from the mount.        |
+| Apps UI        | `mcp.appsUI`, `internal/mcp/ui/`                | Optional: publishes the UI resource and binds `_meta.ui`. Assets are digest-pinned; re-vendor with `make mcp-ui-vendor`. |
 
 ## Architecture
 
@@ -60,7 +59,7 @@ NOTE: "platform package" is a **category, not a directory**. Some live under
 `internal/platform/<name>/` (`authn`, `capabilities`, `config`, `db`, `events`, `notify`,
 `outbox`, `queue`, `sealer`, `session`, `surfaces`, `tenant`, `tokens`); others are exported
 roots (`worker/`, `scheduler/`, `logger/`, `telemetry/`, `mailer/`, `nanoid/`,
-`reqid/`, `authl/`, `httpclient/`, `mcp/`).
+`reqid/`, `httpclient/`, `mcp/`).
 
 ## Tenancy
 
@@ -87,18 +86,18 @@ Three DB credentials, three jobs:
 Tenant scope answers _whose rows_. A scope answers _which verbs_. They are independent
 checks and both run.
 
-| Term                  | Where                                      | What it is                                                                                                                                                     |
-| --------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| scope                 | `internal/platform/authn/scope.go`         | A permission string minted into an API key or JWT: `posts:read`, `posts:write`, `posts:admin`, `apikeys:read`, `members:read`; `apikeys:write` is retired.     |
-| scope catalog         | `authn.MintableScopes()` / `authn.Valid()` | The closed set minting is gated on. A **wire contract** — additive only; a retired scope still validates but is never minted.                                  |
-| scope level           | `authn.LevelOf()`                          | `project` (acts on data inside the projects a key reaches) or `org` (acts on the org itself; refused on a project key).                                        |
-| project key           | `apikey.KindProject`                       | An API key bound to one project for life.                                                                                                                      |
-| org key               | `apikey.KindOrg`                           | An API key reaching its grant (`apikey.ProjectGrant`: all projects, or named ones in `api_key_projects`). Created by an owner or admin; the grant only widens. |
-| personal access token | `apikey.KindPersonal`                      | A key a member mints for themselves in one org, under Settings. Never exceeds its owner; dies when the owner leaves.                                           |
-| reach                 | `session.Principal.Reaches*`               | The one rule every surface asks: may this caller act inside this org, project, resource.                                                                       |
-| `ScopeTable`          | `internal/controlplane/scopes.go:12`       | Maps each RPC procedure to the scope it requires. Read by both the control plane interceptor and the MCP surface.                                              |
-| `Principal`           | `internal/platform/session/session.go:21`  | The authenticated caller. A key principal keeps `UserID == uuid.Nil`, so it is never mistaken for a signed-in human.                                           |
-| `authn.Chain`         | `internal/platform/authn/authn.go:48`      | Tries each `Authenticator` in order and returns the first `Principal`; otherwise `UnauthorizedError`.                                                          |
+| Term                  | Where                                      | What it is                                                                                                                                                                                                                                                       |
+| --------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| scope                 | `internal/platform/authn/scope.go`         | A permission string minted into an API key or JWT: `sheets:read`, `sheets:write`, `sheets:admin`, `spreadsheets:read`, `spreadsheets:write`, `credentials:read`, `credentials:write`, `cache:purge`, `apikeys:read`, `members:read`; `apikeys:write` is retired. |
+| scope catalog         | `authn.MintableScopes()` / `authn.Valid()` | The closed set minting is gated on. A **wire contract** — additive only; a retired scope still validates but is never minted.                                                                                                                                    |
+| scope level           | `authn.LevelOf()`                          | `project` (acts on data inside the projects a key reaches) or `org` (acts on the org itself; refused on a project key).                                                                                                                                          |
+| project key           | `apikey.KindProject`                       | An API key bound to one project for life.                                                                                                                                                                                                                        |
+| org key               | `apikey.KindOrg`                           | An API key reaching its grant (`apikey.ProjectGrant`: all projects, or named ones in `api_key_projects`). Created by an owner or admin; the grant only widens.                                                                                                   |
+| personal access token | `apikey.KindPersonal`                      | A key a member mints for themselves in one org, under Settings. Never exceeds its owner; dies when the owner leaves.                                                                                                                                             |
+| reach                 | `session.Principal.Reaches*`               | The one rule every surface asks: may this caller act inside this org, project, resource.                                                                                                                                                                         |
+| `ScopeTable`          | `internal/controlplane/scopes.go:12`       | Maps each RPC procedure to the scope it requires. Read by both the control plane interceptor and the MCP surface.                                                                                                                                                |
+| `Principal`           | `internal/platform/session/session.go:21`  | The authenticated caller. A key principal keeps `UserID == uuid.Nil`, so it is never mistaken for a signed-in human.                                                                                                                                             |
+| `authn.Chain`         | `internal/platform/authn/authn.go:48`      | Tries each `Authenticator` in order and returns the first `Principal`; otherwise `UnauthorizedError`.                                                                                                                                                            |
 
 NOTE: scopes do **not** imply one another — the check is `slices.Contains`. A key needing
 read plus delete holds both strings. Full catalog and per-surface enforcement:
@@ -217,12 +216,12 @@ registers a **spreadsheet**, publishes a **sheet**, and mints **API keys** for i
 
 ### API keys and scopes
 
-| Term           | Where                                         | What it is                                                                                                                                                                                                                                                                        |
-| -------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `osk_`         | `api.keyPrefix`                               | opensheet's API key prefix: the template's key scheme, configured.                                                                                                                                                                                                                |
-| resource grant | `APIKey.ResourceIDs`                          | In opensheet a resource is a **sheet**. A non-empty grant limits the key to those sheets; an empty one means every sheet the key reaches. A sheet-restricted key fails `AuthorizeProject`, so the tabs routes refuse it.                                                          |
-| scope catalog  | `internal/platform/authn/scope.go`            | opensheet's domain scopes `sheets:read`, `sheets:write`, `sheets:admin`, `spreadsheets:read`, `spreadsheets:write`, `credentials:read`, `credentials:write` and `cache:purge`, in place of the template's `posts:*` examples. Wire contract with authl's Resource Server catalog. |
-| OAuth scope    | `gworkspace.Scopes()`, `gsheet.ScopeReadOnly` | A Google permission URL consented to on Google's screen and pinned on the authorize URL. Unrelated to API key scopes.                                                                                                                                                             |
+| Term           | Where                                         | What it is                                                                                                                                                                                                                                                                                                       |
+| -------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `osk_`         | `api.keyPrefix`                               | opensheet's API key prefix: the template's key scheme, configured.                                                                                                                                                                                                                                               |
+| resource grant | `APIKey.ResourceIDs`                          | In opensheet a resource is a **sheet**. A non-empty grant limits the key to those sheets; an empty one means every sheet the key reaches. A sheet-restricted key fails `AuthorizeProject`, so the tabs routes refuse it.                                                                                         |
+| scope catalog  | `internal/platform/authn/scope.go`            | opensheet's domain scopes `sheets:read`, `sheets:write`, `sheets:admin`, `spreadsheets:read`, `spreadsheets:write`, `credentials:read`, `credentials:write` and `cache:purge`, in place of the template's `posts:*` examples. Wire contract with the scopes registered on opensheet's resource servers in Othra. |
+| OAuth scope    | `gworkspace.Scopes()`, `gsheet.ScopeReadOnly` | A Google permission URL consented to on Google's screen and pinned on the authorize URL. Unrelated to API key scopes.                                                                                                                                                                                            |
 
 ### Google integration
 

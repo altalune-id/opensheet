@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,15 +82,6 @@ func TestResolveStateSecret_InvalidBase64Errors(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestResolveStateSecret_EmptyReturnsEphemeral(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{}
-	got, err := resolveStateSecret(cfg, discardLogger())
-	require.NoError(t, err)
-	assert.NotEmpty(t, got)
-	assert.GreaterOrEqual(t, len(got), 32)
-}
-
 // TestNewWebDeps_CarriesTheResolvedStateSecret guards the double-keying regression: web Deps must hold the bytes resolveStateSecret produced, not a second derivation from cfg.HTTP.StateSecret.
 func TestNewWebDeps_CarriesTheResolvedStateSecret(t *testing.T) {
 	t.Parallel()
@@ -142,13 +134,18 @@ func TestBootClient_Wires(t *testing.T) {
 	assert.Equal(t, cfg, c.Cfg)
 }
 
-func TestBuildAltAuth_NilWhenOIDCUnset(t *testing.T) {
+func TestBuildOIDCClient_NilWhenOIDCUnset(t *testing.T) {
 	t.Parallel()
 	cfg := config.Defaults()
 	cfg.OIDC.Issuer = ""
-	got, err := buildAltAuth(context.Background(), cfg, bytes.Repeat([]byte{0x01}, 32))
-	require.NoError(t, err)
-	assert.Nil(t, got)
+	assert.Nil(t, buildOIDCClient(cfg, nil))
+}
+
+func TestOIDCHTTPClient_RefusesRedirects(t *testing.T) {
+	t.Parallel()
+	c := oidcHTTPClient()
+	require.NotNil(t, c.CheckRedirect)
+	assert.ErrorIs(t, c.CheckRedirect(nil, nil), http.ErrUseLastResponse)
 }
 
 // TestOIDCRedirectURL pins the /oauth/callback path so a typo can't silently break OIDC login.

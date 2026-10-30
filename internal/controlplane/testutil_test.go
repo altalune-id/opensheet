@@ -69,13 +69,12 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	kernel := &platform.Kernel{
 		Log:      log,
 		Reporter: reporter,
-		Verifier: stubVerifier{principal: p, err: verr},
+		Verifier: stubVerifier{principal: fullTokenGrant(p), err: verr},
 	}
 
 	srv := controlplane.New(nil, kernel, controlplane.Deps{Orgs: orgSvc, Projects: projectSvc})
-	srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier)}
+	srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = apikey.NewService(keys, apikey.Scheme{}, fakes.PermissiveMembers(), fakes.NewOrgProjects(), log, reporter.Unexpected)
-	srv.KeyPrefix = apikey.DefaultPrefix
 	ref := srv.ReferenceHandler(controlplane.NewTodoService(todoSvc, tds, projectSvc))
 	mux := http.NewServeMux()
 	mux.Handle("/api/", srv.Handler(""))
@@ -83,6 +82,17 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &harness{t: t, server: ts, orgs: orgs, projs: projs, todos: tds, keys: keys}
+}
+
+// NOTE: a token principal is held to the scope table, so the harness's person carries every scope unless a test narrows it.
+func fullTokenGrant(p session.Principal) session.Principal {
+	if p.Source == "" {
+		p.Source = session.SourceToken
+	}
+	if p.Scopes == nil {
+		p.Scopes = authn.AllScopes()
+	}
+	return p
 }
 
 func withKey(plaintext string) func(http.Header) {

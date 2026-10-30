@@ -32,7 +32,7 @@ Worked example: `blog_list` and `blog_publish` in `api/blog/v1/blog.proto`.
   message tells the caller to run `project_list` first.
 - **Org-scoped tool** (`member_list`) — the `projectId` argument and its check disappear. The tool acts on `ActiveOrgID` alone, so it takes an `org`-level scope and an org-wide read is the blast radius of one delegated token.
 - **Not tenant-scoped** — nothing enters a scope, and a tenant-scoped store call fails with `tenant: missing context`.
-- A JWT's org comes from the local user's membership, never from the token's `org_id` claim — the verifier puts it on `ClaimedOrgID` and `internal/user/authn.go` resolves the real one. Pinned by `TestMCP_JWTResolvesItsTenantFromMembership`.
+- A token's org comes from the local user's membership, never from the token — the verifier reads no org claim and `internal/user/authn.go` resolves it. Pinned by `TestMCP_JWTResolvesItsTenantFromMembership`.
 
 ## Gotchas
 

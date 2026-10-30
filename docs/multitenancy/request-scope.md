@@ -101,15 +101,13 @@ interchangeable downstream.
 - **An argument narrows, it never re-targets.** A key's grant is fixed at mint; a project out of reach is
   forbidden, a post out of reach reads as absent. Pinned by `TestMCP_KeyNeverReachesASiblingProject`.
 
-### A JWT's org comes from membership, never from the claim
+### A token's org comes from membership, never from the token
 
-- **The verifier puts `org_id` on `ClaimedOrgID`, never `ActiveOrgID`**
-  (`internal/platform/tokens/verifier.go`), so an issuer cannot name the tenant.
-- **`internal/user/authn.go` resolves the real org from the local user's membership.** A claim naming an org
-  the user does not belong to refuses the whole credential, and `OrgClaimNotMemberError.Unwrap` returns
-  `*authn.UnauthorizedError` so it stays a masked 401.
-- **No claim resolves a lone membership**, but a multi-org user whose token names no org resolves nothing
-  rather than guessing — it fails later as `UnscopedError`.
+- **The verifier reads no org claim** (`internal/platform/tokens/verifier.go`), so an issuer cannot name
+  the tenant; Othra's access tokens carry none.
+- **`internal/user/authn.go` resolves the org from the local user's membership.** A lone membership
+  resolves that org and its first project; a multi-org user resolves nothing rather than guessing — it
+  fails later as `UnscopedError`.
 - Pinned end to end by `TestMCP_JWTResolvesItsTenantFromMembership`.
 
 ## S3 data plane — path first, then the key must agree

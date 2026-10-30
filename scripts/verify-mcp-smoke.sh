@@ -65,7 +65,7 @@ ISSUER="http://127.0.0.1:${ISSUER_PORT}"
 BASE="http://127.0.0.1:${APP_PORT}"
 AUDIENCE="${BASE}/mcp"
 
-# mcp.enabled requires tokens.issuer and the verifier discovers it at boot; API keys carry the calls.
+# mcp.enabled requires tokens.issuer; discovery is lazy and API keys carry the calls.
 mkdir -p "${tmpdir}/issuer/.well-known"
 cat >"${tmpdir}/issuer/.well-known/openid-configuration" <<JSON
 {"issuer":"${ISSUER}",
@@ -74,7 +74,8 @@ cat >"${tmpdir}/issuer/.well-known/openid-configuration" <<JSON
  "jwks_uri":"${ISSUER}/jwks",
  "response_types_supported":["code"],
  "subject_types_supported":["public"],
- "id_token_signing_alg_values_supported":["EdDSA"]}
+ "code_challenge_methods_supported":["S256"],
+ "id_token_signing_alg_values_supported":["RS256"]}
 JSON
 
 python3 -m http.server "$ISSUER_PORT" --bind 127.0.0.1 --directory "${tmpdir}/issuer" \
@@ -315,6 +316,13 @@ resource=$(jqx "$meta_out" '.resource') || fail "${metadata_url} names no resour
     || fail "metadata resource is ${resource}, want ${AUDIENCE} — the verifier enforces that audience"
 require_true "$meta_out" "[.authorization_servers[]] | index(\"${ISSUER}\") != null" \
     "metadata does not name ${ISSUER} as an authorization server"
+
+api_meta_out="${tmpdir}/api-metadata.json"
+code=$(curl -s -o "$api_meta_out" -w "%{http_code}" "${BASE}/.well-known/oauth-protected-resource/api")
+[ "$code" = "200" ] || fail "GET the API's RFC 9728 document returned ${code}, want 200"
+api_resource=$(jqx "$api_meta_out" '.resource') || fail "the API metadata names no resource"
+[ "$api_resource" = "${BASE}/api" ] \
+    || fail "API metadata resource is ${api_resource}, want ${BASE}/api — the control plane is its own resource"
 require_true "$meta_out" '[.scopes_supported[]] | index("sheets:read") != null and index("members:read") != null' \
     "metadata scopes_supported does not cover the registered tools' scopes"
 

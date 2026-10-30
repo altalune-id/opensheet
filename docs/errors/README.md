@@ -35,13 +35,15 @@ In the Status column, `—` means registered but not yet constructed.
 
 ## USR — Users
 
-| Code     | Constant                         | Status             | Meaning             |
-| -------- | -------------------------------- | ------------------ | ------------------- |
-| `USR001` | `apperror.CodeUserNotFound`      | `NotFound`         | User Not Found      |
-| `USR002` | `apperror.CodeUserAlreadyExists` | `AlreadyExists`    | User Already Exists |
-| `USR003` | `apperror.CodeUserNotInvited`    | `PermissionDenied` | User Not Invited    |
-| `USR004` | `apperror.CodeUserInvalidEmail`  | `InvalidArgument`  | User Invalid Email  |
-| `USR005` | `apperror.CodeUserInvalidName`   | `InvalidArgument`  | User Invalid Name   |
+| Code     | Constant                            | Status             | Meaning                |
+| -------- | ----------------------------------- | ------------------ | ---------------------- |
+| `USR001` | `apperror.CodeUserNotFound`         | `NotFound`         | User Not Found         |
+| `USR002` | `apperror.CodeUserAlreadyExists`    | `AlreadyExists`    | User Already Exists    |
+| `USR003` | `apperror.CodeUserNotInvited`       | `PermissionDenied` | User Not Invited       |
+| `USR004` | `apperror.CodeUserInvalidEmail`     | `InvalidArgument`  | User Invalid Email     |
+| `USR005` | `apperror.CodeUserInvalidName`      | `InvalidArgument`  | User Invalid Name      |
+| `USR006` | `apperror.CodeUserEmailUnverified`  | `PermissionDenied` | User Email Unverified  |
+| `USR007` | `apperror.CodeUserIdentityConflict` | `PermissionDenied` | User Identity Conflict |
 
 ## ORG — Organizations
 
@@ -103,9 +105,10 @@ In the Status column, `—` means registered but not yet constructed.
 
 ## TKN — Tokens
 
-| Code     | Constant                    | Status            | Meaning       |
-| -------- | --------------------------- | ----------------- | ------------- |
-| `TKN001` | `apperror.CodeTokenExpired` | `Unauthenticated` | Token Expired |
+| Code     | Constant                        | Status            | Meaning           |
+| -------- | ------------------------------- | ----------------- | ----------------- |
+| `TKN001` | `apperror.CodeTokenExpired`     | `Unauthenticated` | Token Expired     |
+| `TKN002` | `apperror.CodeTokenUnavailable` | `Unavailable`     | Token Unavailable |
 
 ## ONB — Onboarding
 

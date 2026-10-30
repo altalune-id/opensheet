@@ -5,19 +5,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/altalune-id/oidcrp"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"altalune.id/opensheet/authl"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/cli/render"
+	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
+)
+
+const (
+	cliRedirectURI  = "http://127.0.0.1/callback"
+	loopbackTimeout = 5 * time.Minute
 )
 
 func newAuthCmd(bootServer ServerBootFn, bootClient ClientBootFn) *cobra.Command {
@@ -116,19 +124,20 @@ func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server, _ logi
 	if s.Platform == nil || s.Platform.AltAuth == nil {
 		return errors.New("login: OIDC not configured (oidc.issuer / oidc.clientID)")
 	}
-	opts := []authl.LoopbackOption{}
-	if p := s.Cfg.OIDC.RedirectPort; p > 0 {
-		opts = append(opts, authl.WithLoopbackPort(p))
+	if s.Cfg.OIDC.CLIClientID == "" {
+		return errors.New("login: oidc.cliClientID not set; register a native client for the CLI (set OPENSHEET_OIDC_CLI_CLIENT_ID)")
 	}
-	ident, err := s.Platform.AltAuth.RunLoopback(ctx, opts...)
+	rp := cliRelyingParty(s.Cfg.OIDC, s.Platform.AltAuth.Keys().HTTPClient())
+	tok, err := loopbackSignIn(ctx, rp, s.Cfg.OIDC.RedirectPort, cmd.ErrOrStderr(), oidcrp.OpenBrowser)
 	if err != nil {
 		return fmt.Errorf("login: loopback: %w", err)
 	}
 	p, err := s.Auth.LoginOIDC(ctx, auth.OIDCClaims{
-		Issuer:  s.Cfg.OIDC.Issuer,
-		Subject: ident.Subject,
-		Email:   ident.Email,
-		Name:    ident.Name,
+		Issuer:        s.Cfg.OIDC.Issuer,
+		Subject:       tok.Subject,
+		Email:         tok.Email,
+		EmailVerified: tok.EmailVerified,
+		Name:          tok.Name,
 	})
 	if err != nil {
 		if auth.IsNotInvitedError(err) {
@@ -141,6 +150,37 @@ func runLoopback(ctx context.Context, cmd *cobra.Command, s *boot.Server, _ logi
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Signed in as %s (%s)\n", p.Email, p.Source)
 	return nil
+}
+
+// SECURITY: the CLI is a native public client (RFC 8252), so it never carries the web client's secret.
+func cliRelyingParty(cfg config.OIDCConfig, client *http.Client) *oidcrp.Client {
+	return oidcrp.New(oidcrp.Config{
+		Issuer:      cfg.Issuer,
+		ClientID:    cfg.CLIClientID,
+		RedirectURI: cliRedirectURI,
+		Scopes:      cfg.Scopes,
+		HTTPClient:  client,
+	})
+}
+
+func loopbackSignIn(ctx context.Context, rp *oidcrp.Client, port int, out io.Writer, open func(context.Context, string) error) (*oidcrp.IDToken, error) {
+	ctx, cancel := context.WithTimeout(ctx, loopbackTimeout)
+	defer cancel()
+	set, err := rp.RunLoopback(ctx, oidcrp.LoopbackConfig{
+		Port:   port,
+		Prompt: "select_account",
+		Open: func(ctx context.Context, authURL string) error {
+			_, _ = fmt.Fprintf(out, "Open this URL to sign in:\n  %s\n", authURL)
+			if err := open(ctx, authURL); err != nil {
+				_, _ = fmt.Fprintln(out, "Could not open a browser; open the URL above.")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return set.IDToken, nil
 }
 
 func readPassword(cmd *cobra.Command, reader *bufio.Reader, stdinMode bool) (string, error) {
@@ -257,7 +297,7 @@ func newAuthTokenMintCmd(_ ServerBootFn) *cobra.Command {
 				return ErrNotSignedIn
 			}
 			_ = session.SourceToken
-			return errors.New("auth token mint: not implemented yet (pending the tokens issuer)")
+			return errors.New("auth token mint: not implemented yet (needs a token issuer)")
 		},
 	}
 	cmd.Flags().DurationVar(&ttl, "ttl", 15*time.Minute, "Token time-to-live (e.g. 15m, 1h)")

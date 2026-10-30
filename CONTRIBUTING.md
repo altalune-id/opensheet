@@ -8,7 +8,7 @@
 4. Refactor with all tests green.
 
 Coverage floor: aggregate ≥ 90%, service ≥ 85%. No CI job enforces the
-number; reviewers do. Exported root packages (`authl/`, `httpclient/`,
+number; reviewers do. Exported root packages (`httpclient/`,
 `logger/`, `mailer/`, `mcp/`, `nanoid/`, `reqid/`, `scheduler/`,
 `telemetry/`, `worker/`) get rich table-driven tests — they are copied
 verbatim into forks, so signature changes here are expensive to propagate.

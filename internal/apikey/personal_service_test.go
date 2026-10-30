@@ -2,6 +2,7 @@ package apikey_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -161,6 +162,24 @@ func TestRevokePersonalOfIsPermanentAndScoped(t *testing.T) {
 	f.members.SeatMember(f.orgID, f.alice)
 	_, err = apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, f.members).Authenticate(t.Context(), plaintext)
 	assert.True(t, authn.IsUnauthorizedError(err), "a re-invited member's old token must stay dead, got %v", err)
+}
+
+type unreachableMembers struct{}
+
+func (unreachableMembers) RequireManager(context.Context, uuid.UUID, uuid.UUID) error {
+	return errors.New("connection refused")
+}
+
+func (unreachableMembers) RequireMember(context.Context, uuid.UUID, uuid.UUID) error {
+	return errors.New("connection refused")
+}
+
+func TestAPersonalTokenDuringAMembershipOutageIsUnavailable(t *testing.T) {
+	f := newPersonalFixture(t)
+	_, plaintext := f.mint(t, f.alice, apikey.ProjectGrant{All: true})
+
+	_, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, unreachableMembers{}).Authenticate(t.Context(), plaintext)
+	assert.True(t, authn.IsUnavailableError(err), "a membership lookup failure must not read as a refused token, got %T: %v", err, err)
 }
 
 func TestAPersonalTokenWhoseOwnerWasDeletedIsRefused(t *testing.T) {
