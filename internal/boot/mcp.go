@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 
 	"github.com/altalune-id/oidcrp"
@@ -70,6 +71,7 @@ func buildMCPSurface(cfg *config.Config, log *slog.Logger, s *Services, apiSrv *
 		rootmcp.WithErrorMapper(mcpErrorPayload),
 		rootmcp.WithLogger(log),
 		rootmcp.WithUI(cfg.MCP.AppsUI),
+		rootmcp.WithAllowedHosts(mcpPublicHost(cfg.HTTP)...),
 	}
 	srv := rootmcp.NewServer(opts...)
 	if cfg.MCP.AppsUI {
@@ -99,6 +101,14 @@ func blogListResource() rootmcp.UIResource {
 		Body:          ui.Document(),
 		PrefersBorder: new(bool),
 	}
+}
+
+func mcpPublicHost(c config.HTTPConfig) []string {
+	u, err := url.Parse(c.BaseURL)
+	if err != nil || u.Hostname() == "" {
+		return nil
+	}
+	return []string{u.Hostname()}
 }
 
 func mcpTokensConfig(cfg *config.Config) tokens.Config {

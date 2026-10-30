@@ -19,6 +19,10 @@ The control plane's document, `/.well-known/oauth-protected-resource{basePath}/a
 Streamable HTTP, stateless, JSON. `MCP` chain = `edge` + `RecoverJSON` — no session, no i18n,
 no SSR gate (R5).
 
+Behind a same-host proxy, a loopback connection may carry `http.baseURL`'s host as its `Host`
+(`mcp.WithAllowedHosts`). Every other public `Host` on a loopback connection gets 403, as DNS
+rebinding.
+
 ## Setup
 
 ```bash

@@ -469,3 +469,30 @@ func connect(t *testing.T, srv *mcp.Server, scopes ...string) *sdkmcp.ClientSess
 	t.Cleanup(func() { _ = session.Close() })
 	return session
 }
+
+func TestHandlerServesAProxiedHostOverLoopback(t *testing.T) {
+	ts := httptest.NewServer(mcp.NewServer(mcp.WithAllowedHosts("app.example.com")).Handler())
+	t.Cleanup(ts.Close)
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "app.example.com"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %q; a same-host reverse proxy must reach the handler", resp.StatusCode, got)
+	}
+}
