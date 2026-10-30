@@ -3,6 +3,7 @@ package tokens_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	apiAudience = "https://app.example.com/api"
-	mcpAudience = "https://app.example.com/mcp"
+	apiAudience   = "https://app.example.com/api"
+	mcpAudience   = "https://app.example.com/mcp"
+	personalToken = tokens.PersonalTokenPrefix + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg37cCQ0"
 )
 
 func newVerifier(t *testing.T, idp *oidcrptest.IDP, cfg tokens.Config) tokens.Verifier {
@@ -110,7 +112,7 @@ func TestVerify_PersonalTokenIsIntrospectedAndRevokedAtOnce(t *testing.T) {
 	idp := oidcrptest.New(t)
 	idp.Introspector("rs-api", "rs-secret")
 	v := newVerifier(t, idp, tokens.Config{Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"}})
-	const pt = tokens.PersonalTokenPrefix + "abc"
+	const pt = personalToken
 	idp.Opaque(pt, map[string]any{"aud": apiAudience, "sub": idp.User.Subject, "scope": "posts:read", "exp": time.Now().Add(time.Hour).Unix()})
 
 	p, err := v.Verify(t.Context(), pt)
@@ -126,6 +128,43 @@ func TestVerify_PersonalTokenIsIntrospectedAndRevokedAtOnce(t *testing.T) {
 	}
 	if got := idp.Introspections(); got != 2 {
 		t.Fatalf("introspections = %d, want 2 (no cache)", got)
+	}
+}
+
+func TestVerify_MalformedPersonalTokenIsRefusedLocally(t *testing.T) {
+	idp := oidcrptest.New(t)
+	idp.Introspector("rs-api", "rs-secret")
+	v := newVerifier(t, idp, tokens.Config{Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret"}})
+	body := strings.TrimPrefix(personalToken, tokens.PersonalTokenPrefix)
+	for name, raw := range map[string]string{
+		"tampered body":     tokens.PersonalTokenPrefix + "1" + body[1:],
+		"tampered checksum": personalToken[:len(personalToken)-1] + "1",
+		"short":             personalToken[:len(personalToken)-1],
+		"long":              personalToken + "0",
+		"not base62":        tokens.PersonalTokenPrefix + "-" + body[1:],
+		"bare prefix":       tokens.PersonalTokenPrefix + "abc",
+	} {
+		idp.Opaque(raw, map[string]any{"aud": apiAudience, "sub": idp.User.Subject, "exp": time.Now().Add(time.Hour).Unix()})
+		if _, err := v.Verify(t.Context(), raw); !tokens.IsInvalidTokenError(err) {
+			t.Fatalf("%s: err = %v, want *InvalidTokenError", name, err)
+		}
+	}
+	if got := idp.Introspections(); got != 0 {
+		t.Fatalf("introspections = %d; a malformed personal token must never reach the issuer", got)
+	}
+}
+
+func TestVerify_IntrospectionBudgetIsAnOutage(t *testing.T) {
+	idp := oidcrptest.New(t)
+	idp.Introspector("rs-api", "rs-secret")
+	v := newVerifier(t, idp, tokens.Config{Introspection: tokens.IntrospectionConfig{ClientID: "rs-api", ClientSecret: "rs-secret", MaxPerMinute: 1}})
+	idp.Opaque(personalToken, map[string]any{"aud": apiAudience, "sub": idp.User.Subject, "exp": time.Now().Add(time.Hour).Unix()})
+	if _, err := v.Verify(t.Context(), personalToken); err != nil {
+		t.Fatal(err)
+	}
+	_, err := v.Verify(t.Context(), personalToken)
+	if !authn.IsUnavailableError(err) || tokens.IsInvalidTokenError(err) {
+		t.Fatalf("over budget: err = %v, want *authn.UnavailableError", err)
 	}
 }
 
@@ -168,7 +207,7 @@ func TestVerify_AnIssuerOutageIsNotARefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{"aaa.bbb.ccc", tokens.PersonalTokenPrefix + "abc"} {
+	for _, raw := range []string{"aaa.bbb.ccc", personalToken} {
 		_, err := v.Verify(t.Context(), raw)
 		if !authn.IsUnavailableError(err) {
 			t.Fatalf("Verify(%q) = %v, want *authn.UnavailableError", raw, err)

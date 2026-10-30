@@ -23,6 +23,8 @@ type CSPOptions struct {
 	ExtraStyleSrc  []string
 	// ExtraConnectSrc appends origins XHR/fetch/SSE may reach.
 	ExtraConnectSrc []string
+	// ExtraFormAction appends origins a form submission may navigate to, such as the issuer's end-session endpoint.
+	ExtraFormAction []string
 }
 
 // CSP sets a nonce-based Content-Security-Policy and exposes the nonce on the request context. SECURITY: script-src carries a nonce rather than 'unsafe-inline'; style-src keeps 'unsafe-inline' because the layout sets style="" attributes a nonce cannot cover.
@@ -53,6 +55,7 @@ func buildPolicy(nonce string, opts CSPOptions) string {
 	scriptSrc := append([]string{"'self'", "'nonce-" + nonce + "'"}, opts.ExtraScriptSrc...)
 	styleSrc := append([]string{"'self'", "'unsafe-inline'"}, opts.ExtraStyleSrc...)
 	connectSrc := append([]string{"'self'"}, opts.ExtraConnectSrc...)
+	formAction := append([]string{"'self'"}, opts.ExtraFormAction...)
 
 	directives := []string{
 		"default-src 'self'",
@@ -63,7 +66,7 @@ func buildPolicy(nonce string, opts CSPOptions) string {
 		"connect-src " + strings.Join(connectSrc, " "),
 		"object-src 'none'",
 		"base-uri 'self'",
-		"form-action 'self'",
+		"form-action " + strings.Join(formAction, " "),
 		"frame-ancestors 'none'",
 	}
 	if opts.ReportURI != "" {

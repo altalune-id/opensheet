@@ -325,7 +325,7 @@ func TestMCP_IDTokenIsNeverAnAccessToken(t *testing.T) {
 // TestMCP_PersonalTokenIsRevokedAtOnce is the introspection path: a personal token works until Othra revokes it, and the next call is refused.
 func TestMCP_PersonalTokenIsRevokedAtOnce(t *testing.T) {
 	f := newMCPFixture(t, mcpOpts{enabled: true})
-	const pt = tokens.PersonalTokenPrefix + "boot-test"
+	const pt = tokens.PersonalTokenPrefix + "boottestboottestboottestboottestboottestboo1qFKHy"
 	f.issuer.idp.Opaque(pt, map[string]any{
 		"aud": controlAudience, "sub": tokenSubject, "scope": authn.ScopeSheetsRead, "exp": time.Now().Add(time.Hour).Unix(),
 	})

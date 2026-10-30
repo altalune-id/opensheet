@@ -288,8 +288,8 @@ func TestConnectWorkflow_Start(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		if _, err := w.ReturnTo(u.Query().Get("state")); err != nil {
-			t.Fatalf("ReturnTo: %v", err)
+		if _, err := w.Target(u.Query().Get("state")); err != nil {
+			t.Fatalf("Target: %v", err)
 		}
 	})
 
@@ -312,7 +312,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		tc := scope(t)
 		state := f.start(t, tc)
 
-		c, err := f.workflow.Complete(t.Context(), "auth-code", state)
+		c, err := f.workflow.Complete(t.Context(), "auth-code", state, tc.UserID)
 		if err != nil {
 			t.Fatalf("Complete: %v", err)
 		}
@@ -353,18 +353,18 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 	t.Run("recovers the return path from the same state", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		state := f.start(t, scope(t))
-		got, err := f.workflow.ReturnTo(state)
+		target, err := f.workflow.Target(state)
 		if err != nil {
-			t.Fatalf("ReturnTo: %v", err)
+			t.Fatalf("Target: %v", err)
 		}
-		if got != testReturnTo {
-			t.Errorf("ReturnTo = %q, want %q", got, testReturnTo)
+		if target.ReturnTo != testReturnTo {
+			t.Errorf("ReturnTo = %q, want %q", target.ReturnTo, testReturnTo)
 		}
 	})
 
 	t.Run("ReturnTo rejects a state it did not sign", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
-		if _, err := f.workflow.ReturnTo("forged|state"); !credential.IsStateInvalidError(err) {
+		if _, err := f.workflow.Target("forged|state"); !credential.IsStateInvalidError(err) {
 			t.Fatalf("error = %T %v, want *StateInvalidError", err, err)
 		}
 	})
@@ -375,7 +375,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		unconfigured := newConnect(t, tokenResponse{}, func(_ *connectFixture, cfg *oauth2.Config) {
 			cfg.ClientID = ""
 		})
-		if _, err := unconfigured.workflow.ReturnTo(state); !credential.IsNotConfiguredError(err) {
+		if _, err := unconfigured.workflow.Target(state); !credential.IsNotConfiguredError(err) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}
 	})
@@ -384,11 +384,11 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
 
-		first, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc))
+		first, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc), tc.UserID)
 		if err != nil {
 			t.Fatalf("first Complete: %v", err)
 		}
-		if _, err := f.workflow.Complete(t.Context(), "code-2", f.start(t, tc)); err != nil {
+		if _, err := f.workflow.Complete(t.Context(), "code-2", f.start(t, tc), tc.UserID); err != nil {
 			t.Fatalf("second Complete: %v", err)
 		}
 
@@ -414,14 +414,14 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 	t.Run("reconnecting reactivates a credential that needed reauth", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
-		first, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc))
+		first, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc), tc.UserID)
 		if err != nil {
 			t.Fatalf("first Complete: %v", err)
 		}
 		first.MarkReauthNeeded()
 		f.store.Seed(first)
 
-		again, err := f.workflow.Complete(t.Context(), "code-2", f.start(t, tc))
+		again, err := f.workflow.Complete(t.Context(), "code-2", f.start(t, tc), tc.UserID)
 		if err != nil {
 			t.Fatalf("second Complete: %v", err)
 		}
@@ -433,7 +433,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 	t.Run("a different account in the same project gets its own credential", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
-		if _, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc)); err != nil {
+		if _, err := f.workflow.Complete(t.Context(), "code-1", f.start(t, tc), tc.UserID); err != nil {
 			t.Fatalf("first Complete: %v", err)
 		}
 
@@ -441,7 +441,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 			fx.store = f.store
 			fx.sealer = f.sealer
 		})
-		if _, err := other.workflow.Complete(t.Context(), "code-2", other.start(t, tc)); err != nil {
+		if _, err := other.workflow.Complete(t.Context(), "code-2", other.start(t, tc), tc.UserID); err != nil {
 			t.Fatalf("second Complete: %v", err)
 		}
 		all, err := f.store.List(t.Context(), tc.OrgID, tc.ProjectID)
@@ -457,7 +457,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		f := newConnect(t, tokenResponse{noIDToken: true})
 		tc := scope(t)
 
-		c, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc))
+		c, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc), tc.UserID)
 		if err != nil {
 			t.Fatalf("Complete: %v", err)
 		}
@@ -477,7 +477,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 			return nil, errStoreTouched
 		}
 
-		if _, err := f.workflow.Complete(t.Context(), "auth-code", state); err == nil {
+		if _, err := f.workflow.Complete(t.Context(), "auth-code", state, tc.UserID); err == nil {
 			t.Fatal("Complete swallowed a list failure")
 		}
 		if *f.unex != 1 {
@@ -489,7 +489,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		f := newConnect(t, tokenResponse{refreshToken: " ", status: http.StatusOK})
 		tc := scope(t)
 
-		_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc))
+		_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc), tc.UserID)
 		if !credential.IsNoRefreshTokenError(err) {
 			t.Fatalf("error = %T %v, want *NoRefreshTokenError", err, err)
 		}
@@ -506,7 +506,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		f := newConnect(t, tokenResponse{status: http.StatusBadRequest})
 		tc := scope(t)
 
-		_, err := f.workflow.Complete(t.Context(), "stale-code", f.start(t, tc))
+		_, err := f.workflow.Complete(t.Context(), "stale-code", f.start(t, tc), tc.UserID)
 		if err == nil {
 			t.Fatal("Complete accepted a rejected code")
 		}
@@ -524,7 +524,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		})
 		tc := scope(t)
 
-		_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc))
+		_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc), tc.UserID)
 		if !sealer.IsUnavailableError(err) {
 			t.Fatalf("error = %T %v, want sealer.UnavailableError", err, err)
 		}
@@ -544,7 +544,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 					f.store.Seed(seeded(t, tc))
 				}
 
-				_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc))
+				_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc), tc.UserID)
 				if !credential.IsNotSealedError(err) {
 					t.Fatalf("error = %T %v, want *NotSealedError", err, err)
 				}
@@ -558,7 +558,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 		state := f.start(t, tc)
 		f.store.SaveFn = func(context.Context, *credential.Credential) error { return errStoreTouched }
 
-		if _, err := f.workflow.Complete(t.Context(), "auth-code", state); err == nil {
+		if _, err := f.workflow.Complete(t.Context(), "auth-code", state, tc.UserID); err == nil {
 			t.Fatal("Complete swallowed a store failure")
 		}
 		if *f.unex != 1 {
@@ -574,7 +574,7 @@ func TestConnectWorkflow_Complete(t *testing.T) {
 			return &credential.AlreadyExistsError{Name: c.Name}
 		}
 
-		_, err := f.workflow.Complete(t.Context(), "auth-code", state)
+		_, err := f.workflow.Complete(t.Context(), "auth-code", state, tc.UserID)
 		if !credential.IsAlreadyExistsError(err) {
 			t.Fatalf("error = %T %v, want *AlreadyExistsError", err, err)
 		}
@@ -640,7 +640,7 @@ func TestConnectWorkflow_CompleteRejectsBadState(t *testing.T) {
 				return nil, errStoreTouched
 			}
 
-			_, err := f.workflow.Complete(t.Context(), tt.code, state)
+			_, err := f.workflow.Complete(t.Context(), tt.code, state, tc.UserID)
 			if !credential.IsStateInvalidError(err) {
 				t.Fatalf("error = %T %v, want *StateInvalidError", err, err)
 			}
@@ -650,13 +650,26 @@ func TestConnectWorkflow_CompleteRejectsBadState(t *testing.T) {
 		})
 	}
 
+	t.Run("a state issued to another user", func(t *testing.T) {
+		for name, userID := range map[string]uuid.UUID{"another user": uuid.New(), "no user": uuid.Nil} {
+			t.Run(name, func(t *testing.T) {
+				f := newConnect(t, tokenResponse{})
+				f.store.SaveFn = func(context.Context, *credential.Credential) error { return errStoreTouched }
+				_, err := f.workflow.Complete(t.Context(), "auth-code", f.start(t, tc), userID)
+				if !credential.IsStateInvalidError(err) {
+					t.Fatalf("error = %T %v, want *StateInvalidError", err, err)
+				}
+			})
+		}
+	})
+
 	t.Run("an unconfigured deployment refuses to complete", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		state := f.start(t, tc)
 		unconfigured := newConnect(t, tokenResponse{}, func(_ *connectFixture, cfg *oauth2.Config) {
 			cfg.ClientSecret = ""
 		})
-		if _, err := unconfigured.workflow.Complete(t.Context(), "auth-code", state); !credential.IsNotConfiguredError(err) {
+		if _, err := unconfigured.workflow.Complete(t.Context(), "auth-code", state, tc.UserID); !credential.IsNotConfiguredError(err) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}
 	})

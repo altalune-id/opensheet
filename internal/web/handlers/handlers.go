@@ -253,13 +253,18 @@ func capitaliseRole(role string) string {
 	return strings.ToUpper(role[:1]) + strings.ToLower(role[1:])
 }
 
-// SecretBytes returns the cookie and OAuth-state HMAC key. SECURITY: panics on a Deps that skipped [NewDeps], so no signing path is ever keyed on zero bytes.
-func (d Deps) SecretBytes() []byte {
-	if len(d.secret) < MinSecretLen {
+// Key returns the cookie-signing key for purpose, derived from the state secret. SECURITY: panics on a Deps that skipped [NewDeps], so no signing path is ever keyed on zero bytes.
+func (d Deps) Key(purpose string) []byte {
+	if !d.hasSecret() {
 		panic((&ShortSecretError{Len: len(d.secret)}).Error() + " — build Deps with handlers.NewDeps")
 	}
-	return d.secret
+	return web.DeriveKey(d.secret, purpose)
 }
+
+// SecureCookie reports whether cookies written for r carry the Secure attribute.
+func (d Deps) SecureCookie(r *http.Request) bool { return d.Cfg.HTTP.CookieSecure || r.TLS != nil }
+
+func (d Deps) hasSecret() bool { return len(d.secret) >= MinSecretLen }
 
 // LogErr prints via the injected logger (or the stdlib default when nil).
 func (d Deps) LogErr(msg string, err error) {
@@ -336,7 +341,7 @@ func (d Deps) LoadSession(r *http.Request) (session.Principal, string, bool) {
 	if err != nil {
 		return session.Principal{}, "", false
 	}
-	sid, err := web.VerifyCookie(d.SecretBytes(), c.Value)
+	sid, err := web.VerifyCookie(d.Key(web.PurposeSession), c.Value)
 	if err != nil {
 		return session.Principal{}, "", false
 	}
@@ -358,9 +363,9 @@ func (d Deps) WriteSession(w http.ResponseWriter, r *http.Request, p session.Pri
 	}
 	web.SetCookie(w, web.CookieOpts{
 		Name:         web.SessionCookieName,
-		Value:        web.SignCookie(d.SecretBytes(), sid),
+		Value:        web.SignCookie(d.Key(web.PurposeSession), sid),
 		BasePath:     d.Cfg.HTTP.BasePath,
-		CookieSecure: d.Cfg.HTTP.CookieSecure,
+		CookieSecure: d.SecureCookie(r),
 		MaxAge:       int(web.SessionTTL.Seconds()),
 	})
 	return nil
@@ -376,7 +381,7 @@ func (d Deps) ClearSession(w http.ResponseWriter, r *http.Request) {
 	if _, sid, ok := d.LoadSession(r); ok {
 		_ = d.Sessions.Delete(r.Context(), sid)
 	}
-	web.ClearCookie(w, web.SessionCookieName, d.Cfg.HTTP.BasePath, d.Cfg.HTTP.CookieSecure)
+	web.ClearCookie(w, web.SessionCookieName, d.Cfg.HTTP.BasePath, d.SecureCookie(r))
 }
 
 // SanitizeReturnTo rejects any return_to that leaves the same-origin.

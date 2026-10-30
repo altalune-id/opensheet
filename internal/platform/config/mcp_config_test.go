@@ -299,12 +299,13 @@ func TestLoad_MCPDefaultsOff(t *testing.T) {
 
 func TestEnvKeys_MCPKeysAreRuntime(t *testing.T) {
 	want := map[string][]string{
-		"OPENSHEET_MCP_ENABLED":                     nil,
-		"OPENSHEET_MCP_AUDIENCE":                    nil,
-		"OPENSHEET_MCP_AUDIENCE_OVERRIDE":           nil,
-		"OPENSHEET_MCP_APPS_UI":                     nil,
-		"OPENSHEET_MCP_INTROSPECTION_CLIENT_ID":     nil,
-		"OPENSHEET_MCP_INTROSPECTION_CLIENT_SECRET": {"secret"},
+		"OPENSHEET_MCP_ENABLED":                      nil,
+		"OPENSHEET_MCP_AUDIENCE":                     nil,
+		"OPENSHEET_MCP_AUDIENCE_OVERRIDE":            nil,
+		"OPENSHEET_MCP_APPS_UI":                      nil,
+		"OPENSHEET_MCP_INTROSPECTION_CLIENT_ID":      nil,
+		"OPENSHEET_MCP_INTROSPECTION_CLIENT_SECRET":  {"secret"},
+		"OPENSHEET_MCP_INTROSPECTION_MAX_PER_MINUTE": nil,
 	}
 	seen := map[string]bool{}
 	for _, k := range WalkEnvKeys("OPENSHEET") {

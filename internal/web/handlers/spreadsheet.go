@@ -272,7 +272,7 @@ func (h *SpreadsheetHandler) pickerURL(sc ProjectScope, creds []*credential.Cred
 		if c.Kind != credential.KindGoogleOAuth {
 			continue
 		}
-		state := PickerStateFor(h.SecretBytes(), sc.org.Slug, sc.project.Slug, c.ID)
+		state := PickerStateFor(h.Key(web.PurposeGooglePicker), sc.org.Slug, sc.project.Slug, c.ID)
 		return web.Path(h.Cfg.HTTP.BasePath, googlePickerPath) + "?state=" + url.QueryEscape(state)
 	}
 	return ""

@@ -29,7 +29,7 @@ func ParseStateSecret(raw string) ([]byte, error) {
 	return buf, nil
 }
 
-// NOTE: hex is tried first to match sealer.ParseKey, so one `openssl rand -hex 32` value keys both secrets.
+// SECURITY: hex is tried first to match sealer.ParseKey; http.stateSecret and security.encryptionKey share the format but must be different values.
 func decodeStateSecret(s string) ([]byte, error) {
 	if b, err := hex.DecodeString(s); err == nil {
 		return b, nil

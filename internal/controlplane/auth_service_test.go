@@ -36,6 +36,7 @@ func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 		ActiveOrgID:     orgID,
 		ActiveProjectID: projectID,
 		Scopes:          []string{"todo.read", "todo.write", authn.ScopeAPIKeysRead},
+		Source:          session.SourceToken,
 	}
 	h := newHarness(t, p)
 
@@ -64,6 +65,9 @@ func TestWhoami_ValidPrincipal_ReturnsFields(t *testing.T) {
 	}
 	if resp.Msg.Name != "Alice" {
 		t.Errorf("name = %q", resp.Msg.Name)
+	}
+	if resp.Msg.Source != string(session.SourceToken) {
+		t.Errorf("source = %q, want %q", resp.Msg.Source, session.SourceToken)
 	}
 	if resp.Msg.ActiveOrgId != orgID.String() {
 		t.Errorf("active_org_id = %q", resp.Msg.ActiveOrgId)

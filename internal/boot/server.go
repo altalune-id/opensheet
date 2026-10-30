@@ -168,22 +168,22 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 	caps := capabilities.From(cfg)
 
 	kernel := &platform.Kernel{
-		Pool:            pool,
-		PgConn:          pgConn,
-		Log:             log,
-		Reporter:        reporter,
-		Sessions:        sessions,
-		Sealer:          sl,
-		Verifier:        verifier,
-		Mail:            mail,
-		AltAuth:         altAuth,
-		OIDCStateSecret: stateSecret,
-		Tracer:          tp.Tracer("altalune.id/opensheet"),
-		Meter:           mp.Meter("altalune.id/opensheet"),
-		Notify:          sinks,
-		Nano:            nanoid.New,
-		Caps:            caps,
-		Outbox:          outbox.NewStore(cfg.DB, pool, pgConn),
+		Pool:        pool,
+		PgConn:      pgConn,
+		Log:         log,
+		Reporter:    reporter,
+		Sessions:    sessions,
+		Sealer:      sl,
+		Verifier:    verifier,
+		Mail:        mail,
+		AltAuth:     altAuth,
+		StateSecret: stateSecret,
+		Tracer:      tp.Tracer("altalune.id/opensheet"),
+		Meter:       mp.Meter("altalune.id/opensheet"),
+		Notify:      sinks,
+		Nano:        nanoid.New,
+		Caps:        caps,
+		Outbox:      outbox.NewStore(cfg.DB, pool, pgConn),
 	}
 	for _, s := range sinks {
 		if c, ok := s.(io.Closer); ok {

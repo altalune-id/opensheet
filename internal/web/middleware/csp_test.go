@@ -116,3 +116,13 @@ func TestCSP_ExtraSourcesAreAppended(t *testing.T) {
 		t.Fatalf("extra sources were not appended: %q", policy)
 	}
 }
+
+func TestCSP_ExtraFormActionIsAppended(t *testing.T) {
+	t.Parallel()
+
+	rec, _ := serveWithCSP(t, middleware.CSPOptions{Enabled: true, ExtraFormAction: []string{"https://id.example"}})
+	policy := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "form-action 'self' https://id.example;") {
+		t.Fatalf("form-action did not carry the extra origin: %q", policy)
+	}
+}

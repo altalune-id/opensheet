@@ -7,8 +7,8 @@ require (
 	connectrpc.com/otelconnect v0.12.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/a-h/templ v0.3.1070
-	github.com/altalune-id/oauthrs v0.0.0-20261030000256-f3cd84b86f6f
-	github.com/altalune-id/oidcrp v0.0.0-20261029230018-81e927225965
+	github.com/altalune-id/oauthrs v0.0.0-20261030070826-6e5063f3b6ca
+	github.com/altalune-id/oidcrp v0.0.0-20261030070618-63bfc891ff35
 	github.com/dop251/goja v0.0.0-20260917113740-793a2a65c13b
 	github.com/go-jet/jet/v2 v2.16.1
 	github.com/go-playground/validator/v10 v10.30.5

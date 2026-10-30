@@ -14,6 +14,7 @@ type Config struct {
 type IntrospectionConfig struct {
 	ClientID     string `mapstructure:"clientID"     yaml:"clientID"     awareness:"-"`
 	ClientSecret string `mapstructure:"clientSecret" yaml:"clientSecret" awareness:"secret"`
+	MaxPerMinute int    `mapstructure:"maxPerMinute" yaml:"maxPerMinute" awareness:"-"      validate:"gte=0"`
 }
 
 // Enabled reports whether personal tokens are accepted through introspection.

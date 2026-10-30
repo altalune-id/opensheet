@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -100,7 +101,7 @@ type webHandlerDeps struct {
 
 func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, err error) { //nolint:nonamedreturns // three return values differ in role
 	cfg, kernel, slogger, svcs := d.Cfg, d.Kernel, d.Log, d.Services
-	deps, err := newWebDeps(cfg, d.Caps, kernel.Sessions, slogger, kernel.OIDCStateSecret)
+	deps, err := newWebDeps(cfg, d.Caps, kernel.Sessions, slogger, kernel.StateSecret)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,7 +109,7 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 	deps.Projects = svcs.Projects
 	deps.I18n = d.Bundle
 
-	authHandler := webhandlers.NewAuthHandler(deps, svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, kernel.AltAuth, d.Required).WithStateSecret(kernel.OIDCStateSecret)
+	authHandler := webhandlers.NewAuthHandler(deps, svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, kernel.AltAuth, d.Required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, svcs.Users)
 	onboardHandler := webhandlers.NewOnboardHandler(deps, svcs.Users, svcs.Orgs, svcs.Projects, svcs.Onboards, d.Required, d.OnComplete, d.SetupToken)
 	homeHandler := webhandlers.NewHomeHandler(deps, svcs.Orgs, svcs.Projects)
@@ -150,7 +151,7 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 		MCPHandler:       d.MCP.Handler,
 		ResourceMetadata: resourceMetadata(cfg, d.MCP, d.APIResource),
 		RobotsCfg:        &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
-		Chains:           surfaceChains(cfg, kernel, slogger, d.Reporter, errTmpl, d.Bundle, d.DefaultLoc, d.Required, deps.SecretBytes()),
+		Chains:           surfaceChains(cfg, kernel, slogger, d.Reporter, errTmpl, d.Bundle, d.DefaultLoc, d.Required, deps.Key(web.PurposeSession)),
 	})
 	return handler, routes, nil
 }
@@ -213,7 +214,7 @@ func surfaceChains(
 			webmw.Recover(reporter.Unexpected, nil),
 		}),
 		Console: slices.Concat(edge, []web.Middleware{
-			webmw.CSP(cspOptions(cfg.HTTP.CSP)),
+			webmw.CSP(cspOptions(cfg)),
 			webmw.Recover(reporter.Unexpected, errTmpl),
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
@@ -284,10 +285,23 @@ func (w logSlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func cspOptions(cfg config.CSPConfig) webmw.CSPOptions {
-	return webmw.CSPOptions{
-		Enabled:    cfg.Enabled,
-		ReportOnly: cfg.ReportOnly,
-		ReportURI:  cfg.ReportURI,
+func cspOptions(cfg *config.Config) webmw.CSPOptions {
+	opts := webmw.CSPOptions{
+		Enabled:    cfg.HTTP.CSP.Enabled,
+		ReportOnly: cfg.HTTP.CSP.ReportOnly,
+		ReportURI:  cfg.HTTP.CSP.ReportURI,
 	}
+	if origin := issuerOrigin(cfg.OIDC.Issuer); origin != "" && cfg.OIDC.EndSessionOnLogout {
+		opts.ExtraFormAction = []string{origin}
+	}
+	opts.ExtraFormAction = append(opts.ExtraFormAction, opensheetFormAction(cfg)...)
+	return opts
+}
+
+func issuerOrigin(issuer string) string {
+	u, err := url.Parse(issuer)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }

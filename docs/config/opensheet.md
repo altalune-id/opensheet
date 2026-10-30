@@ -34,6 +34,7 @@ it, so a lost or rotated key makes every stored credential unreadable until it i
   persisted session stops verifying on restart. Under `driver: sqlite` the ephemeral fallback
   stands.
 - `security.encryptionKey` and `http.stateSecret` share one format: 32 bytes, as 64 hex characters
-  or as base64. Generate either with `openssl rand -hex 32`. Hex is tried first, base64 second.
+  or as base64. Generate each with its own `openssl rand -hex 32`: they must be different values. Hex is
+  tried first, base64 second.
   `config.Validate()` checks a non-empty secret, so a malformed one is refused before any listener
   opens.

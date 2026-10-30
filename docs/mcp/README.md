@@ -42,14 +42,15 @@ Order is enforced — each step's omission is a boot error:
 Discovery is lazy: a wrong `tokens.issuer` fails the first verified call with a masked 401,
 not boot.
 
-| Key                              | Default                     | Meaning                                     |
-| -------------------------------- | --------------------------- | ------------------------------------------- |
-| `mcp.enabled`                    | `false`                     | Master switch                               |
-| `mcp.audience`                   | `baseURL + basePath + /mcp` | RFC 8707 resource id the verifier pins      |
-| `mcp.audienceOverride`           | `false`                     | Accept an audience ≠ the mounted URL        |
-| `mcp.appsUI`                     | `false`                     | Publish the UI resource, bind `_meta.ui`    |
-| `mcp.introspection.clientID`     | `""`                        | MCP resource server id, for personal tokens |
-| `mcp.introspection.clientSecret` | `""`                        | Its introspection secret (`othra_rs_…`)     |
+| Key                              | Default                             | Meaning                                                  |
+| -------------------------------- | ----------------------------------- | -------------------------------------------------------- |
+| `mcp.enabled`                    | `false`                             | Master switch                                            |
+| `mcp.audience`                   | `baseURL + basePath + /mcp`         | RFC 8707 resource id the verifier pins                   |
+| `mcp.audienceOverride`           | `false`                             | Accept an audience ≠ the mounted URL                     |
+| `mcp.appsUI`                     | `false`                             | Publish the UI resource, bind `_meta.ui`                 |
+| `mcp.introspection.clientID`     | `""`                                | MCP resource server id, for personal tokens              |
+| `mcp.introspection.clientSecret` | `""`                                | Its introspection secret (`othra_rs_…`)                  |
+| `mcp.introspection.maxPerMinute` | `tokens.introspection.maxPerMinute` | Introspection calls per minute, all tokens; `0` inherits |
 
 `mcp.audience` must be absolute, fragment-free, and equal the mounted URL unless
 `mcp.audienceOverride=true`. The override is the only way to widen what the verifier accepts,

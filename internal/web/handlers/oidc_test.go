@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/handlers"
@@ -32,11 +34,10 @@ const (
 )
 
 type oidcHarness struct {
-	f      *handlerFixture
-	idp    *oidcrptest.IDP
-	mux    *http.ServeMux
-	secret []byte
-	tr     *i18n.Translator
+	f   *handlerFixture
+	idp *oidcrptest.IDP
+	mux *http.ServeMux
+	tr  *i18n.Translator
 }
 
 func newOIDCHarness(t *testing.T) *oidcHarness {
@@ -60,11 +61,10 @@ func newOIDCHarness(t *testing.T) *oidcHarness {
 		nil, discardLogger(), passthroughUnexpected(),
 	)
 	authSvc := auth.NewService(nil, login, discardLogger(), passthroughUnexpected())
-	secret := []byte("resolved-state-secret-32-bytes!!")
-	h := handlers.NewAuthHandler(f.Deps, authSvc, f.Users, f.Orgs, f.Projects, rp, nil).WithStateSecret(secret)
+	h := handlers.NewAuthHandler(f.Deps, authSvc, f.Users, f.Orgs, f.Projects, rp, nil)
 	mux := http.NewServeMux()
 	h.Register(mux)
-	return &oidcHarness{f: f, idp: idp, mux: mux, secret: secret}
+	return &oidcHarness{f: f, idp: idp, mux: mux}
 }
 
 func (o *oidcHarness) do(r *http.Request) *httptest.ResponseRecorder {
@@ -123,7 +123,7 @@ func TestOIDC_SignInWritesTheSessionAndHonoursReturnTo(t *testing.T) {
 
 	sess := cookieNamed(rec, web.SessionCookieName)
 	require.NotNil(t, sess, "a successful sign-in sets the session cookie")
-	sid, err := web.VerifyCookie(o.f.Deps.SecretBytes(), sess.Value)
+	sid, err := web.VerifyCookie(o.f.Deps.Key(web.PurposeSession), sess.Value)
 	require.NoError(t, err)
 	p, ok, err := o.f.Sessions.Load(t.Context(), sid)
 	require.NoError(t, err)
@@ -134,8 +134,8 @@ func TestOIDC_SignInWritesTheSessionAndHonoursReturnTo(t *testing.T) {
 
 	last := cookieNamed(rec, lastUserCookie)
 	require.NotNil(t, last)
-	email, err := web.VerifyCookie(o.secret, last.Value)
-	require.NoError(t, err, "the last-user cookie is signed with the resolved state secret")
+	email, err := web.VerifyCookie(o.f.Deps.Key(web.PurposeLastUser), last.Value)
+	require.NoError(t, err, "the last-user cookie is signed with the last-user key")
 	assert.Equal(t, o.idp.User.Email, email)
 	cleared := cookieNamed(rec, oidcStateCookie)
 	require.NotNil(t, cleared)
@@ -145,7 +145,7 @@ func TestOIDC_SignInWritesTheSessionAndHonoursReturnTo(t *testing.T) {
 func TestOIDC_LastUserIsTheLoginHintUnlessSwitching(t *testing.T) {
 	t.Parallel()
 	o := newOIDCHarness(t)
-	last := &http.Cookie{Name: lastUserCookie, Value: web.SignCookie(o.secret, " Ana@Gmail.com ")}
+	last := &http.Cookie{Name: lastUserCookie, Value: web.SignCookie(o.f.Deps.Key(web.PurposeLastUser), " Ana@Gmail.com ")}
 
 	authURL, _ := o.start(t, "", last)
 	q := mustQuery(t, authURL)
@@ -158,18 +158,43 @@ func TestOIDC_LastUserIsTheLoginHintUnlessSwitching(t *testing.T) {
 	assert.Equal(t, "select_account", q.Get("prompt"))
 }
 
-func TestOIDC_StateCookieIsSignedWithTheResolvedSecret(t *testing.T) {
+func TestOIDC_StateCookieIsSignedWithTheOIDCStateKey(t *testing.T) {
 	t.Parallel()
 	o := newOIDCHarness(t)
 	authURL, state := o.start(t, "")
 
-	_, err := web.VerifyCookie(o.secret, state.Value)
-	require.NoError(t, err, "the state cookie must verify with the resolved secret")
-	_, err = web.VerifyCookie([]byte(o.f.Cfg.HTTP.StateSecret), state.Value)
-	require.Error(t, err, "the state cookie must not be signed with the raw config string")
+	_, err := web.VerifyCookie(o.f.Deps.Key(web.PurposeOIDCState), state.Value)
+	require.NoError(t, err, "the state cookie must verify with the oidc-state key")
+	for _, purpose := range []string{web.PurposeSession, web.PurposeInvite, web.PurposeOnboard, web.PurposeLastUser} {
+		_, err = web.VerifyCookie(o.f.Deps.Key(purpose), state.Value)
+		require.Error(t, err, "the state cookie must not verify as %s", purpose)
+	}
+	root, err := config.ParseStateSecret(o.f.Cfg.HTTP.StateSecret)
+	require.NoError(t, err)
+	_, err = web.VerifyCookie(root, state.Value)
+	require.Error(t, err, "the state cookie must not be signed with the root secret")
 
 	rec := o.callback(o.idp.Authorize(authURL), state)
 	require.Equal(t, http.StatusSeeOther, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestOIDC_InviteCookieNeverVerifiesAsState(t *testing.T) {
+	t.Parallel()
+	o := newOIDCHarness(t)
+	authURL, state := o.start(t, "")
+	payload := state.Value[:strings.LastIndexByte(state.Value, '|')]
+
+	inviteMux := http.NewServeMux()
+	handlers.NewInviteHandler(o.f.Deps, o.f.Orgs, o.f.Invites).Register(inviteMux)
+	rec := httptest.NewRecorder()
+	inviteMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/invites/accept?token="+url.QueryEscape(payload), nil))
+	invite := cookieNamed(rec, web.InviteCookieName)
+	require.NotNil(t, invite)
+
+	forged := &http.Cookie{Name: oidcStateCookie, Value: invite.Value}
+	rec = o.callback(o.idp.Authorize(authURL), forged)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "an invite-signed value must never pass as the sign-in state")
+	assert.Nil(t, cookieNamed(rec, web.SessionCookieName))
 }
 
 func TestOIDC_ExpiredStateCookieIsRefused(t *testing.T) {
@@ -177,7 +202,7 @@ func TestOIDC_ExpiredStateCookieIsRefused(t *testing.T) {
 	o := newOIDCHarness(t)
 	authURL, state := o.start(t, "")
 
-	value, err := web.VerifyCookie(o.secret, state.Value)
+	value, err := web.VerifyCookie(o.f.Deps.Key(web.PurposeOIDCState), state.Value)
 	require.NoError(t, err)
 	raw, err := base64.RawURLEncoding.DecodeString(value)
 	require.NoError(t, err)
@@ -186,7 +211,7 @@ func TestOIDC_ExpiredStateCookieIsRefused(t *testing.T) {
 	payload["e"] = time.Now().Add(-time.Minute).Unix()
 	raw, err = json.Marshal(payload)
 	require.NoError(t, err)
-	expired := &http.Cookie{Name: oidcStateCookie, Value: web.SignCookie(o.secret, base64.RawURLEncoding.EncodeToString(raw))}
+	expired := &http.Cookie{Name: oidcStateCookie, Value: web.SignCookie(o.f.Deps.Key(web.PurposeOIDCState), base64.RawURLEncoding.EncodeToString(raw))}
 
 	rec := o.callback(o.idp.Authorize(authURL), expired)
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an expired state cookie must be refused even with a valid signature")
@@ -221,7 +246,8 @@ func TestOIDC_ForgedLastUserCookieIsIgnored(t *testing.T) {
 func TestOIDC_StartRefusesWithoutAStateSecret(t *testing.T) {
 	t.Parallel()
 	o := newOIDCHarness(t)
-	h := handlers.NewAuthHandler(o.f.Deps, nil, o.f.Users, o.f.Orgs, o.f.Projects, oidcrp.New(oidcrp.Config{Issuer: o.idp.Issuer(), HTTPClient: o.idp.Client()}), nil)
+	deps := handlers.Deps{Cfg: o.f.Cfg, Caps: o.f.Deps.Caps, Sessions: o.f.Sessions, Logger: o.f.Deps.Logger, Orgs: o.f.Orgs, Projects: o.f.Projects}
+	h := handlers.NewAuthHandler(deps, nil, o.f.Users, o.f.Orgs, o.f.Projects, oidcrp.New(oidcrp.Config{Issuer: o.idp.Issuer(), HTTPClient: o.idp.Client()}), nil)
 	mux := http.NewServeMux()
 	h.Register(mux)
 	rec := httptest.NewRecorder()
