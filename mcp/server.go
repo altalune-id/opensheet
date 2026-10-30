@@ -4,8 +4,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -32,6 +35,7 @@ type Server struct {
 	registry   *Registry
 
 	unmappedCode string
+	allowedHosts []string
 
 	mu        sync.Mutex
 	sealed    bool
@@ -69,10 +73,46 @@ func (s *Server) SDK() *sdkmcp.Server {
 // Handler returns the stateless streamable-HTTP handler for this server, sealing the registry.
 func (s *Server) Handler() http.Handler {
 	sdk := s.SDK()
-	return sdkmcp.NewStreamableHTTPHandler(
-		func(*http.Request) *sdkmcp.Server { return sdk },
-		&sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, Logger: s.logger},
-	)
+	opts := &sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, Logger: s.logger}
+	if len(s.allowedHosts) == 0 {
+		return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return sdk }, opts)
+	}
+	opts.DisableLocalhostProtection = true
+	next := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return sdk }, opts)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.rebound(r) {
+			http.Error(w, fmt.Sprintf("Forbidden: invalid Host header %q", r.Host), http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// SECURITY: the SDK's DNS-rebinding check plus the allowed hosts; see
+// https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices
+func (s *Server) rebound(r *http.Request) bool {
+	local, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || local == nil || !isLoopback(local.String()) || isLoopback(r.Host) {
+		return false
+	}
+	return !slices.Contains(s.allowedHosts, strings.ToLower(hostOf(r.Host)))
+}
+
+func hostOf(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return strings.Trim(addr, "[]")
+	}
+	return host
+}
+
+func isLoopback(addr string) bool {
+	host := hostOf(addr)
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 func (s *Server) build() {

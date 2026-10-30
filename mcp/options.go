@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"log/slog"
+	"strings"
 )
 
 // ScopesFunc resolves the scopes the caller carries, for the per-tool scope check.
@@ -58,4 +59,15 @@ func WithUnmappedCode(code string) Option {
 // WithUI publishes ToolSpec.UI as the MCP Apps `_meta.ui` link when enabled is true.
 func WithUI(enabled bool) Option {
 	return func(s *Server) { s.ui = enabled }
+}
+
+// WithAllowedHosts lets a loopback request carry one of hosts as its Host, as a same-host proxy sends; other hosts stay refused.
+func WithAllowedHosts(hosts ...string) Option {
+	return func(s *Server) {
+		for _, h := range hosts {
+			if h != "" {
+				s.allowedHosts = append(s.allowedHosts, strings.ToLower(h))
+			}
+		}
+	}
 }
