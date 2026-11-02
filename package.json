@@ -18,7 +18,7 @@
     "lint-staged": "lint-staged"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.74.0",
+    "@bufbuild/buf": "^1.75.0",
     "husky": "9.1.7",
     "lint-staged": "17.6.0",
     "prettier": "3.9.10"
