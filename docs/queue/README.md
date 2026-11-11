@@ -162,13 +162,13 @@ forever.
 
 ## `serve` flags
 
-| Flags              | HTTP        | scheduler | consumer | listener | outbox dispatch, db-health |
-| ------------------ | ----------- | --------- | -------- | -------- | -------------------------- |
-| none               | full        | yes       | yes      | yes      | yes                        |
-| `--no-scheduler`   | full        | no        | yes      | yes      | yes                        |
-| `--no-consumer`    | full        | yes       | no       | yes      | yes                        |
-| `--scheduler-only` | health only | yes       | no       | yes      | yes                        |
-| `--consumer-only`  | health only | no        | yes      | yes      | yes                        |
+| Flags              | HTTP        | scheduler | consumer | listener | outbox dispatch |
+| ------------------ | ----------- | --------- | -------- | -------- | --------------- |
+| none               | full        | yes       | yes      | yes      | yes             |
+| `--no-scheduler`   | full        | no        | yes      | yes      | yes             |
+| `--no-consumer`    | full        | yes       | no       | yes      | yes             |
+| `--scheduler-only` | health only | yes       | no       | yes      | yes             |
+| `--consumer-only`  | health only | no        | yes      | yes      | yes             |
 
 - "consumer yes" and "listener yes" also need `queue.enabled=true`. `--consumer-only` with the
   queue disabled fails boot.

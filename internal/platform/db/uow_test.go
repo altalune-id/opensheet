@@ -90,3 +90,64 @@ func TestRunInTx_RejectsNestedUnitOfWork(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNestedUnitOfWork", outerErr)
 	}
 }
+
+func TestAfterCommit_RunsAfterCommit(t *testing.T) {
+	t.Parallel()
+	pool := openTestPool(t)
+
+	ran := 0
+	err := db.RunInTx(t.Context(), pool, func(ctx context.Context) error {
+		db.AfterCommit(ctx, func() { ran++ })
+		if ran != 0 {
+			return errors.New("hook ran before commit")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunInTx: %v", err)
+	}
+	if ran != 1 {
+		t.Fatalf("hook runs = %d, want 1", ran)
+	}
+}
+
+func TestAfterCommit_SkipsRollback(t *testing.T) {
+	t.Parallel()
+	pool := openTestPool(t)
+
+	ran := 0
+	_ = db.RunInTx(t.Context(), pool, func(ctx context.Context) error {
+		db.AfterCommit(ctx, func() { ran++ })
+		return errors.New("boom")
+	})
+	if ran != 0 {
+		t.Fatalf("hook ran on rollback")
+	}
+}
+
+func TestAfterCommit_SkipsFailedCommit(t *testing.T) {
+	t.Parallel()
+	pool := openTestPool(t)
+
+	ran := 0
+	err := db.RunInTx(t.Context(), pool, func(ctx context.Context) error {
+		db.AfterCommit(ctx, func() { ran++ })
+		tx, _ := db.CurrentTx(ctx)
+		return tx.Rollback()
+	})
+	if err == nil {
+		t.Fatal("commit of a finished tx succeeded")
+	}
+	if ran != 0 {
+		t.Fatalf("hook ran on a failed commit")
+	}
+}
+
+func TestAfterCommit_RunsAtOnceWithoutATx(t *testing.T) {
+	t.Parallel()
+	ran := 0
+	db.AfterCommit(t.Context(), func() { ran++ })
+	if ran != 1 {
+		t.Fatalf("hook runs = %d, want 1", ran)
+	}
+}

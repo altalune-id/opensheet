@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/opensheet/internal/platform/db"
-	"altalune.id/opensheet/worker"
 )
 
 func testHealthLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -20,13 +19,12 @@ func healthCfg() db.HealthConfig {
 	return db.HealthConfig{Interval: 30 * time.Second, Timeout: 2 * time.Second}
 }
 
-func TestHealthMonitor_NotReadyBeforeFirstProbe(t *testing.T) {
+func TestHealthMonitor_NoSnapshotBeforeFirstProbe(t *testing.T) {
 	sqlDB, _, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
 	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
-	require.False(t, m.Ready(), "readiness must be false until the first probe lands")
 	require.Nil(t, m.Snapshot())
 }
 
@@ -85,55 +83,43 @@ func TestHealthMonitor_ProbesEachDistinctHandle(t *testing.T) {
 	require.Equal(t, "reader", snap.Handles[1].Name)
 }
 
-func TestHealthMonitor_IsAStandaloneWorker(t *testing.T) {
-	sqlDB, _, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sqlDB.Close() })
-
-	var w worker.Worker = db.NewHealthMonitor(
-		db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
-	require.Equal(t, "db-health", w.Name())
-}
-
-func TestHealthMonitor_RunProbesOnceBeforeTheFirstTick(t *testing.T) {
+func TestHealthMonitor_ReadyProbesOnlyWhenTheSnapshotIsStale(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	mock.ExpectPing()
 
-	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- m.Run(ctx) }()
+	interval := 200 * time.Millisecond
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB},
+		db.HealthConfig{Interval: interval, Timeout: time.Second}, testHealthLogger(), nil)
 
-	require.Eventually(t, m.Ready, 2*time.Second, 5*time.Millisecond,
-		"Run must probe immediately, not wait a full interval")
-	cancel()
-	require.NoError(t, <-done, "a canceled context is a clean shutdown, not a worker failure")
+	require.True(t, m.Ready(), "the first probe request must ping")
+	time.Sleep(interval / 2)
+	require.True(t, m.Ready(), "a fresh snapshot must answer without a ping")
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	mock.ExpectPing().WillReturnError(context.DeadlineExceeded)
+	time.Sleep(interval)
+	require.False(t, m.Ready(), "a stale snapshot must ping again")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestHealthMonitor_RunSwallowsProbeFailures(t *testing.T) {
-	sqlDB, _, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+func TestHealthMonitor_SendsNoQueryWithoutAProbe(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
+	mock.ExpectPing()
 
 	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB},
-		db.HealthConfig{Interval: time.Millisecond, Timeout: 50 * time.Millisecond},
-		testHealthLogger(), nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- m.Run(ctx) }()
+		db.HealthConfig{Interval: time.Millisecond, Timeout: time.Second}, testHealthLogger(), nil)
+	require.NoError(t, m.Probe(t.Context()))
+	time.Sleep(50 * time.Millisecond)
 
-	require.Eventually(t, func() bool {
-		snap := m.Snapshot()
-		return snap != nil && !snap.Ready
-	}, 2*time.Second, 5*time.Millisecond)
-	cancel()
-	require.NoError(t, <-done,
-		"a failing probe must not kill the worker - that is what escalated on every tick before")
+	require.NoError(t, mock.ExpectationsWereMet())
+	require.True(t, m.Snapshot().Ready, "an unrequested ping hit the database")
 }
 
-func TestHealthMonitor_RunClampsNonPositiveConfigToDefaults(t *testing.T) {
+func TestHealthMonitor_ClampsNonPositiveConfigToDefaults(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  db.HealthConfig
@@ -153,14 +139,9 @@ func TestHealthMonitor_RunClampsNonPositiveConfigToDefaults(t *testing.T) {
 			mock.ExpectPing()
 
 			m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, tt.cfg, testHealthLogger(), nil)
-			ctx, cancel := context.WithCancel(t.Context())
-			done := make(chan error, 1)
-			require.NotPanics(t, func() { go func() { done <- m.Run(ctx) }() },
-				"a non-positive interval must be clamped before it reaches time.NewTicker")
-
-			require.Eventually(t, m.Ready, 2*time.Second, 5*time.Millisecond)
-			cancel()
-			require.NoError(t, <-done)
+			require.True(t, m.Ready())
+			require.True(t, m.Ready(), "a non-positive interval must clamp to the default cache age")
+			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
 }
@@ -175,4 +156,19 @@ func TestHealthMonitor_ProbeSucceedsWithZeroConfiguredTimeout(t *testing.T) {
 	require.NoError(t, m.Probe(t.Context()))
 	require.True(t, m.Ready())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHealthMonitor_CacheAgeIgnoresWallClockJumps(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	mock.ExpectPing()
+
+	m := db.NewHealthMonitor(db.Pool{W: sqlDB, R: sqlDB}, healthCfg(), testHealthLogger(), nil)
+	require.True(t, m.Ready())
+	snap := m.Snapshot()
+	snap.At = snap.At.Add(-time.Hour)
+
+	require.True(t, m.Ready())
+	require.NoError(t, mock.ExpectationsWereMet(), "a wall-clock jump made a fresh probe look stale")
 }

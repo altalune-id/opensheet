@@ -28,10 +28,18 @@ func (u *pgUnitOfWork) Run(ctx context.Context, fn func(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	if fnErr := fn(pdb.ContextWithTx(ctx, tx)); fnErr != nil {
+	if !owned {
+		return fn(ctx)
+	}
+	txCtx := pdb.ContextWithTx(ctx, tx)
+	if fnErr := fn(txCtx); fnErr != nil {
 		return u.endTx(tx, owned, fnErr)
 	}
-	return u.endTx(tx, owned, nil)
+	if err := u.endTx(tx, owned, nil); err != nil {
+		return err
+	}
+	pdb.RunAfterCommit(txCtx)
+	return nil
 }
 
 type sqliteUnitOfWork struct {
@@ -50,12 +58,14 @@ func (u *sqliteUnitOfWork) Run(ctx context.Context, fn func(ctx context.Context)
 	if err != nil {
 		return fmt.Errorf("sheet.unit.sqlite: begin: %w", err)
 	}
-	if fnErr := fn(pdb.ContextWithTx(ctx, tx)); fnErr != nil {
+	txCtx := pdb.ContextWithTx(ctx, tx)
+	if fnErr := fn(txCtx); fnErr != nil {
 		_ = tx.Rollback()
 		return fnErr
 	}
 	if cErr := tx.Commit(); cErr != nil {
 		return fmt.Errorf("sheet.unit.sqlite: commit: %w", cErr)
 	}
+	pdb.RunAfterCommit(txCtx)
 	return nil
 }

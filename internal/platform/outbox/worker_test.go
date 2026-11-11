@@ -295,3 +295,265 @@ func TestWorkerNameIsStable(t *testing.T) {
 	assert.Equal(t, outbox.WorkerName, w.Name())
 	assert.Equal(t, "outbox.dispatch", w.Name())
 }
+
+type countingTenants struct {
+	singleTenant
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *countingTenants) Each(ctx context.Context, fn func(context.Context, string) error) error {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return c.singleTenant.Each(ctx, fn)
+}
+
+func (c *countingTenants) sweeps() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+type failFirstDeliverer struct {
+	*recordingDeliverer
+}
+
+func (d *failFirstDeliverer) Deliver(ctx context.Context, e outbox.Entry) error {
+	_ = d.recordingDeliverer.Deliver(ctx, e)
+	if d.count(e.ID) == 1 {
+		return errors.New("endpoint refused")
+	}
+	return nil
+}
+
+func quietOpts() outbox.WorkerOpts {
+	return outbox.WorkerOpts{Tick: 5 * time.Second, IdlePoll: 10 * time.Minute, Batch: 10, Concurrency: 2}
+}
+
+func TestWorkerWakeDeliversWithoutWaitingForTheIdlePoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tc := workerScope()
+		raw := fakes.NewOutbox()
+		d := newRecordingDeliverer(nil)
+		opts := quietOpts()
+		opts.Waker = outbox.NewWaker()
+		w := outbox.NewWorker(raw, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler), opts)
+		store := outbox.WakeOnEnqueue(raw, opts.Waker)
+
+		cancel, done := runWorker(t, w)
+		synctest.Wait()
+
+		e := entry(tc, uuid.New())
+		require.NoError(t, fakes.UnitOfWork(tenant.Into(t.Context(), tc), func(ctx context.Context) error {
+			require.NoError(t, store.Enqueue(ctx, e))
+			time.Sleep(time.Second)
+			assert.Equal(t, 0, d.count(e.ID), "the worker woke before the enqueue committed")
+			return nil
+		}))
+		time.Sleep(time.Second)
+
+		assert.Equal(t, 1, d.count(e.ID), "a committed enqueue did not wake the worker before the idle poll")
+		cancel()
+		require.NoError(t, <-done)
+	})
+}
+
+func TestWorkerSendsNoQueryWhileIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tenants := &countingTenants{singleTenant: singleTenant{tc: workerScope()}}
+		w := outbox.NewWorker(fakes.NewOutbox(), newRecordingDeliverer(nil), tenants,
+			slog.New(slog.DiscardHandler), quietOpts())
+
+		cancel, done := runWorker(t, w)
+		time.Sleep(10*time.Minute - time.Second)
+		assert.Equal(t, 1, tenants.sweeps(), "only the startup sweep may run before the idle poll")
+
+		time.Sleep(2 * time.Second)
+		assert.Equal(t, 2, tenants.sweeps(), "the idle poll did not sweep")
+		cancel()
+		require.NoError(t, <-done)
+	})
+}
+
+func TestWorkerRetriesAFailedEntryBeforeTheIdlePoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tc := workerScope()
+		store := fakes.NewOutbox()
+		e := entry(tc, uuid.New())
+		require.NoError(t, store.Enqueue(tenant.Into(t.Context(), tc), e))
+		d := &failFirstDeliverer{recordingDeliverer: newRecordingDeliverer(nil)}
+		w := outbox.NewWorker(store, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler), quietOpts())
+
+		cancel, done := runWorker(t, w)
+		time.Sleep(backoffCeiling(2) + time.Second)
+
+		assert.Equal(t, 2, d.count(e.ID), "the retry waited for the idle poll instead of its backoff")
+		got, ok := store.Entry(e.ID)
+		require.True(t, ok)
+		assert.Equal(t, outbox.StatusDelivered, got.Status)
+		cancel()
+		require.NoError(t, <-done)
+	})
+}
+
+func TestWorkerResweepsAfterAFullBatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tc := workerScope()
+		store := fakes.NewOutbox()
+		ids := make([]uuid.UUID, 3)
+		for i := range ids {
+			e := entry(tc, uuid.New())
+			require.NoError(t, store.Enqueue(tenant.Into(t.Context(), tc), e))
+			ids[i] = e.ID
+		}
+		d := newRecordingDeliverer(nil)
+		opts := quietOpts()
+		opts.Batch = 2
+		w := outbox.NewWorker(store, d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler), opts)
+
+		cancel, done := runWorker(t, w)
+		time.Sleep(opts.Tick + time.Second)
+
+		for _, id := range ids {
+			assert.Equal(t, 1, d.count(id), "entry %s waited for the idle poll behind a full batch", id)
+		}
+		cancel()
+		require.NoError(t, <-done)
+	})
+}
+
+func backoffCeiling(attempt int) time.Duration {
+	base := outbox.BackoffBase(attempt)
+	return base + base/10
+}
+
+type flakyStore struct {
+	outbox.Store
+	mu                                  sync.Mutex
+	claimFails, succeedFails, failFails int
+}
+
+func (s *flakyStore) take(n *int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if *n == 0 {
+		return false
+	}
+	*n--
+	return true
+}
+
+func (s *flakyStore) ClaimDue(ctx context.Context, now time.Time, limit int) ([]outbox.Entry, error) {
+	if s.take(&s.claimFails) {
+		return nil, errors.New("claim refused")
+	}
+	return s.Store.ClaimDue(ctx, now, limit)
+}
+
+func (s *flakyStore) Succeed(ctx context.Context, e outbox.Entry, at time.Time) error {
+	if s.take(&s.succeedFails) {
+		return errors.New("settle refused")
+	}
+	return s.Store.Succeed(ctx, e, at)
+}
+
+func (s *flakyStore) Fail(ctx context.Context, e outbox.Entry, retryAt time.Time, cause string) error {
+	if s.take(&s.failFails) {
+		return errors.New("settle refused")
+	}
+	return s.Store.Fail(ctx, e, retryAt, cause)
+}
+
+type flakyTenants struct {
+	singleTenant
+	mu    sync.Mutex
+	fails int
+}
+
+func (f *flakyTenants) Each(ctx context.Context, fn func(context.Context, string) error) error {
+	f.mu.Lock()
+	fail := f.fails > 0
+	if fail {
+		f.fails--
+	}
+	f.mu.Unlock()
+	if fail {
+		return errors.New("enumerate refused")
+	}
+	return f.singleTenant.Each(ctx, fn)
+}
+
+func TestWorkerRetriesAtTheTickAfterAnError(t *testing.T) {
+	cases := []struct {
+		name    string
+		store   func(outbox.Store) outbox.Store
+		tenants func(tenant.Context) outbox.Tenants
+	}{
+		{
+			name:    "claim error",
+			store:   func(s outbox.Store) outbox.Store { return &flakyStore{Store: s, claimFails: 1} },
+			tenants: func(tc tenant.Context) outbox.Tenants { return singleTenant{tc: tc} },
+		},
+		{
+			name:  "tenant enumeration error",
+			store: func(s outbox.Store) outbox.Store { return s },
+			tenants: func(tc tenant.Context) outbox.Tenants {
+				return &flakyTenants{singleTenant: singleTenant{tc: tc}, fails: 1}
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				tc := workerScope()
+				base := fakes.NewOutbox()
+				e := entry(tc, uuid.New())
+				require.NoError(t, base.Enqueue(tenant.Into(t.Context(), tc), e))
+
+				d := newRecordingDeliverer(nil)
+				w := outbox.NewWorker(c.store(base), d, c.tenants(tc), slog.New(slog.DiscardHandler),
+					outbox.WorkerOpts{Tick: 5 * time.Second, IdlePoll: time.Hour})
+
+				cancel, done := runWorker(t, w)
+				time.Sleep(6 * time.Second)
+				cancel()
+				require.NoError(t, <-done)
+
+				assert.Equal(t, 1, d.count(e.ID), "an error left the sweep for the idle poll instead of the tick")
+			})
+		})
+	}
+}
+
+func TestWorkerRetriesAtTheLeaseAfterASettleError(t *testing.T) {
+	cases := []struct {
+		name  string
+		store func(outbox.Store) *flakyStore
+		err   error
+	}{
+		{name: "succeed error", store: func(s outbox.Store) *flakyStore { return &flakyStore{Store: s, succeedFails: 1} }},
+		{name: "fail error", store: func(s outbox.Store) *flakyStore { return &flakyStore{Store: s, failFails: 1} }, err: errors.New("endpoint refused")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				tc := workerScope()
+				base := fakes.NewOutbox()
+				e := entry(tc, uuid.New())
+				require.NoError(t, base.Enqueue(tenant.Into(t.Context(), tc), e))
+
+				d := newRecordingDeliverer(c.err)
+				w := outbox.NewWorker(c.store(base), d, singleTenant{tc: tc}, slog.New(slog.DiscardHandler),
+					outbox.WorkerOpts{Tick: 5 * time.Second, IdlePoll: time.Hour})
+
+				cancel, done := runWorker(t, w)
+				time.Sleep(outbox.ClaimLease + 10*time.Second)
+				cancel()
+				require.NoError(t, <-done)
+
+				assert.Equal(t, 2, d.count(e.ID), "an unsettled claim waited for the idle poll instead of its lease")
+			})
+		})
+	}
+}

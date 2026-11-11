@@ -111,6 +111,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("queue.enabled", false)
 	v.SetDefault("queue.connectTimeout", "10s")
 
+	v.SetDefault("outbox.idlePoll", "5s")
+
 	v.SetDefault("api.enabled", true)
 	v.SetDefault("api.keyPrefix", "key_")
 	v.SetDefault("api.openapi.enabled", true)

@@ -115,7 +115,6 @@ func TestBootServer_ProcessMatrix(t *testing.T) {
 			require.NotNil(t, srv.Listener, "the listener runs on every queue-enabled instance")
 			require.Contains(t, names, queue.ListenerName)
 			require.Contains(t, names, outbox.WorkerName, "the outbox dispatch worker runs on every process shape")
-			require.Contains(t, names, "db-health", "db health runs on every process shape")
 
 			rec := httptest.NewRecorder()
 			srv.httpHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))

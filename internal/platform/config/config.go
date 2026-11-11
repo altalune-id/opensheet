@@ -46,6 +46,7 @@ type Config struct {
 	Telemetry     telemetry.Config    `yaml:"telemetry"     mapstructure:"telemetry"`
 	Scheduler     SchedulerConfig     `yaml:"scheduler"     mapstructure:"scheduler"`
 	Queue         QueueConfig         `yaml:"queue"         mapstructure:"queue"`
+	Outbox        OutboxConfig        `yaml:"outbox"        mapstructure:"outbox"`
 	Observability ObservabilityConfig `yaml:"observability" mapstructure:"observability"`
 	Mail          MailConfig          `yaml:"mail"          mapstructure:"mail"`
 	I18n          I18nConfig          `yaml:"i18n"          mapstructure:"i18n"`
@@ -212,6 +213,11 @@ type SchedulerConfig struct {
 	Timezone      string                        `yaml:"timezone"      mapstructure:"timezone"      awareness:"bootstrap"`
 	ShutdownGrace time.Duration                 `yaml:"shutdownGrace" mapstructure:"shutdownGrace" awareness:"-"        validate:"gte=0"`
 	Jobs          map[string]SchedulerJobConfig `yaml:"jobs"          mapstructure:"jobs"          awareness:"-"`
+}
+
+// OutboxConfig tunes the outbox dispatch worker.
+type OutboxConfig struct {
+	IdlePoll time.Duration `yaml:"idlePoll" mapstructure:"idlePoll" awareness:"-" validate:"gte=0"`
 }
 
 // SchedulerJobConfig overrides per-job scheduler settings by job name.

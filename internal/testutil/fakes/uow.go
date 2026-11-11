@@ -14,5 +14,10 @@ func UnitOfWork(ctx context.Context, fn func(ctx context.Context) error) error {
 	if _, ok := db.CurrentTx(ctx); ok {
 		return db.ErrNestedUnitOfWork
 	}
-	return fn(db.ContextWithTx(ctx, nil))
+	txCtx := db.ContextWithTx(ctx, nil)
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	db.RunAfterCommit(txCtx)
+	return nil
 }

@@ -80,14 +80,16 @@ Every other store method opens a tenant-scoped transaction and fails without a s
 
 ## Unit of work
 
-| Primitive                             | Does                                                                                          |
-| ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `tenant.NewUnitOfWork(cfg, pool, pc)` | The `tenant.UnitOfWork` a service holds: `tenant.RunInTx` on Postgres, `db.RunInTx` on SQLite |
-| `db.RunInTx(ctx, pool, fn)`           | Plain transaction                                                                             |
-| `tenant.RunInTx(ctx, pc, tc, fn)`     | Tenant-scoped; calls `set_config` for the org                                                 |
-| `db.ContextWithTx` / `db.CurrentTx`   | Stores enroll in an outer transaction when one is on the context                              |
-| `db.ErrNestedUnitOfWork`              | Nesting is refused, not silently flattened                                                    |
-| `db.Pool{W, R}`                       | Non-tenant reads (`user`, `onboard`) use `R`; tenant reads use `W`                            |
+| Primitive                             | Does                                                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `tenant.NewUnitOfWork(cfg, pool, pc)` | The `tenant.UnitOfWork` a service holds: `tenant.RunInTx` on Postgres, `db.RunInTx` on SQLite        |
+| `db.RunInTx(ctx, pool, fn)`           | Plain transaction                                                                                    |
+| `tenant.RunInTx(ctx, pc, tc, fn)`     | Tenant-scoped; calls `set_config` for the org                                                        |
+| `db.ContextWithTx` / `db.CurrentTx`   | Stores enroll in an outer transaction when one is on the context                                     |
+| `db.AfterCommit(ctx, fn)`             | Runs `fn` after the owning unit of work commits; never on rollback. Runs at once with no transaction |
+| `db.RunAfterCommit(ctx)`              | Called by the unit-of-work owner after a successful commit                                           |
+| `db.ErrNestedUnitOfWork`              | Nesting is refused, not silently flattened                                                           |
+| `db.Pool{W, R}`                       | Non-tenant reads (`user`, `onboard`) use `R`; tenant reads use `W`                                   |
 
 Tenant reads need `set_config` inside the transaction, which is why they cannot use a replica.
 
