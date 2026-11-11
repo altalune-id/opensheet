@@ -52,7 +52,7 @@ type MigratorConfig struct {
 	Role string `yaml:"role" mapstructure:"role" awareness:"bootstrap"`
 }
 
-// HealthConfig tunes the db-health worker.
+// HealthConfig tunes the on-demand database health probe.
 type HealthConfig struct {
 	Interval time.Duration `yaml:"interval" mapstructure:"interval" awareness:"-" validate:"gte=0"`
 	Timeout  time.Duration `yaml:"timeout"  mapstructure:"timeout"  awareness:"-" validate:"gte=0"`

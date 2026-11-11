@@ -44,11 +44,13 @@ func RunInTx(ctx context.Context, pc *PgConn, tc Context, fn func(ctx context.Co
 		return fmt.Errorf("tenant: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := fn(db.ContextWithTx(ctx, tx)); err != nil {
+	txCtx := db.ContextWithTx(ctx, tx)
+	if err := fn(txCtx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("tenant: commit: %w", err)
 	}
+	db.RunAfterCommit(txCtx)
 	return nil
 }

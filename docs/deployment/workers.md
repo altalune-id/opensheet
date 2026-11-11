@@ -28,10 +28,9 @@ holding none. `0` (unlimited) is unaffected.
 **Deployment shapes.** `serve --no-scheduler` and `serve --scheduler-only` are mutually exclusive
 flags. In-process everywhere (the default) costs job load on the latency path; `--no-scheduler` serving
 replicas plus one `--scheduler-only` replica costs one more deployment unit. `--scheduler-only` still
-binds `http.addr` and still serves `/healthz` and `/readyz` — the `db-health` worker runs there too —
-so the same probes work unchanged. Combined with `scheduler.enabled=false` it is rejected at boot: the
-process would serve probes and do no work. Readiness is not a factor in the choice; `db-health` is a
-worker, not a job.
+binds `http.addr` and still serves `/healthz` and `/readyz`, so the same probes work unchanged. Combined with `scheduler.enabled=false` it is rejected at boot: the
+process would serve probes and do no work. Readiness is not a factor in the choice: `/readyz` pings the
+DB on demand in every process.
 
 ## Queue
 

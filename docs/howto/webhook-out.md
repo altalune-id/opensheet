@@ -2,7 +2,7 @@
 
 Surface **S5 dispatch** ([`surfaces`](../surfaces/README.md)) — the only egress surface, where we call a URL the tenant controls. Receiving a third party's push is the opposite direction, [`webhook-in.md`](webhook-in.md) (S4). Operator alerts to Slack or Discord are **not** this surface: `internal/platform/notify` is a separate, fire-and-forget code path, and wiring a tenant endpoint into it leaks operational data cross-tenant.
 
-What ships: `internal/platform/outbox/` (table, store, worker, backoff) and `internal/webhook/` (endpoints, console, `Deliverer`). Boot always registers `outbox.NewWorker` with `webhook.NewDeliverer`; `boot.WithDispatch` overrides the deliverer in tests. The receiver contract you are extending: [`webhooks`](../webhooks/README.md).
+What ships: `internal/platform/outbox/` (table, store, worker, backoff) and `internal/webhook/` (endpoints, console, `Deliverer`). Boot always registers `outbox.NewWorker` with `webhook.NewDeliverer`, and wraps the kernel store in `outbox.WakeOnEnqueue` so a committed write wakes the worker through `db.AfterCommit`; `boot.WithDispatch` overrides the deliverer in tests. The receiver contract you are extending: [`webhooks`](../webhooks/README.md).
 
 ## Steps
 

@@ -159,7 +159,7 @@ one account once and never overwrite it. Boot writes nothing — it reconciles t
 | `db.allowBypassRLS`         | `false`                     | `bootstrap`          | Skips `schema.RLSGuard`. Dev only — `true` in production means no tenant isolation.           |
 | `db.connectTimeout`         | `30s`                       | `-`                  | Total budget for the initial connect-and-ping, retries included. `0` disables retrying.       |
 | `db.connectBackoff`         | `250ms`                     | `-`                  | Starting backoff between connect attempts; doubles, capped at 5s, never overruns the timeout. |
-| `db.health.interval`        | `30s`                       | `-`                  | Tick cadence of the `db-health` worker; how stale a `/readyz` answer can be.                  |
+| `db.health.interval`        | `30s`                       | `-`                  | Max age of the cached probe result; a `/readyz` older than this pings the DB again.           |
 | `db.health.timeout`         | `2s`                        | `-`                  | Per-handle ping timeout within one probe round.                                               |
 | `tenant.rlsEnforce`         | `true`                      | `bootstrap`          | Renders the RLS clauses into the Postgres migration templates.                                |
 | `tenant.tenantScopedTables` | `[]`                        | `bootstrap`          | Extra tables `schema.RLSGuard` audits beyond the generated list.                              |
@@ -184,6 +184,12 @@ Boot fails if the runtime role holds `BYPASSRLS` and `db.allowBypassRLS` is `fal
 - **Job cadences are deliberately not configurable.** A cadence is a package constant in the
   owning module's `scheduler.go` (e.g. `sweepCron` in `internal/todo/scheduler.go`): changing one
   changes the domain's behavior and belongs in review, not in a deploy-time env var.
+
+## Outbox
+
+| Key               | Default | Awareness | Meaning                                                                                                                              |
+| ----------------- | ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `outbox.idlePoll` | `5s`    | `-`       | Longest wait between dispatch sweeps when nothing wakes the worker and no retry it scheduled is due. Never shorter than the 5s tick. |
 
 ## Encryption at rest
 

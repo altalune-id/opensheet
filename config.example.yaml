@@ -231,6 +231,10 @@ onboard:
   # [secret] env: OPENSHEET_ONBOARD_SETUP_TOKEN
   setupToken: ""
 
+outbox:
+  # env: OPENSHEET_OUTBOX_IDLE_POLL
+  idlePoll: 5s
+
 queue:
   # env: OPENSHEET_QUEUE_CONNECT_TIMEOUT
   connectTimeout: 10s

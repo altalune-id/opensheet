@@ -94,13 +94,13 @@ one errgroup and returns the first non-nil error.
 1. **Return `nil` on graceful shutdown** (ctx canceled) — never `ctx.Err()`.
 2. **Return non-nil only on unrecoverable failure** — the errgroup cancels every sibling.
 3. **Never block cancellation past the graceful window** — 10s, `worker.HTTP`'s shutdown budget.
-4. **A periodic loop logs per-tick failures instead of returning them.** `db.HealthMonitor` swallows
-   probe errors for exactly this reason: a database blip must not kill the process.
+4. **A periodic loop logs per-tick failures instead of returning them.** `outbox.Worker` logs a failed
+   sweep for exactly this reason: a database blip must not kill the process.
 
-| Choose          | When                                                                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| scheduler `Job` | At most one replica does the work per tick, or an operator triggers it by name (`opensheet scheduler run <job>`)                               |
-| `worker.Worker` | Every replica needs its own result (per-process state, a health snapshot), or per-tick failures must not reach the scheduler's `ErrorReporter` |
+| Choose          | When                                                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| scheduler `Job` | At most one replica does the work per tick, or an operator triggers it by name (`opensheet scheduler run <job>`)                                 |
+| `worker.Worker` | Every replica needs its own result (per-process state, an in-process queue), or per-tick failures must not reach the scheduler's `ErrorReporter` |
 
 ## Import boundary
 
