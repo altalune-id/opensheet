@@ -223,6 +223,7 @@ func (h *APIKeyHandler) projectView(sc ProjectScope, minted *templates.APIKeyMin
 		return templates.APIKeysView{}, err
 	}
 	v := baseView(h.ProjectURL(sc, "/apikeys"), minted, errKind, code)
+	v.Scopes = projectScopes(v.Scopes)
 	v.CanManage = h.canManage(sc.req, sc.org.ID, sc.principal.UserID)
 	v.Resources = resourceView(resources)
 	for _, k := range items {
@@ -429,6 +430,16 @@ func apiKeyRow(k *apikey.APIKey, base string, projects []templates.APIKeyProject
 		row.RevokedAt = k.RevokedAt.Format(time.RFC3339)
 	}
 	return row
+}
+
+func projectScopes(all []templates.APIKeyScopeOption) []templates.APIKeyScopeOption {
+	out := make([]templates.APIKeyScopeOption, 0, len(all))
+	for _, opt := range all {
+		if lvl, ok := authn.LevelOf(opt.Value); ok && lvl == authn.LevelProject {
+			out = append(out, opt)
+		}
+	}
+	return out
 }
 
 func scopeOptions() []templates.APIKeyScopeOption {
