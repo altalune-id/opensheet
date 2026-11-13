@@ -160,6 +160,18 @@ func TestProjectAPIKeys_HideTheRetiredScope(t *testing.T) {
 	assert.Contains(t, page.Body.String(), `value="`+authn.ScopeSheetsRead+`"`)
 }
 
+func TestProjectAPIKeys_HideOrgLevelScopes(t *testing.T) {
+	x := newAPIKeyWebFixture(t)
+	page := x.as(t, x.owner, http.MethodGet, "/orgs/acme/projects/alpha/apikeys", nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	assert.NotContains(t, page.Body.String(), `value="`+authn.ScopeMembersRead+`"`)
+	assert.Contains(t, page.Body.String(), `value="`+authn.ScopeSheetsRead+`"`)
+
+	orgPage := x.as(t, x.owner, http.MethodGet, "/orgs/acme/apikeys", nil)
+	require.Equal(t, http.StatusOK, orgPage.Code)
+	assert.Contains(t, orgPage.Body.String(), `value="`+authn.ScopeMembersRead+`"`)
+}
+
 func TestAPIKeys_ExpiryIsRequiredAndCapped(t *testing.T) {
 	x := newAPIKeyWebFixture(t)
 	for _, days := range []string{"", "0", "366", "never"} {
