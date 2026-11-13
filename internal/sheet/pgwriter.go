@@ -7,6 +7,7 @@ import (
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
 
+	pdb "altalune.id/opensheet/internal/platform/db"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -57,6 +58,10 @@ func (s *postgresStore) Save(ctx context.Context, sh *Sheet) error {
 			).WHERE(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
 	res, execErr := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(execErr) {
+		return s.endTx(tx, owned, &NotFoundError{ID: sh.ID.String()})
+	}
 	if execErr != nil {
 		if isPgUniqueViolation(execErr) {
 			return s.endTx(tx, owned, &AlreadyExistsError{Field: "slug", Value: sh.Slug})

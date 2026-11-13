@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
+
+	pdb "altalune.id/opensheet/internal/platform/db"
 )
 
 func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
@@ -35,6 +37,10 @@ func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
 			s.table.AcceptedAt.SET(pgNullableTimeExpr(i.UsedAt)),
 		).WHERE(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))))
 	res, execErr := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(execErr) {
+		return s.endTx(tx, owned, &NotFoundError{ID: i.ID.String()})
+	}
 	if execErr != nil {
 		return s.endTx(tx, owned, fmt.Errorf("invite.postgres.Save: %w", execErr))
 	}
