@@ -177,6 +177,10 @@ func (s *postgresStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context,
 			).WHERE(s.endpoints.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
 	res, err := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(err) {
+		return &NotFoundError{ID: e.ID.String()}
+	}
 	if err != nil {
 		return fmt.Errorf("webhook.postgres.Save: %w", err)
 	}

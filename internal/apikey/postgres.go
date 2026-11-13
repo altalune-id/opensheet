@@ -242,6 +242,10 @@ func (s *postgresStore) save(ctx context.Context, tx *sql.Tx, tc tenant.Context,
 			).WHERE(s.keys.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
 	res, execErr := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(execErr) {
+		return &NotFoundError{}
+	}
 	if execErr != nil {
 		return fmt.Errorf("apikey.postgres.Save: %w", execErr)
 	}

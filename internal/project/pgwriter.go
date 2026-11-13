@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/go-jet/jet/v2/postgres"
+
+	pdb "altalune.id/opensheet/internal/platform/db"
 )
 
 func (s *postgresStore) Save(ctx context.Context, p *Project) error {
@@ -29,6 +31,10 @@ func (s *postgresStore) Save(ctx context.Context, p *Project) error {
 			).WHERE(s.table.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
 	res, execErr := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(execErr) {
+		return s.endTx(tx, owned, &NotFoundError{ID: p.ID.String()})
+	}
 	if execErr != nil {
 		if isPgOneSystemViolation(execErr) {
 			return s.endTx(tx, owned, &SystemProjectExistsError{OrgID: p.OrgID.String(), Slug: p.Slug})

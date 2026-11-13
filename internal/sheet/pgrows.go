@@ -11,6 +11,7 @@ import (
 	"github.com/go-jet/jet/v2/qrm"
 	"github.com/google/uuid"
 
+	pdb "altalune.id/opensheet/internal/platform/db"
 	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
@@ -167,6 +168,10 @@ func (s *postgresRowStore) UpsertRow(ctx context.Context, k SnapshotKey, row Pro
 			).WHERE(s.rows.OrgID.EQ(postgres.UUID(tc.OrgID))),
 		)
 	res, execErr := stmt.ExecContext(ctx, tx)
+	// NOTE: the conflict clause's org guard refuses with zero rows, or with a row-level security refusal on newer Postgres.
+	if pdb.IsRowSecurityViolation(execErr) {
+		return s.endTx(tx, owned, &NotFoundError{ID: k.SheetID.String()})
+	}
 	if execErr != nil {
 		return s.endTx(tx, owned, fmt.Errorf("sheet.rows.postgres.UpsertRow: %w", execErr))
 	}
