@@ -152,3 +152,37 @@ func TestSignupHandler_PostSignup_BlankProjectSlugIsGenerated(t *testing.T) {
 	projectSlug := strings.TrimSuffix(strings.TrimPrefix(loc, "/orgs/acme/projects/"), "/overview")
 	assert.Regexp(t, generatedSlugShape, projectSlug, "a blank project slug must be generated, not the literal default")
 }
+
+// TestSignupHandler_GetSignup_LogoutFormIsNotNested pins that "Wrong account" logs out: a browser drops a nested <form>, so its button would submit the signup form.
+func TestSignupHandler_GetSignup_LogoutFormIsNotNested(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.Cfg.Mode = config.ModeCloud
+	u, err := f.Users.Create(context.Background(), user.CreateRequest{Email: "alice@example.com", Name: "Alice", Source: user.SourceOIDC})
+	require.NoError(t, err)
+
+	mux := http.NewServeMux()
+	handlers.NewSignupHandler(f.Deps, f.Users, f.Orgs, f.Projects).Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, f.authedRequest(t, http.MethodGet, "/signup/complete", "", session.Principal{UserID: u.ID, Email: u.Email, Name: u.Name}))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	require.Contains(t, body, `action="/logout"`, "the logout form must render, or this guard proves nothing")
+	depth := 0
+	for rest := body; ; {
+		open, closing := strings.Index(rest, "<form"), strings.Index(rest, "</form>")
+		if open < 0 && closing < 0 {
+			break
+		}
+		if open >= 0 && (closing < 0 || open < closing) {
+			depth++
+			require.LessOrEqual(t, depth, 1, "a <form> opens inside another <form>")
+			rest = rest[open+len("<form"):]
+			continue
+		}
+		depth--
+		rest = rest[closing+len("</form>"):]
+	}
+	require.Zero(t, depth)
+}

@@ -124,6 +124,10 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 	legalHandler := webhandlers.NewLegalHandler(deps)
 
 	errTmpl := webmw.LogError{Log: slogger}
+	cop, err := buildCrossOrigin(cfg.HTTP.BaseURL)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	handler, routes = web.NewServerWithRoutes(web.ServerOpts{
 		BasePath: cfg.HTTP.BasePath,
@@ -150,7 +154,7 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 		MCPHandler:       d.MCP.Handler,
 		ResourceMetadata: resourceMetadata(cfg, d.MCP, d.APIResource),
 		RobotsCfg:        &struct{ RobotsTxt string }{RobotsTxt: cfg.HTTP.RobotsTxt},
-		Chains:           surfaceChains(cfg, kernel, slogger, d.Reporter, errTmpl, d.Bundle, d.DefaultLoc, d.Required, deps.Key(web.PurposeSession)),
+		Chains:           surfaceChains(cfg, kernel, slogger, d.Reporter, errTmpl, d.Bundle, d.DefaultLoc, d.Required, deps.Key(web.PurposeSession), cop),
 	})
 	return handler, routes, nil
 }
@@ -202,6 +206,7 @@ func surfaceChains(
 	defaultLoc i18npkg.Locale,
 	required *atomic.Bool,
 	secret []byte,
+	cop *http.CrossOriginProtection,
 ) web.SurfaceChains {
 	edge := []web.Middleware{
 		webmw.RequestID,
@@ -215,6 +220,7 @@ func surfaceChains(
 		Console: slices.Concat(edge, []web.Middleware{
 			webmw.CSP(cspOptions(cfg)),
 			webmw.Recover(reporter.Unexpected, errTmpl),
+			cop.Handler,
 			webmw.Session(webmw.SessionConfig{
 				Store:  kernel.Sessions,
 				Secret: secret,
@@ -239,6 +245,19 @@ func surfaceChains(
 			webmw.RecoverJSON(reporter.Unexpected),
 		}),
 	}
+}
+
+// SECURITY: behind a proxy the Host header is not the public origin, so the configured baseURL origin is trusted explicitly.
+func buildCrossOrigin(baseURL string) (*http.CrossOriginProtection, error) {
+	cop := http.NewCrossOriginProtection()
+	origin := web.Origin(baseURL)
+	if origin == "" {
+		return cop, nil
+	}
+	if err := cop.AddTrustedOrigin(origin); err != nil {
+		return nil, fmt.Errorf("boot: http.baseURL origin: %w", err)
+	}
+	return cop, nil
 }
 
 func healthOnlyHandler(cfg *config.Config, healthOK func() bool) http.Handler {

@@ -17,6 +17,10 @@ type Org struct {
 	memberships []*org.Membership
 	userLookup  map[uuid.UUID]func() (string, string)
 	takenSlugs  int
+	// MembershipOfFailAfter makes every MembershipOf call after the first N return MembershipOfErr.
+	MembershipOfFailAfter int
+	MembershipOfErr       error
+	membershipOfCalls     int
 }
 
 // NewOrg returns an empty in-memory org.Store.
@@ -133,6 +137,10 @@ func (r *Org) SaveMembership(_ context.Context, m *org.Membership) error {
 func (r *Org) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*org.Membership, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.membershipOfCalls++
+	if r.MembershipOfErr != nil && r.membershipOfCalls > r.MembershipOfFailAfter {
+		return nil, r.MembershipOfErr
+	}
 	for _, x := range r.memberships {
 		if x.OrgID == orgID && x.UserID == userID {
 			c := *x
@@ -140,6 +148,13 @@ func (r *Org) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*org.Mem
 		}
 	}
 	return nil, &org.MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
+}
+
+// MembershipOfCalls reports how many times MembershipOf ran.
+func (r *Org) MembershipOfCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.membershipOfCalls
 }
 
 func (r *Org) ListMembers(_ context.Context, orgID uuid.UUID) ([]*org.Membership, error) {

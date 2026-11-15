@@ -95,12 +95,18 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	o, proj, r := sc.org, sc.project, sc.req
+	p, o, proj, r := sc.principal, sc.org, sc.project, sc.req
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
+	// SECURITY: RequireProject admits any org member, so renaming needs an owner or admin; a failed lookup refuses.
+	canManage, mErr := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
+	if mErr != nil || !canManage {
+		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to rename this project.")
+		return
+	}
 	if _, err := h.Projects.Rename(r.Context(), proj.ID, name); err != nil {
 		h.LogErr("web project: rename", err)
 		if project.IsSystemProtectedError(err) {
