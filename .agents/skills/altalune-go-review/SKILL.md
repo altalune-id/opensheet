@@ -33,22 +33,22 @@ that review. The user may also name files or a PR — that overrides the script.
 
 ## 2. Load the standards
 
-Each lives in `.agents/skills/<name>/SKILL.md`; that project copy is the source of truth over any
-same-named personal skill. Read the named sections, not the whole file; do not restate them from memory.
+Repo skills live in `.agents/skills/<name>/SKILL.md`; shared skills come from the `altalune`
+plugin marketplace. Read the named sections, not the whole file; do not restate them from memory.
 
-| Always                   | Read                                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------- |
-| `go`                     | Core Principles, Interface Design, Concurrency Patterns, Error Handling, Testing Patterns   |
-| `go-spec-reviewer`       | Step 2 table — the simplicity / YAGNI bar                                                   |
-| `altalune-go-convention` | "Rules that are expensive to get wrong", plus the `docs/howto/` recipe for each change type |
-| `comment-discipline`     | Keep, Delete, Traps                                                                         |
+| Always                              | Read                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------- |
+| `go:go`                             | Core Principles, Interface Design, Concurrency Patterns, Error Handling, Testing Patterns   |
+| `go-spec-reviewer:go-spec-reviewer` | Step 2 table — the simplicity / YAGNI bar                                                   |
+| `altalune-go-convention`            | "Rules that are expensive to get wrong", plus the `docs/howto/` recipe for each change type |
+| `alt-go:alt-comment-discipline`     | Keep, Delete, Traps                                                                         |
 
-| Only if the diff touches                                            | Read                                       |
-| ------------------------------------------------------------------- | ------------------------------------------ |
-| an exported symbol in a root package or `internal/platform/`        | `go-release`: breaking change, Deprecation |
-| a `go` statement, channel, `select`, `sync`, `errgroup` or a worker | `go-concurrency`: all of it                |
-| `cmd/` or `internal/cli/`                                           | `cobra-viper`                              |
-| a `.templ` file or htmx attribute                                   | `htmx-guidance`                            |
+| Only if the diff touches                                            | Read                                                  |
+| ------------------------------------------------------------------- | ----------------------------------------------------- |
+| an exported symbol in a root package or `internal/platform/`        | `go-release:go-release`: breaking change, Deprecation |
+| a `go` statement, channel, `select`, `sync`, `errgroup` or a worker | `alt-go:alt-go-concurrency`: all of it                |
+| `cmd/` or `internal/cli/`                                           | `cobra-viper:cobra-viper`                             |
+| a `.templ` file or htmx attribute                                   | `htmx:htmx-guidance`                                  |
 
 If a spec or plan drove the change, read it: a change that does not do what the plan says is
 a finding.

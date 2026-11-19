@@ -29,14 +29,20 @@ depguard rule: stdlib and the MCP Go SDK only.
 
 ## Skills
 
-`.agents/skills/` holds the real files and sets the review bar. `.claude/skills/` is
-symlinks into it — edit `.agents/skills/`, never the links. Loaded automatically on task
-match: `go` (idiomatic Go, through 1.25/1.26) · `go-concurrency` (goroutine ownership and
-lifecycle) · `cobra-viper` · `go-release` · `go-spec-reviewer` ·
-`altalune-go-convention` (module shape, tenant scoping, surfaces) ·
-`altalune-go-review` (review a change: convention, reuse, extensibility, scalability) ·
-`comment-discipline` (when a comment earns its place; gate is `make comment-check`) ·
-`htmx-guidance`, `htmx-debugging`, `htmx-upgrade-from-htmx2`, `htmx-extension-authoring`.
+Shared skills come from the `altalune` Claude Code plugin marketplace
+([`altalune-id/agent-plugins`](https://github.com/altalune-id/agent-plugins)), enabled in
+`.claude/settings.json`; Codex and opencode users run that repo's `install.sh`. Loaded
+automatically on task match: `go:go` (idiomatic Go, through 1.25/1.26) ·
+`alt-go:alt-go-concurrency` (goroutine ownership and lifecycle) · `alt-go:alt-go-proverb` ·
+`cobra-viper:cobra-viper` · `go-release:go-release` · `go-spec-reviewer:go-spec-reviewer` ·
+`alt-go:alt-comment-discipline` (when a comment earns its place; gate is `make comment-check`) ·
+`htmx:htmx-guidance`, `htmx:htmx-debugging`, `htmx:htmx-upgrade-from-htmx2`,
+`htmx:htmx-extension-authoring`.
+
+This repo's own skills live in `.agents/skills/` and set the review bar. `.claude/skills/` is
+symlinks into it — edit `.agents/skills/`, never the links: `altalune-go-convention` (module
+shape, tenant scoping, surfaces) · `altalune-go-review` (review a change: convention, reuse,
+extensibility, scalability).
 
 ## Rules that override defaults
 
@@ -68,6 +74,9 @@ lifecycle) · `cobra-viper` · `go-release` · `go-spec-reviewer` ·
 - **Comments — default NO comments.** Keep 1-line godoc on exported symbols,
   TODO/SECURITY/FIXME/NOTE markers, external URL references. Delete rationale, history and
   architecture prose. Enforced by `make comment-check` (`cmd/comment-lint`, CI job `comment-check`).
+- **Comment gate scope.** `make comment-check` checks Go files only, with rules `multiline-doc`,
+  `unexported-doc`, `blank-doc-line`, `section-header` and `prose-block`; other file types follow
+  `alt-go:alt-comment-discipline` by review.
 - **No references to uncommitted files.** Never reference untracked files or IDs defined only in them.
 - **Config awareness tags.** Every `Config` field you add or change carries
   `awareness:"..."` (`required` / `bootstrap` / `secret` / `mode:<x>`; `-` opts out, and a
@@ -132,6 +141,8 @@ scoped API keys.
 - **Data plane** — the product. Sheet routes, write rules and query syntax:
   [`docs/surfaces/opensheet.md`](docs/surfaces/opensheet.md); scope resolution:
   [`docs/multitenancy/opensheet.md`](docs/multitenancy/opensheet.md).
+- **Sheets is a low-volume, human-editable store** — about 10 million cells per spreadsheet,
+  per-minute quotas, no query language; a batch create is one `Values.Append`, all or nothing.
 - **API keys** — the template's keys with `api.keyPrefix` set to `osk_`; `ResourceIDs` name
   sheets. The scope catalog is opensheet's: `sheets:*`, `spreadsheets:*`, `credentials:*`,
   `cache:purge`. These strings are the wire contract with the scopes registered on opensheet's resource servers in Othra.
