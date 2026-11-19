@@ -19,7 +19,9 @@ Section 2. Verbs only — `Save`, `ByID`, `List`, `Delete`; never `Get*` or `Fin
    the missing method a compile error.
 5. Tests, paired: `sqlite_test.go` (`:memory:` or a temp-file DSN) and
    `postgres_integration_test.go` (`//go:build integration`, `pgtest.New(t)`). Name them
-   `TestSQLite_<Behaviour>` / `TestPostgres_<Behaviour>` so the pair is greppable.
+   `TestSQLite_<Behaviour>` / `TestPostgres_<Behaviour>` so the pair is greppable. The package's
+   `main_integration_test.go` has `func TestMain(m *testing.M) { pgtest.Main(m) }`: it removes the
+   container when the binary exits, and `pgtest.New` fails without it.
 6. `make check`, then `make test-integration`.
 
 The one shared contract harness in the tree is `runStoreContract` in
