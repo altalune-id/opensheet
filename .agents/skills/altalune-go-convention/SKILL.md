@@ -113,7 +113,7 @@ formats files otherwise). Run it before claiming a module is done.
 
 Integration tests need Postgres. Set `TEST_PG_DSN` at a throwaway database and use `-p 1` —
 without it, packages race on `CREATE/DROP ROLE` and cleanup fails. Without `TEST_PG_DSN` each
-`pgtest.New` starts its own container and the suite takes ~25 minutes instead of ~2.
+package's test binary starts one container, removed by `pgtest.Main` when the binary exits.
 
 What `verify.sh` cannot check, and you still must do: open the page, run
 `bash scripts/verify-serve-smoke.sh` (and `verify-mcp-smoke.sh` for S7), and revert each

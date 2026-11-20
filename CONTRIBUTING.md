@@ -36,8 +36,11 @@ make test-all           # both
 
 Integration tests carry `//go:build integration`, so `go test ./...` never
 touches them. Bare `make test-integration` spins ephemeral Postgres through
-`pgtest.New(t)` and needs a docker or podman socket; set `TEST_PG_DSN` to
-reuse a running cluster instead, which is faster:
+`pgtest.New(t)` and needs a container runtime socket; set `TEST_PG_DSN` to
+reuse a running cluster instead, which is faster. Every package that calls
+`pgtest.New` has a `main_integration_test.go` with
+`func TestMain(m *testing.M) { pgtest.Main(m) }`: it removes the package's one
+Postgres container when the test binary exits, and `pgtest.New` fails without it.
 
 ```bash
 TEST_PG_DSN='postgres://opensheet:opensheet@localhost:5432/opensheet_test?sslmode=disable' \
