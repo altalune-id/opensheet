@@ -1,0 +1,21 @@
+{
+  "extraKnownMarketplaces": {
+    "altalune": {
+      "source": {
+        "source": "github",
+        "repo": "altalune-id/agent-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "go@altalune": true,
+    "cobra-viper@altalune": true,
+    "go-release@altalune": true,
+    "go-spec-reviewer@altalune": true,
+    "htmx@altalune": true,
+    "alt-go@altalune": true,
+    "alt-workflow@altalune": true,
+    "alt-oauth@altalune": true,
+    "alt-mcp@altalune": true
+  }
+}

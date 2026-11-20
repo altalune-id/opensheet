@@ -42,7 +42,7 @@ the owners in this codebase; a second copy of anything they hold is a finding.
   [`architecture`](../../../../docs/architecture/README.md#rules-each-layer-must-not-break).
 - **Fork cost.** A signature change in a verbatim-copied package (`httpclient/ logger/
 mailer/ mcp/ nanoid/ reqid/ scheduler/ telemetry/ worker/ internal/platform/`) needs a reason
-  and tests first. Load `go-release` for exported API changes.
+  and tests first. Load `go-release:go-release` for exported API changes.
 
 ## Scalability
 
