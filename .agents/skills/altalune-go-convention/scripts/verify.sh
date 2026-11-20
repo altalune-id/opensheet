@@ -5,8 +5,8 @@
 #   scripts/verify.sh --check         read-only: never writes a file (use during review)
 #   scripts/verify.sh --integration   also run the Postgres suite (combines with --check)
 #
-# TEST_PG_DSN should point at a throwaway database. Without it every pgtest.New
-# starts its own container and the suite takes ~25 minutes instead of ~2.
+# TEST_PG_DSN should point at a throwaway database. Without it every package's
+# test binary starts its own container.
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -108,7 +108,7 @@ fi
 if [ "$integration" -eq 1 ]; then
   step "integration suite"
   if [ -z "${TEST_PG_DSN:-}" ]; then
-    printf '    TEST_PG_DSN unset — this will start a container per pgtest.New and take ~25 min\n'
+    printf '    TEST_PG_DSN unset — this will start a container per test binary\n'
   fi
   if ! make test-integration >/tmp/altalune-go-convention-integration.log 2>&1; then
     grep -E "^(FAIL|--- FAIL)" /tmp/altalune-go-convention-integration.log | head -10

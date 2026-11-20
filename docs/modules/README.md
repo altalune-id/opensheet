@@ -11,19 +11,20 @@ This doc is the **shape** and is canonical for it. Ordered steps: [`howto/module
 
 ## 1. Files
 
-| File                           | Holds                                                      |
-| ------------------------------ | ---------------------------------------------------------- |
-| `<name>.go`                    | Aggregate root, `New()` with invariants, value types       |
-| `store.go`                     | `Store` interface — the driven port                        |
-| `errors.go`                    | Typed error structs, `Is<FullTypeName>`, `ToAppError()`    |
-| `service.go`                   | `Service` struct, `NewService(...)`, application methods   |
-| `factory.go`                   | `NewStore(cfg, pool, pc) Store` — driver dispatch          |
-| `postgres.go`                  | `postgresStore` on go-jet + `tenant.PgConn`                |
-| `sqlite.go`                    | `sqliteStore` on `pool.W`                                  |
-| `<name>_test.go`               | Aggregate invariants, table-driven, pure Go                |
-| `service_test.go`              | Application tests on `internal/testutil/fakes.<Name>`      |
-| `sqlite_test.go`               | `:memory:` DB + SQLite migrations                          |
-| `postgres_integration_test.go` | `//go:build integration`, `pgtest.New(t)` or `TEST_PG_DSN` |
+| File                           | Holds                                                         |
+| ------------------------------ | ------------------------------------------------------------- |
+| `<name>.go`                    | Aggregate root, `New()` with invariants, value types          |
+| `store.go`                     | `Store` interface — the driven port                           |
+| `errors.go`                    | Typed error structs, `Is<FullTypeName>`, `ToAppError()`       |
+| `service.go`                   | `Service` struct, `NewService(...)`, application methods      |
+| `factory.go`                   | `NewStore(cfg, pool, pc) Store` — driver dispatch             |
+| `postgres.go`                  | `postgresStore` on go-jet + `tenant.PgConn`                   |
+| `sqlite.go`                    | `sqliteStore` on `pool.W`                                     |
+| `<name>_test.go`               | Aggregate invariants, table-driven, pure Go                   |
+| `service_test.go`              | Application tests on `internal/testutil/fakes.<Name>`         |
+| `sqlite_test.go`               | `:memory:` DB + SQLite migrations                             |
+| `postgres_integration_test.go` | `//go:build integration`, `pgtest.New(t)` or `TEST_PG_DSN`    |
+| `main_integration_test.go`     | `//go:build integration`, `TestMain` calling `pgtest.Main(m)` |
 
 Those names are fixed; extra files are free — `pgreader.go` / `pgwriter.go` when `postgres.go` grows,
 `scheduler.go` (Section 6), a workflow file (Section 7), a pure helper like `blog/markdown.go`.

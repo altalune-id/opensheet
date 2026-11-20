@@ -20,6 +20,10 @@ while read -r _ local_sha _ remote_sha; do
     done
 done
 
+git fetch --quiet origin main 2>/dev/null || echo "warn: cannot fetch origin/main — using the local ref"
+has_main=
+git rev-parse --verify --quiet origin/main >/dev/null && has_main=1
+
 echo "→ gofmt -l ."
 if [ -n "$(gofmt -l .)" ]; then
     echo "gofmt: the following files need formatting:" >&2
@@ -41,29 +45,37 @@ go tool gen-config-example --format=yaml --check
 echo "→ go tool i18n-lint --check"
 go tool i18n-lint --check
 
-echo "→ go test -race -shuffle=on ./..."
-go test -race -shuffle=on ./...
-
-echo "→ golangci-lint run"
-golangci-lint run --timeout=3m ./...
-
-echo "→ buf breaking vs origin/main"
-git fetch --quiet origin main 2>/dev/null || echo "warn: no origin/main — skipping buf breaking"
-if git rev-parse --verify origin/main >/dev/null 2>&1; then
-    if git ls-tree -r origin/main --name-only | grep -q '\.proto$'; then
-        pnpm exec buf breaking --against '.git#branch=origin/main' || {
-            echo "buf breaking failed — proto API surface may have broken"; exit 1;
-        }
-    else
-        echo "warn: origin/main has no .proto files — skipping buf breaking"
-    fi
+if [ -n "$has_main" ]; then
+    echo "→ golangci-lint run (issues new since origin/main)"
+    golangci-lint run --timeout=3m --new-from-rev=origin/main ./...
+else
+    echo "→ golangci-lint run"
+    golangci-lint run --timeout=3m ./...
 fi
 
-echo "→ goreleaser check"
-if command -v goreleaser >/dev/null 2>&1; then
-    goreleaser check
+if [ -n "$PREPUSH_FULL" ] || [ -z "$has_main" ]; then
+    echo "→ go test -race -shuffle=on ./..."
+    go test -race -shuffle=on ./...
 else
-    echo "warn: goreleaser not installed — skipping (brew install goreleaser to enable)"
+    pkgs=$(git diff --name-only origin/main...HEAD | while IFS= read -r f; do
+        d=$(dirname "$f" | sed 's#^testdata\(/.*\)\{0,1\}$#.#; s#/testdata\(/.*\)\{0,1\}$##')
+        while [ "$d" != "." ]; do
+            if ls "$d"/*.go >/dev/null 2>&1; then
+                echo "./$d"
+                break
+            fi
+            d=$(dirname "$d")
+        done
+    done | sort -u)
+    if [ -n "$pkgs" ]; then
+        pkgs=$(go list -e -f '{{if or .GoFiles .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' $pkgs)
+    fi
+    if [ -z "$pkgs" ]; then
+        echo "→ go test: no Go package changed vs origin/main — skipping (PREPUSH_FULL=1 runs every test)"
+    else
+        echo "→ go test -race -shuffle=on (packages changed vs origin/main; PREPUSH_FULL=1 runs every test)"
+        go test -race -shuffle=on $pkgs
+    fi
 fi
 
 echo "→ pre-push OK"

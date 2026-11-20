@@ -5,17 +5,18 @@ automatically on `pnpm install` (via the `prepare` script in `package.json`).
 
 ## What runs when
 
-| Hook | Command | Purpose |
-|---|---|---|
-| `pre-commit` | `go tool i18n-lint --check` | fail if a `d.Tr` key has no translation |
-| `pre-commit` | `pnpm exec lint-staged` | gofmt + go vet, hadolint, yamllint, buf lint, prettier on staged files only |
-| `pre-push` | `git verify-commit` over outgoing range | fail fast if any outgoing commit is not GPG/SSH-signed |
-| `pre-push` | `go tool gen-config-example --check` (env + yaml) | fail if `.env.example` / `config.example.yaml` drifted from struct tags |
-| `pre-push` | `go tool i18n-lint --check` | i18n coverage across locales |
-| `pre-push` | `go test -race -shuffle=on ./...` | full unit test suite |
-| `pre-push` | `golangci-lint run --timeout=3m ./...` | static analysis |
-| `pre-push` | `pnpm exec buf breaking --against origin/main` | protobuf breaking-change guard |
-| `pre-push` | `goreleaser check` | release config sanity |
+| Hook         | Command                                            | Purpose                                                                                                              |
+| ------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pre-commit` | `go tool i18n-lint --check`                        | fail if a `d.Tr` key has no translation                                                                              |
+| `pre-commit` | `pnpm exec lint-staged`                            | gofmt + go vet, hadolint, yamllint, buf lint, prettier on staged files only                                          |
+| `pre-push`   | `git verify-commit` over outgoing range            | fail fast if any outgoing commit is not GPG/SSH-signed                                                               |
+| `pre-push`   | `gofmt -l .`, `go vet ./...`, `pnpm exec buf lint` | formatting, vet and proto lint                                                                                       |
+| `pre-push`   | `go tool gen-config-example --check` (env + yaml)  | fail if `.env.example` / `config.example.yaml` drifted from struct tags                                              |
+| `pre-push`   | `go tool i18n-lint --check`                        | i18n coverage across locales                                                                                         |
+| `pre-push`   | `golangci-lint run --new-from-rev=origin/main`     | static analysis on code changed since `origin/main`                                                                  |
+| `pre-push`   | `go test -race -shuffle=on`                        | unit tests of the Go packages changed since `origin/main`; `PREPUSH_FULL=1` (or no `origin/main`) runs every package |
+
+CI runs everything else on every pull request: the full golangci-lint, `buf breaking`, `goreleaser check` and the integration suite.
 
 ## Before you commit — the short list
 

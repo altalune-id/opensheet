@@ -1,0 +1,13 @@
+//go:build integration
+
+package session_test
+
+import (
+	"testing"
+
+	"altalune.id/opensheet/internal/testutil/pgtest"
+)
+
+func TestMain(m *testing.M) {
+	pgtest.Main(m)
+}

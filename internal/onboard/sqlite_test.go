@@ -3,7 +3,6 @@ package onboard_test
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ func TestMain(m *testing.M) {
 		_ = db.Ping()
 		_ = db.Close()
 	}
-	os.Exit(m.Run())
+	runTests(m)
 }
 
 func openMemSQLite(t *testing.T) (*sql.DB, pdb.DBConfig) {
