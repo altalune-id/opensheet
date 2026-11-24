@@ -319,7 +319,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 
 	apiRes := apiResource(cfg, log)
 	apiSrv, apiHandler := buildAPIHandler(cfg, kernel, svcs, apiRes)
-	dataHandler := buildDataHandler(cfg, caps, log, svcs)
+	dataHandler := buildDataHandler(cfg, caps, log, svcs, verifier)
 
 	mcpSurf, err := buildMCPSurface(cfg, log, svcs, apiSrv, tokenKeys)
 	if err != nil {

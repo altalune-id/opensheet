@@ -131,9 +131,9 @@ pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 
 ### Numbering
 
-Postgres `001`–`005` and `012`–`020`, and SQLite `001`–`003` and `010`–`017`, are the template's,
+Postgres `001`–`005` and `012`–`018`, and SQLite `001`–`003` and `010`–`015`, are the template's,
 content byte-identical to it. They are **never edited, renamed, renumbered or deleted**.
-opensheet's own are Postgres `006`–`011` and SQLite `004`–`009`. A new template migration lands
+opensheet's own are Postgres `006`–`011` and `019`, and SQLite `004`–`009` and `016`. A new template migration lands
 at opensheet's next free number; a new opensheet migration takes the next free number too.
 
 The template's later edits to Postgres `001_init` and `005_definer_functions` and SQLite
@@ -179,6 +179,8 @@ erDiagram
         uuid credential_id FK "RESTRICT"
         text google_file_id "unique per project"
         text title
+        bool writable
+        text provision_key "unique per project when set"
     }
     sheets {
         uuid id PK
@@ -223,6 +225,9 @@ erDiagram
 - `sheet_rows` is the queryable projection of a published tab, keyed on the tab's `id` column.
   `row_index` counts an interior blank row, so the spreadsheet row is `row_index + 2`. Its `jsonb`
   keys come back in Postgres' order, so the served body is rebuilt with `encoding/json`.
+- `spreadsheets.provision_key` (`019`, SQLite `016`) is the idempotency key of the `Provision`
+  call that created the document, `NULL` for one registered by hand. A partial unique index on
+  `(project_id, provision_key)` makes a retried call find its first file instead of creating another.
 - `sheets.generation` guards the projection: a refresh captures it before fetching and discards
   its write if it moved, and a `PATCH` holds it as a per-sheet write lock.
 

@@ -24,15 +24,16 @@ it needs its own periodic `DELETE FROM <prefix>sessions WHERE expires_at < now()
 The steps are in [`deployment`](README.md#oidc). opensheet's resource servers take these scopes
 (the catalog is in [`scopes`](../scopes/README.md)):
 
-| Resource server | Scopes                                                                                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<base>/mcp`    | `sheets:read`, `members:read`                                                                                                                                    |
-| `<base>/api`    | `sheets:read`, `sheets:admin`, `spreadsheets:read`, `spreadsheets:write`, `credentials:read`, `credentials:write`, `cache:purge`, `apikeys:read`, `members:read` |
+| Resource server | Scopes                                                                                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<base>/mcp`    | `sheets:read`, `members:read`                                                                                                                                                    |
+| `<base>/api`    | `sheets:read`, `sheets:write`, `sheets:admin`, `spreadsheets:read`, `spreadsheets:write`, `credentials:read`, `credentials:write`, `cache:purge`, `apikeys:read`, `members:read` |
 
 Not part of the registration:
 
-- **The data plane** (`/api/v1/`) takes opensheet API keys only. It accepts no Othra token and
-  serves no RFC 9728 document. Integrators keep calling it with an API key, unchanged.
+- **The data plane** (`/api/v1/`) has no resource server of its own. It takes opensheet API keys
+  and Othra tokens issued for `<base>/api`, sent as `Authorization: Bearer`, and serves no RFC 9728
+  document. A token's person must be a member of the org in the path.
 - **Google Sheets and Drive OAuth** (`google.oauth.*`, `/credentials/google/callback`) is
   opensheet's own client of Google for reading spreadsheets. It is not sign-in and has nothing to
   register in Othra. Its connect state is signed with its own key derived from `http.stateSecret`,

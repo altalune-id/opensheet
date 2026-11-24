@@ -1,4 +1,4 @@
-// Package dataplane implements S3, the REST data plane over published sheets: the surface an integrator's running product calls directly, authenticated by API key.
+// Package dataplane implements S3, the REST data plane over published sheets: the surface an integrator's running product calls directly, authenticated by API key or access token.
 package dataplane
 
 import (

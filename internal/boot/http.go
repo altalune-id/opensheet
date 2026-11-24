@@ -39,6 +39,7 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services, resour
 		CredentialConnect: s.Connect,
 		Spreadsheets:      s.Spreadsheets,
 		Sheets:            s.Sheets,
+		Provision:         s.Provision,
 	})
 	srv.Authn = s.Authn
 	srv.Resource = resource
@@ -50,10 +51,11 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services, resour
 	return srv, h
 }
 
-func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, slogger *slog.Logger, s *Services) http.Handler {
+func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, slogger *slog.Logger, s *Services, verifier tokens.Verifier) http.Handler {
 	if !caps.DataPlaneEnabled {
 		return nil
 	}
+	authz, challenge := dataAuthorizer(cfg, s, verifier)
 	return dataplane.NewSheetHandler(dataplane.SheetHandlerParams{
 		BasePath:   cfg.HTTP.BasePath,
 		Orgs:       orgServiceForDataplane{svc: s.Orgs},
@@ -64,9 +66,10 @@ func buildDataHandler(cfg *config.Config, caps capabilities.Capabilities, slogge
 		Purger:     s.Sheets,
 		Writer:     s.Write,
 		Tabs:       s.Spreadsheets,
-		Authz:      s.KeyAuthn,
+		Authz:      authz,
 		Caps:       caps,
 		DefaultTTL: cfg.Cache.DefaultTTL,
+		Challenge:  challenge,
 		Log:        slogger,
 	})
 }

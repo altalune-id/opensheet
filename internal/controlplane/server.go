@@ -53,6 +53,7 @@ type Deps struct {
 	CredentialConnect *credential.ConnectWorkflow
 	Spreadsheets      *spreadsheet.Service
 	Sheets            *sheet.Service
+	Provision         *spreadsheet.ProvisionWorkflow
 }
 
 // Server holds the wired Connect handlers and their runtime configuration.
@@ -98,12 +99,12 @@ func New(cfg *config.Config, kernel *platform.Kernel, d Deps) *Server {
 		Invites:  d.Invites,
 
 		AuthSvc:    NewAuthService(d.Orgs),
-		ProjectSvc: NewProjectService(d.Projects),
+		ProjectSvc: NewProjectService(d.Projects, d.Orgs),
 		MemberSvc:  NewMemberService(d.Orgs),
 
-		CredentialSvc:  NewCredentialService(d.Credentials, d.CredentialConnect, d.Projects),
-		SpreadsheetSvc: NewSpreadsheetService(d.Spreadsheets, d.Projects),
-		SheetSvc:       NewSheetService(d.Sheets, d.Projects),
+		CredentialSvc:  NewCredentialService(d.Credentials, d.CredentialConnect, d.Projects, d.Orgs),
+		SpreadsheetSvc: NewSpreadsheetService(d.Spreadsheets, d.Projects, d.Orgs, d.Sheets, d.Provision),
+		SheetSvc:       NewSheetService(d.Sheets, d.Projects, d.Orgs),
 	}
 	if cfg != nil {
 		s.OpenAPIEnabled = cfg.API.OpenAPI.Enabled
@@ -132,7 +133,7 @@ var (
 func (s *Server) Handler(basePath string) http.Handler {
 	opts := s.handlerOptions()
 	// NOTE: built here, not in New, since s.APIKeys isn't set until after New returns.
-	s.APIKeySvc = NewAPIKeyService(s.APIKeys, s.Projects)
+	s.APIKeySvc = NewAPIKeyService(s.APIKeys, s.Projects, s.Orgs)
 
 	inner := http.NewServeMux()
 	for _, m := range []mountedHandler{

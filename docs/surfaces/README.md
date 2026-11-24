@@ -23,7 +23,7 @@ outside world on a tenant's behalf. Seven, on two axes.
 | --- | ----------------- | ------------------------------- | -------------------- | ---------- | ---------------------------------------- |
 | S1  | **console**       | `internal/web/handlers/`        | `/`                  | ingress    | a person, in a browser                   |
 | S2  | **control plane** | `internal/controlplane/`        | `/api/`              | ingress    | the CLI; integrator automation           |
-| S3  | **data plane**    | `internal/dataplane/`           | `/api/v1/`           | ingress    | an integrator's running product          |
+| S3  | **data plane**    | `internal/dataplane/`           | `/api/v1/`           | ingress    | an integrator's product or connected app |
 | S4  | **ingest**        | `internal/ingest/`              | `/hooks/{provider}/` | ingress    | a third party pushing to us              |
 | S5  | **dispatch**      | `internal/webhook/` + outbox    | —                    | **egress** | us, calling the tenant                   |
 | S6  | **cli**           | `internal/cli/`                 | —                    | dual-mode  | an operator, at a terminal               |

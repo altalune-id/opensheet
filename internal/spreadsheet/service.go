@@ -75,16 +75,20 @@ func (s *Service) Register(ctx context.Context, credentialID uuid.UUID, googleFi
 		span.RecordError(err)
 		return nil, err
 	}
-	if saveErr := s.store.Save(ctx, sp); saveErr != nil {
+	if saveErr := s.save(ctx, tc, sp, "spreadsheet.Register: save"); saveErr != nil {
 		span.RecordError(saveErr)
-		if IsAlreadyExistsError(saveErr) {
-			return nil, saveErr
-		}
-		return nil, s.unexpected(ctx, "spreadsheet.Register: save", saveErr,
-			"org_id", tc.OrgID, "project_id", tc.ProjectID)
+		return nil, saveErr
 	}
 	span.SetAttributes(attribute.String("spreadsheet.id", sp.ID.String()))
 	return sp, nil
+}
+
+func (s *Service) save(ctx context.Context, tc tenant.Context, sp *Spreadsheet, situation string) error {
+	err := s.store.Save(ctx, sp)
+	if err == nil || IsAlreadyExistsError(err) {
+		return err
+	}
+	return s.unexpected(ctx, situation, err, "org_id", tc.OrgID, "project_id", tc.ProjectID)
 }
 
 // List returns the documents registered in the caller's project, oldest first.

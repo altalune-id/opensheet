@@ -131,6 +131,23 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 	return sh, nil
 }
 
+// PublishTab returns the writable key sheet published under slug for spreadsheetID's tab, creating it when the slug is free; a slug another spreadsheet holds is an *AlreadyExistsError.
+func (s *Service) PublishTab(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string) (*Sheet, error) {
+	sh, err := s.BySlug(ctx, slug)
+	if err == nil {
+		if sh.SpreadsheetID != spreadsheetID {
+			return nil, &AlreadyExistsError{Field: "slug", Value: slug}
+		}
+		return sh, nil
+	}
+	if !IsNotFoundError(err) {
+		return nil, err
+	}
+	return s.Create(ctx, CreateRequest{
+		SpreadsheetID: spreadsheetID, Tab: tab, Slug: slug, Visibility: VisibilityKey, Writable: true,
+	})
+}
+
 // ByID returns the identified sheet when it belongs to the caller's tenant scope.
 func (s *Service) ByID(ctx context.Context, id uuid.UUID) (*Sheet, error) {
 	ctx, span := tracer.Start(ctx, "sheet.ByID",

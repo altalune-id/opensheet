@@ -38,15 +38,15 @@ primitive each surface uses, what narrows it, and the tests that hold it togethe
 
 ### R4 — authorization depth per surface
 
-| Surface          | Credential                                                     | Authenticated by               | Authorization depth                       |
-| ---------------- | -------------------------------------------------------------- | ------------------------------ | ----------------------------------------- |
-| S1 console       | `sid` cookie, HMAC                                             | `webmw.Session`                | org membership + role                     |
-| S2 control plane | Othra token (API audience) **or** an api key (`api.keyPrefix`) | `authn.Interceptor(Chain)`     | **method→scope table, fail closed**       |
-| S3 data plane    | Bearer or `X-API-Key`, key only — a JWT is **401**             | per-route `Authorize`          | scope **+** `ResourceIDs`                 |
-| S4 ingest        | provider signature                                             | per-provider `ingest.Verifier` | none — provider identity _is_ the authz   |
-| S5 dispatch      | n/a, we sign                                                   | n/a                            | n/a                                       |
-| S6 cli           | in-process: none; remote: the credential of the plane it calls | —                              | inherits the plane it calls               |
-| S7 mcp           | Othra token (MCP audience) **or** an api key                   | `authn.Chain` + per-tool scope | **every tool scope-checked, 403 step-up** |
+| Surface          | Credential                                                     | Authenticated by               | Authorization depth                                               |
+| ---------------- | -------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| S1 console       | `sid` cookie, HMAC                                             | `webmw.Session`                | org membership + role                                             |
+| S2 control plane | Othra token (API audience) **or** an api key (`api.keyPrefix`) | `authn.Interceptor(Chain)`     | **method→scope table, fail closed**                               |
+| S3 data plane    | an api key **or** an Othra token (API audience)                | per-route `Authorize`          | key: scope **+** `ResourceIDs`; token: org membership **+** scope |
+| S4 ingest        | provider signature                                             | per-provider `ingest.Verifier` | none — provider identity _is_ the authz                           |
+| S5 dispatch      | n/a, we sign                                                   | n/a                            | n/a                                                               |
+| S6 cli           | in-process: none; remote: the credential of the plane it calls | —                              | inherits the plane it calls                                       |
+| S7 mcp           | Othra token (MCP audience) **or** an api key                   | `authn.Chain` + per-tool scope | **every tool scope-checked, 403 step-up**                         |
 
 Fail-closed is the whole point of the S2 row: a key or token principal reaching a Connect method
 absent from the scope table is **denied**, and `TestEveryRPCHasAScope` asserts every mounted method

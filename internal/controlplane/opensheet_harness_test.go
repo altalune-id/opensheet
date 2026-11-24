@@ -109,14 +109,26 @@ func newOSHarnessWithKeys(t *testing.T, p session.Principal) *osHarness {
 	return buildOSHarness(t, p, nil, true)
 }
 
+type harnessStores struct {
+	orgs  org.Store
+	projs project.Store
+	creds credential.Store
+}
+
 func buildOSHarness(t *testing.T, p session.Principal, aerr error, realKeys bool) *osHarness {
+	t.Helper()
+	orgs, projs, creds := fakes.NewOrg(), fakes.NewProject(), fakes.NewCredential()
+	h := buildOSHarnessOn(t, p, aerr, realKeys, harnessStores{orgs: orgs, projs: projs, creds: creds})
+	h.orgs, h.projs, h.creds = orgs, projs, creds
+	return h
+}
+
+func buildOSHarnessOn(t *testing.T, p session.Principal, aerr error, realKeys bool, st harnessStores) *osHarness {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reporter := apperror.NewReporter(log, false)
 
-	orgs := fakes.NewOrg()
-	projs := fakes.NewProject()
-	creds := fakes.NewCredential()
+	orgs, projs, creds := st.orgs, st.projs, st.creds
 	sprds := fakes.NewSpreadsheet()
 	shts := fakes.NewSheet()
 	keys := fakes.NewAPIKey()
@@ -133,6 +145,8 @@ func buildOSHarness(t *testing.T, p session.Principal, aerr error, realKeys bool
 	sheetSvc := sheet.NewService(shts, log, reporter.Unexpected, publicSheetsOn{}, snaps,
 		sheet.NewMemoryIdempotencyStore(), publishWorkflow)
 	keySvc := apikey.NewService(keys, apikey.Scheme{}, fakes.PermissiveMembers(), fakes.NewOrgProjects(), log, reporter.Unexpected)
+	provision := spreadsheet.NewProvisionWorkflow(sprdSvc, googleWriterFactory(t), stubTokenSources{},
+		harnessPublisher{svc: sheetSvc}, log, reporter.Unexpected)
 
 	kernel := &platform.Kernel{Log: log, Reporter: reporter}
 
@@ -143,6 +157,7 @@ func buildOSHarness(t *testing.T, p session.Principal, aerr error, realKeys bool
 		CredentialConnect: connectWorkflow(t, creds, sl, log, reporter),
 		Spreadsheets:      sprdSvc,
 		Sheets:            sheetSvc,
+		Provision:         provision,
 	})
 	srv.Authn = authn.Chain{stubAuthenticator{principal: p, err: aerr}}
 	if realKeys {
@@ -151,10 +166,7 @@ func buildOSHarness(t *testing.T, p session.Principal, aerr error, realKeys bool
 	srv.APIKeys = keySvc
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
-	return &osHarness{
-		t: t, server: ts, orgs: orgs, projs: projs,
-		creds: creds, sprds: sprds, sheets: shts, keys: keys, snaps: snaps,
-	}
+	return &osHarness{t: t, server: ts, sprds: sprds, sheets: shts, keys: keys, snaps: snaps}
 }
 
 func (h *osHarness) seedProject(orgID uuid.UUID) *project.Project {
@@ -200,6 +212,18 @@ func testSealer(t *testing.T) sealer.Sealer {
 	return s
 }
 
+type harnessPublisher struct{ svc *sheet.Service }
+
+func (p harnessPublisher) Publish(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string) (spreadsheet.PublishedSheet, error) {
+	sh, err := p.svc.PublishTab(ctx, spreadsheetID, tab, slug)
+	if err != nil {
+		return spreadsheet.PublishedSheet{}, err
+	}
+	return spreadsheet.PublishedSheet{ID: sh.ID, Slug: sh.Slug, Tab: sh.Tab}, nil
+}
+
+func (harnessPublisher) ValidSlug(slug string) error { return sheet.ValidateSlug(slug) }
+
 type anySheetSource struct{}
 
 func (anySheetSource) SourceFor(_ context.Context, spreadsheetID uuid.UUID) (sheet.Source, error) {
@@ -226,8 +250,12 @@ func googleFactory(t *testing.T) gsheet.Factory {
 
 func googleWriterFactory(t *testing.T) gsheet.WriterFactory {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/v4/spreadsheets" {
+			_, _ = io.WriteString(w, `{"spreadsheetId":"PROVISIONED"}`)
+			return
+		}
 		_, _ = io.WriteString(w, "{}")
 	}))
 	t.Cleanup(srv.Close)

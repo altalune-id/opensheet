@@ -562,3 +562,67 @@ func TestScopes_ReadOnlyAndReadWriteAreDistinct(t *testing.T) {
 		t.Fatal("ScopeReadOnly and ScopeReadWrite are the same scope")
 	}
 }
+
+func TestWriter_CreateSpreadsheet(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{"spreadsheetId":"NEW-FILE"}`
+	})
+
+	id, err := w.CreateSpreadsheet(context.Background(), "Budget", []string{"Wallets", "Transactions"})
+	if err != nil {
+		t.Fatalf("CreateSpreadsheet: %v", err)
+	}
+	if id != "NEW-FILE" {
+		t.Errorf("id = %q, want NEW-FILE", id)
+	}
+	got := sent.snapshot()
+	if got.calls != 1 || got.method != http.MethodPost || got.path != "/v4/spreadsheets" {
+		t.Fatalf("request = %d x %s %s, want one POST /v4/spreadsheets", got.calls, got.method, got.path)
+	}
+	for _, want := range []string{`"title":"Budget"`, `"title":"Wallets"`, `"title":"Transactions"`} {
+		if !strings.Contains(got.body, want) {
+			t.Errorf("body = %s, want it to carry %s", got.body, want)
+		}
+	}
+}
+
+func TestWriter_CreateSpreadsheetTranslatesGoogleErrors(t *testing.T) {
+	t.Parallel()
+	w := newTestWriter(t, func(*http.Request) (int, string) {
+		return http.StatusForbidden, `{"error":{"code":403,"message":"denied"}}`
+	})
+
+	_, err := w.CreateSpreadsheet(context.Background(), "Budget", []string{"Wallets"})
+	if !gworkspace.IsPermissionDeniedError(err) {
+		t.Errorf("err = %v, want a PermissionDeniedError", err)
+	}
+}
+
+func TestWriter_UpdateHeadersIsOneBatch(t *testing.T) {
+	t.Parallel()
+	var sent sentRequest
+	w := newTestWriter(t, func(r *http.Request) (int, string) {
+		sent.record(r)
+		return http.StatusOK, `{}`
+	})
+
+	err := w.UpdateHeaders(context.Background(), "FILE", []HeaderRow{
+		{Tab: "Wallets", Cells: []any{"id", "name", "balance"}},
+		{Tab: "Transactions", Cells: []any{"id", "amount"}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateHeaders: %v", err)
+	}
+	got := sent.snapshot()
+	if got.calls != 1 || got.method != http.MethodPost || got.path != "/v4/spreadsheets/FILE/values:batchUpdate" {
+		t.Fatalf("request = %d x %s %s, want one POST values:batchUpdate", got.calls, got.method, got.path)
+	}
+	for _, want := range []string{`'Wallets'!A1:C1`, `'Transactions'!A1:B1`, `["id","name","balance"]`, `"valueInputOption":"RAW"`} {
+		if !strings.Contains(got.body, want) {
+			t.Errorf("body = %s, want it to carry %s", got.body, want)
+		}
+	}
+}

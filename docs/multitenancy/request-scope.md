@@ -121,8 +121,9 @@ resource-pinned key fails it outright. Steps:
 [`howto/external-api.md`](../howto/external-api.md).
 
 - **Every failure is one masked `NotFoundError`** — unresolvable slug, missing row and denied key are
-  indistinguishable.
-- **No `authn.Chain` here**: the surface accepts keys only and a JWT is refused at the door. Scope strings:
+  indistinguishable. A bearer token the verifier refuses is a `401` decided before the slugs resolve.
+- **No `authn.Chain` here**: `dataplane.NewCredentialAuthorizer` sends a key to the key authorizer and a
+  JWT to the token path, which requires membership of the path's org. Scope strings:
   [`scopes`](../scopes/README.md).
 
 ## S6 cli, S4 ingest, S5 dispatch

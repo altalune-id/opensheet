@@ -14,8 +14,14 @@ resolve org and project only. Every failure, the sheet lookup included, is the o
 A key's `ResourceIDs` name sheets. A key restricted to some sheets is refused on the
 `/spreadsheets/{id}/tabs` routes, which authorize project-wide (`AuthorizeProject`).
 
+An Othra token for the control-plane audience is also accepted. Its person must be a member of
+the path's org (`org.Service.RequireMember`, checked on every request), and the token's scopes
+cap what it may do. It reaches every sheet of the project: `ResourceIDs` narrow only keys.
+`TestDataPlane_SheetActionsAreMemberLevel` pins that no sheet, spreadsheet or credential action
+needs a manager, so membership plus scope is the whole check.
+
 A `public` sheet is read with no credential at all, and only while `sheets.publicEnabled` is on.
-Writes always need a key.
+Writes always need a key or a token.
 
 ## Routes
 

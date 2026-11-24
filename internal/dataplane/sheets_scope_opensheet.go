@@ -31,7 +31,7 @@ type sheetResolver struct {
 	sheets   Sheets
 }
 
-// SECURITY: scope comes from the path — this surface has no session and no membership to gate on. NOTE: not the shared resolver, which masks every lookup failure; here an unexpected failure must stay a 500.
+// SECURITY: scope comes from the path, never from the credential; a token is checked for membership of it at authorization. NOTE: not the shared resolver, which masks every lookup failure; here an unexpected failure must stay a 500.
 func (rs sheetResolver) resolve(ctx context.Context, orgSlug, projectSlug, sheetSlug string) (context.Context, sheetScope, error) {
 	ctx, ps, err := rs.resolveProject(ctx, orgSlug, projectSlug)
 	if err != nil {

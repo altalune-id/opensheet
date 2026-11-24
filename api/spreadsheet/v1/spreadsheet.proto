@@ -3,6 +3,7 @@ syntax = "proto3";
 package spreadsheet.v1;
 
 import "google/protobuf/timestamp.proto";
+import "sheet/v1/sheet.proto";
 
 option go_package = "altalune.id/opensheet/gen/go/spreadsheet/v1;spreadsheetv1";
 
@@ -13,6 +14,7 @@ service SpreadsheetService {
   rpc Update(UpdateRequest) returns (UpdateResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc ListTabs(ListTabsRequest) returns (ListTabsResponse);
+  rpc Provision(ProvisionRequest) returns (ProvisionResponse);
 }
 
 message Spreadsheet {
@@ -80,4 +82,23 @@ message ListTabsRequest {
 
 message ListTabsResponse {
   repeated string tabs = 1;
+}
+
+message ProvisionTab {
+  string title = 1;
+  repeated string headers = 2;
+  string slug = 3;
+}
+
+message ProvisionRequest {
+  string project_id = 1;
+  string credential_id = 2;
+  string title = 3;
+  repeated ProvisionTab tabs = 4;
+  string idempotency_key = 5;
+}
+
+message ProvisionResponse {
+  Spreadsheet spreadsheet = 1;
+  repeated sheet.v1.Sheet sheets = 2;
 }

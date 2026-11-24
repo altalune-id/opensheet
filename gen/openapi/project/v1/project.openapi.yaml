@@ -240,6 +240,9 @@ components:
         createdAt:
           title: created_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        orgSlug:
+          type: string
+          title: org_slug
       title: Project
       additionalProperties: false
 security: []

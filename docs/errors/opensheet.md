@@ -10,7 +10,15 @@ The `KEY` group of opensheet's own API keys is retired with them; key failures c
 
 The data plane (`/api/v1/`) answers with these codes in a JSON envelope,
 `{"error":{"code":"SHT013","message":"row not found"}}`, unlike the template's data plane, which
-answers an opaque outcome word only.
+answers an opaque outcome word only. Every refusal is the masked `SHT001` 404, except:
+
+| Status | Code     | When                                                                                      |
+| ------ | -------- | ----------------------------------------------------------------------------------------- |
+| `401`  | `TKN001` | an expired access token, before the path resolves                                         |
+| `401`  | `GEN002` | an invalid access token (signature, key, audience, an ID token), before the path resolves |
+| `503`  | `TKN002` | a credential check that cannot run: issuer, key store or membership store down            |
+
+Both `401`s carry `WWW-Authenticate: Bearer error="invalid_token"` naming the API's RFC 9728 document.
 
 ## CRD — Credentials
 
@@ -28,13 +36,14 @@ answers an opaque outcome word only.
 
 ## SPR — Spreadsheets
 
-| Code     | Constant                                | Meaning                        |
-| -------- | --------------------------------------- | ------------------------------ |
-| `SPR001` | `apperror.CodeSpreadsheetNotFound`      | Spreadsheet Not Found          |
-| `SPR002` | `apperror.CodeSpreadsheetAlreadyExists` | Spreadsheet Already Registered |
-| `SPR003` | `apperror.CodeSpreadsheetInvalidFileID` | Spreadsheet Invalid File ID    |
-| `SPR004` | `apperror.CodeSpreadsheetInvalidTitle`  | Spreadsheet Invalid Title      |
-| `SPR005` | `apperror.CodeSpreadsheetNotWritable`   | Spreadsheet Not Writable       |
+| Code     | Constant                                   | Meaning                        |
+| -------- | ------------------------------------------ | ------------------------------ |
+| `SPR001` | `apperror.CodeSpreadsheetNotFound`         | Spreadsheet Not Found          |
+| `SPR002` | `apperror.CodeSpreadsheetAlreadyExists`    | Spreadsheet Already Registered |
+| `SPR003` | `apperror.CodeSpreadsheetInvalidFileID`    | Spreadsheet Invalid File ID    |
+| `SPR004` | `apperror.CodeSpreadsheetInvalidTitle`     | Spreadsheet Invalid Title      |
+| `SPR005` | `apperror.CodeSpreadsheetNotWritable`      | Spreadsheet Not Writable       |
+| `SPR006` | `apperror.CodeSpreadsheetProvisionInvalid` | Spreadsheet Provision Invalid  |
 
 ## SHT — Sheets
 

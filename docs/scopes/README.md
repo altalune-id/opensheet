@@ -39,19 +39,18 @@ Defined in `internal/platform/authn/scope.go`, one `catalog` row per scope with 
 ```mermaid
 flowchart LR
   K["key_… principal"] --> CP & DP & MCP
-  J["token principal"] --> CP & MCP
-  J -. "401 at the door" .-> DP
+  J["token principal"] --> CP & DP & MCP
   CP["control plane<br/>ScopeTable"] --> OK([checked])
-  DP["data plane<br/>+ org/project + ResourceIDs"] --> OK
+  DP["data plane<br/>+ org/project + ResourceIDs or membership"] --> OK
   MCP["mcp<br/>ScopeTable"] --> OK
 ```
 
-| Surface       | Enforced by                             | Applies to                 |
-| ------------- | --------------------------------------- | -------------------------- |
-| control plane | `authn.Interceptor` + `ScopeTable()`    | keys and tokens            |
-| data plane    | `apikey.Authorize` per route            | keys only — a token is 401 |
-| mcp           | `mcp.Server.authorize` + `ScopeTable()` | keys and tokens            |
-| console       | session membership and role             | —                          |
+| Surface       | Enforced by                             | Applies to      |
+| ------------- | --------------------------------------- | --------------- |
+| control plane | `authn.Interceptor` + `ScopeTable()`    | keys and tokens |
+| data plane    | `dataplane.NewCredentialAuthorizer`     | keys and tokens |
+| mcp           | `mcp.Server.authorize` + `ScopeTable()` | keys and tokens |
+| console       | session membership and role             | —               |
 
 - **No credential is exempt.** A token is a delegated grant a client holds for a person, so its
   scopes are the limit of that delegation, on the control plane and on MCP alike. Only a console

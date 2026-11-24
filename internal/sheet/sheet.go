@@ -149,6 +149,9 @@ func (s *Sheet) SetWritable(writable bool) {
 	s.UpdatedAt = time.Now().UTC()
 }
 
+// ValidateSlug reports why slug cannot name a published sheet, or nil when it can.
+func ValidateSlug(slug string) error { return validateSlug(slug) }
+
 func validateSlug(slug string) error {
 	if reservedSlug(slug) {
 		return &InvalidSlugError{Slug: slug, Reason: "reserved"}

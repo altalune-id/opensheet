@@ -15,6 +15,7 @@ The full table lives in `docs/errors/opensheet.md`.
 | ------ | -------------------------------------------- | ----------------------------------------------------------------------------- |
 | `304`  | Not modified                                 | Expected when sending `If-None-Match`.                                        |
 | `400`  | Malformed request                            | Clause syntax, unknown query param, bad JSON.                                 |
+| `401`  | Access token refused (`TKN001`, `GEN002`)    | `TKN001` expired: refresh. `GEN002` invalid: get a token for the API.         |
 | `403`  | The _sheet_ forbids it                       | `SHT009` not writable, `SHT006` public reads disabled. Not a key problem.     |
 | `404`  | Unknown slug **or** the key may not touch it | See masking below — this is the common one.                                   |
 | `409`  | Conflict                                     | Duplicate id (`SHT012`), or `Idempotency-Key` replayed with a different body. |
@@ -22,9 +23,11 @@ The full table lives in `docs/errors/opensheet.md`.
 | `413`  | Body too large                               | `SHT007`/`SHT028` — split the batch.                                          |
 | `429`  | Google's rate limit                          | Honour `Retry-After`. Cache harder; purge less.                               |
 | `502`  | Google unavailable                           | Retry with backoff.                                                           |
+| `503`  | Credential check unavailable (`TKN002`)      | Retry with backoff. The key or token was not judged.                          |
 
-**There is no `401` on these routes.** A missing, malformed or wrong bearer token returns
-`404`, not `401` — do not wait for a `401` to detect a bad key.
+**A `401` is only ever an access token problem.** An expired token is `TKN001`, an invalid one
+`GEN002`, each with `WWW-Authenticate: Bearer error="invalid_token"`. A bad or missing API key is
+still `404` — do not wait for a `401` to detect a bad key.
 
 ## The 404 mask
 
@@ -32,13 +35,14 @@ The full table lives in `docs/errors/opensheet.md`.
 for another project, a key missing the scope, a key not granted this sheet and a slug that
 does not exist are one indistinguishable answer."_
 
-So `404` covers all five of:
+So `404` covers all of:
 
 - the slug really does not exist
 - no `Authorization` header at all
-- the token is malformed or revoked
+- the API key is malformed or revoked
 - the key belongs to another project
 - the key lacks the scope, or was restricted to other sheets
+- an OAuth token whose person is not a member of the org, or which lacks the scope
 
 Work through them in that order. The server logs the real reason under the request id; the
 response deliberately withholds it so slugs cannot be enumerated by probing.
@@ -51,6 +55,7 @@ response deliberately withholds it so slugs cannot be enumerated by probing.
 | `SPR`  | registered spreadsheet           |
 | `APK`  | API key minting and grants       |
 | `GEN`  | generic: auth, scope, validation |
+| `TKN`  | credential check unavailable     |
 | `CRD`  | Google credential                |
 | `GSH`  | Google's answer, passed through  |
 

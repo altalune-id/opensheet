@@ -69,8 +69,11 @@ func (i *tokenIssuer) mint(t *testing.T, audience string, scopes []string) strin
 }
 
 type mcpOpts struct {
-	enabled bool
-	appsUI  bool
+	enabled   bool
+	appsUI    bool
+	dataPlane bool
+	apiOff    bool
+	audience  string
 }
 
 type mcpFixture struct {
@@ -90,11 +93,16 @@ func newMCPFixture(t *testing.T, opts mcpOpts) *mcpFixture {
 	cfg.Mode = config.ModeCloud
 	cfg.OIDC = config.OIDCConfig{Issuer: issuer.url, ClientID: "mcp-client", ClientSecret: "mcp-secret", CLIClientID: cliClientID}
 	cfg.HTTP.CSP.Enabled = true
-	cfg.API.Enabled = true
+	cfg.API.Enabled = !opts.apiOff
 	cfg.API.KeyPrefix = apikey.DefaultPrefix
 	introspection := tokens.IntrospectionConfig{ClientID: introspectorID, ClientSecret: introspectorSecret}
-	cfg.Tokens = tokens.Config{Issuer: issuer.url, Audience: controlAudience, Introspection: introspection}
+	audience := controlAudience
+	if opts.audience != "" {
+		audience = opts.audience
+	}
+	cfg.Tokens = tokens.Config{Issuer: issuer.url, Audience: audience, Introspection: introspection}
 	cfg.MCP = config.MCPConfig{Enabled: opts.enabled, AppsUI: opts.appsUI, Audience: mcpAudience, Introspection: introspection}
+	cfg.DataPlane.Enabled = opts.dataPlane
 
 	seed, err := boot.BootServer(context.Background(), cfg, boot.WithOIDCHTTPClient(issuer.idp.Client()))
 	require.NoError(t, err)

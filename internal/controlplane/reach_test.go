@@ -15,6 +15,7 @@ import (
 	projectv1 "altalune.id/opensheet/gen/go/project/v1"
 	sheetv1 "altalune.id/opensheet/gen/go/sheet/v1"
 	spreadsheetv1 "altalune.id/opensheet/gen/go/spreadsheet/v1"
+	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
@@ -37,6 +38,10 @@ func newReachFixture(t *testing.T) *reachFixture {
 	ctx := context.Background()
 	orgID := uuid.New()
 	h := newOSHarnessWithKeys(t, humanPrincipal(orgID))
+	o, err := org.NewOrg("reach-org", "Reach Org", uuid.New())
+	require.NoError(t, err)
+	o.ID = orgID
+	require.NoError(t, h.orgs.Save(ctx, o))
 
 	own, err := project.New(orgID, "own", "Own")
 	require.NoError(t, err)

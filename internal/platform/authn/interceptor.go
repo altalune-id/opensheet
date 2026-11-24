@@ -51,3 +51,11 @@ func isSession(src session.Source) bool {
 	}
 	return false
 }
+
+// CheckScope refuses a key or token principal lacking scope, the same check Interceptor makes for a procedure's declared scope.
+func CheckScope(p session.Principal, scope string) error {
+	if isSession(p.Source) || slices.Contains(p.Scopes, scope) {
+		return nil
+	}
+	return &InsufficientScopeError{Scope: scope, Source: p.Source}
+}

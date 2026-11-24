@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
+	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/i18n"
@@ -77,6 +78,7 @@ type sheetHandler struct {
 	authz      Authorizer
 	caps       Capabilities
 	defaultTTL time.Duration
+	challenge  string
 	log        *slog.Logger
 }
 
@@ -94,6 +96,7 @@ type SheetHandlerParams struct {
 	Authz      Authorizer
 	Caps       Capabilities
 	DefaultTTL time.Duration
+	Challenge  string
 	Log        *slog.Logger
 }
 
@@ -109,6 +112,7 @@ func NewSheetHandler(p SheetHandlerParams) http.Handler {
 		authz:      p.Authz,
 		caps:       p.Caps,
 		defaultTTL: p.DefaultTTL,
+		challenge:  p.Challenge,
 		log:        p.Log.With("surface", "data"),
 	}
 	inner := http.NewServeMux()
@@ -125,7 +129,7 @@ func NewSheetHandler(p SheetHandlerParams) http.Handler {
 	inner.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.listTabs)
 	inner.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.createTab)
 	inner.HandleFunc("/", h.unknown)
-	return http.StripPrefix(strings.TrimRight(p.BasePath, "/")+mountSuffix, inner)
+	return http.StripPrefix(strings.TrimRight(p.BasePath, "/")+mountSuffix, h.verifyBearer(inner))
 }
 
 func (h *sheetHandler) rows(w http.ResponseWriter, r *http.Request) {
@@ -304,16 +308,38 @@ func (h *sheetHandler) allowRead(r *http.Request, sc sheetScope) error {
 
 // SECURITY: every refusal becomes the shared SheetNotFoundError, so a key for another project, a key missing the scope, a key not granted this sheet and a slug that does not exist are one indistinguishable answer.
 func (h *sheetHandler) authorize(r *http.Request, sc sheetScope, scopeName string) error {
-	if _, err := h.authz.Authorize(r.Context(), authn.CredentialFrom(r), scopeName, sc.orgID, sc.projectID, sc.sheet.ID); err != nil {
-		return &SheetNotFoundError{cause: err}
+	if _, err := h.authz.Authorize(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID, sc.sheet.ID); err != nil {
+		return refusal(err)
 	}
 	return nil
 }
 
+// SECURITY: X-API-Key carries keys alone; a JWT sent there is refused as if no credential came.
+func credentialOf(r *http.Request) string {
+	raw := authn.CredentialFrom(r)
+	if r.Header.Get("Authorization") == "" && (authn.Scheme{}).Looks(raw) == authn.ShapeJWT {
+		return ""
+	}
+	return raw
+}
+
+// SECURITY: an outage is the one answer that is not the masked not-found, so a caller retries instead of reading the sheet as gone.
+func refusal(err error) error {
+	if authn.IsUnavailableError(err) {
+		return apperror.New(
+			apperror.CodeTokenUnavailable,
+			authn.UnavailableMessage,
+			codes.Unavailable,
+			&apperrorv1.ErrorDetail{Code: apperror.CodeTokenUnavailable},
+		).WithCause(err)
+	}
+	return &SheetNotFoundError{cause: err}
+}
+
 // SECURITY: a route naming no sheet authorizes project-wide, and the authorizer refuses a resource-restricted key there — a key granted specific sheets cannot use the tabs routes at all.
 func (h *sheetHandler) authorizeProject(r *http.Request, sc sheetProjectScope, scopeName string) error {
-	if _, err := h.authz.AuthorizeProject(r.Context(), authn.CredentialFrom(r), scopeName, sc.orgID, sc.projectID); err != nil {
-		return &SheetNotFoundError{cause: err}
+	if _, err := h.authz.AuthorizeProject(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID); err != nil {
+		return refusal(err)
 	}
 	return nil
 }
