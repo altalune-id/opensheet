@@ -1,6 +1,6 @@
 # Add a data-plane REST endpoint
 
-Surface **S3 data plane** ([`surfaces`](../surfaces/README.md)) — REST under `/api/v1/orgs/{org}/projects/{project}/…`, called by an integrator's running product with an API key. A JWT is a 401 at the door. Your own CLI and integrator automation belong on [`internal-api.md`](internal-api.md) (S2); a browser page on [`webpage.md`](webpage.md) (S1).
+Surface **S3 data plane** ([`surfaces`](../surfaces/README.md)) — REST under `/api/v1/orgs/{org}/projects/{project}/…`, called by an integrator's running product with an API key, or by a connected app with an Othra token for the control-plane audience; `dataplane.NewCredentialAuthorizer` routes each by shape. Your own CLI and integrator automation belong on [`internal-api.md`](internal-api.md) (S2); a browser page on [`webpage.md`](webpage.md) (S1).
 
 Worked example: `internal/dataplane/blog.go`, ported through `internal/boot/shims.go`.
 

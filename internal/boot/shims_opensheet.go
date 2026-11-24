@@ -52,6 +52,18 @@ func (t tokensForSpreadsheetWrite) TokenSourceFor(ctx context.Context, id uuid.U
 	return t.svc.TokenSourceFor(ctx, id, gsheet.ScopeReadWrite)
 }
 
+type sheetsForProvision struct{ svc *sheet.Service }
+
+func (p sheetsForProvision) Publish(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string) (spreadsheet.PublishedSheet, error) {
+	sh, err := p.svc.PublishTab(ctx, spreadsheetID, tab, slug)
+	if err != nil {
+		return spreadsheet.PublishedSheet{}, err
+	}
+	return spreadsheet.PublishedSheet{ID: sh.ID, Slug: sh.Slug, Tab: sh.Tab}, nil
+}
+
+func (sheetsForProvision) ValidSlug(slug string) error { return sheet.ValidateSlug(slug) }
+
 var (
 	_ sheet.TokenSources       = tokensForSheetRead{}
 	_ sheet.TokenSources       = tokensForSheetWrite{}

@@ -49,6 +49,9 @@ const (
 	// SpreadsheetServiceListTabsProcedure is the fully-qualified name of the SpreadsheetService's
 	// ListTabs RPC.
 	SpreadsheetServiceListTabsProcedure = "/spreadsheet.v1.SpreadsheetService/ListTabs"
+	// SpreadsheetServiceProvisionProcedure is the fully-qualified name of the SpreadsheetService's
+	// Provision RPC.
+	SpreadsheetServiceProvisionProcedure = "/spreadsheet.v1.SpreadsheetService/Provision"
 )
 
 // SpreadsheetServiceClient is a client for the spreadsheet.v1.SpreadsheetService service.
@@ -59,6 +62,7 @@ type SpreadsheetServiceClient interface {
 	Update(context.Context, *connect.Request[v1.UpdateRequest]) (*connect.Response[v1.UpdateResponse], error)
 	Delete(context.Context, *connect.Request[v1.DeleteRequest]) (*connect.Response[v1.DeleteResponse], error)
 	ListTabs(context.Context, *connect.Request[v1.ListTabsRequest]) (*connect.Response[v1.ListTabsResponse], error)
+	Provision(context.Context, *connect.Request[v1.ProvisionRequest]) (*connect.Response[v1.ProvisionResponse], error)
 }
 
 // NewSpreadsheetServiceClient constructs a client for the spreadsheet.v1.SpreadsheetService
@@ -108,17 +112,24 @@ func NewSpreadsheetServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(spreadsheetServiceMethods.ByName("ListTabs")),
 			connect.WithClientOptions(opts...),
 		),
+		provision: connect.NewClient[v1.ProvisionRequest, v1.ProvisionResponse](
+			httpClient,
+			baseURL+SpreadsheetServiceProvisionProcedure,
+			connect.WithSchema(spreadsheetServiceMethods.ByName("Provision")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // spreadsheetServiceClient implements SpreadsheetServiceClient.
 type spreadsheetServiceClient struct {
-	list     *connect.Client[v1.ListRequest, v1.ListResponse]
-	create   *connect.Client[v1.CreateRequest, v1.CreateResponse]
-	get      *connect.Client[v1.GetRequest, v1.GetResponse]
-	update   *connect.Client[v1.UpdateRequest, v1.UpdateResponse]
-	delete   *connect.Client[v1.DeleteRequest, v1.DeleteResponse]
-	listTabs *connect.Client[v1.ListTabsRequest, v1.ListTabsResponse]
+	list      *connect.Client[v1.ListRequest, v1.ListResponse]
+	create    *connect.Client[v1.CreateRequest, v1.CreateResponse]
+	get       *connect.Client[v1.GetRequest, v1.GetResponse]
+	update    *connect.Client[v1.UpdateRequest, v1.UpdateResponse]
+	delete    *connect.Client[v1.DeleteRequest, v1.DeleteResponse]
+	listTabs  *connect.Client[v1.ListTabsRequest, v1.ListTabsResponse]
+	provision *connect.Client[v1.ProvisionRequest, v1.ProvisionResponse]
 }
 
 // List calls spreadsheet.v1.SpreadsheetService.List.
@@ -151,6 +162,11 @@ func (c *spreadsheetServiceClient) ListTabs(ctx context.Context, req *connect.Re
 	return c.listTabs.CallUnary(ctx, req)
 }
 
+// Provision calls spreadsheet.v1.SpreadsheetService.Provision.
+func (c *spreadsheetServiceClient) Provision(ctx context.Context, req *connect.Request[v1.ProvisionRequest]) (*connect.Response[v1.ProvisionResponse], error) {
+	return c.provision.CallUnary(ctx, req)
+}
+
 // SpreadsheetServiceHandler is an implementation of the spreadsheet.v1.SpreadsheetService service.
 type SpreadsheetServiceHandler interface {
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
@@ -159,6 +175,7 @@ type SpreadsheetServiceHandler interface {
 	Update(context.Context, *connect.Request[v1.UpdateRequest]) (*connect.Response[v1.UpdateResponse], error)
 	Delete(context.Context, *connect.Request[v1.DeleteRequest]) (*connect.Response[v1.DeleteResponse], error)
 	ListTabs(context.Context, *connect.Request[v1.ListTabsRequest]) (*connect.Response[v1.ListTabsResponse], error)
+	Provision(context.Context, *connect.Request[v1.ProvisionRequest]) (*connect.Response[v1.ProvisionResponse], error)
 }
 
 // NewSpreadsheetServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -204,6 +221,12 @@ func NewSpreadsheetServiceHandler(svc SpreadsheetServiceHandler, opts ...connect
 		connect.WithSchema(spreadsheetServiceMethods.ByName("ListTabs")),
 		connect.WithHandlerOptions(opts...),
 	)
+	spreadsheetServiceProvisionHandler := connect.NewUnaryHandler(
+		SpreadsheetServiceProvisionProcedure,
+		svc.Provision,
+		connect.WithSchema(spreadsheetServiceMethods.ByName("Provision")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/spreadsheet.v1.SpreadsheetService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SpreadsheetServiceListProcedure:
@@ -218,6 +241,8 @@ func NewSpreadsheetServiceHandler(svc SpreadsheetServiceHandler, opts ...connect
 			spreadsheetServiceDeleteHandler.ServeHTTP(w, r)
 		case SpreadsheetServiceListTabsProcedure:
 			spreadsheetServiceListTabsHandler.ServeHTTP(w, r)
+		case SpreadsheetServiceProvisionProcedure:
+			spreadsheetServiceProvisionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -249,4 +274,8 @@ func (UnimplementedSpreadsheetServiceHandler) Delete(context.Context, *connect.R
 
 func (UnimplementedSpreadsheetServiceHandler) ListTabs(context.Context, *connect.Request[v1.ListTabsRequest]) (*connect.Response[v1.ListTabsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("spreadsheet.v1.SpreadsheetService.ListTabs is not implemented"))
+}
+
+func (UnimplementedSpreadsheetServiceHandler) Provision(context.Context, *connect.Request[v1.ProvisionRequest]) (*connect.Response[v1.ProvisionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("spreadsheet.v1.SpreadsheetService.Provision is not implemented"))
 }

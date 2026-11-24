@@ -28,6 +28,8 @@ type Spreadsheet struct {
 	GoogleFileID string
 	Title        string
 	Writable     bool
+	// ProvisionKey is the idempotency key of the Provision call that created the document; empty when it was registered by hand.
+	ProvisionKey string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

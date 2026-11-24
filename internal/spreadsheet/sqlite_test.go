@@ -453,3 +453,43 @@ func TestNewStore_DispatchesByDriver(t *testing.T) {
 		t.Fatal("postgres dispatch returned nil")
 	}
 }
+
+func TestSQLite_Spreadsheet_ProvisionKeyRoundTrips(t *testing.T) {
+	f := newSQLiteFixture(t)
+	sp, err := spreadsheet.New(f.tc.OrgID, f.tc.ProjectID, f.credentialID, "FILE-prov", "Provisioned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp.ProvisionKey = "connect-1"
+	if err := f.store.Save(f.ctx(), sp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	f.save(t, "FILE-plain", "Plain")
+
+	got, err := f.store.ByProvisionKey(f.ctx(), f.tc.OrgID, f.tc.ProjectID, "connect-1")
+	if err != nil {
+		t.Fatalf("ByProvisionKey: %v", err)
+	}
+	if got.ID != sp.ID || got.ProvisionKey != "connect-1" {
+		t.Errorf("got %s key %q, want %s key connect-1", got.ID, got.ProvisionKey, sp.ID)
+	}
+	if _, err := f.store.ByProvisionKey(f.ctx(), f.tc.OrgID, f.tc.ProjectID, "absent"); !spreadsheet.IsNotFoundError(err) {
+		t.Errorf("absent key: err = %v, want NotFoundError", err)
+	}
+	if _, err := f.store.ByProvisionKey(f.ctx(), f.tc.OrgID, uuid.New(), "connect-1"); !spreadsheet.IsNotFoundError(err) {
+		t.Errorf("another project: err = %v, want NotFoundError", err)
+	}
+	other := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: f.tc.ProjectID})
+	if _, err := f.store.ByProvisionKey(other, f.tc.OrgID, f.tc.ProjectID, "connect-1"); !spreadsheet.IsNotFoundError(err) {
+		t.Errorf("another org's scope: err = %v, want NotFoundError", err)
+	}
+
+	dup, err := spreadsheet.New(f.tc.OrgID, f.tc.ProjectID, f.credentialID, "FILE-dup", "Dup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup.ProvisionKey = "connect-1"
+	if err := f.store.Save(f.ctx(), dup); !spreadsheet.IsAlreadyExistsError(err) {
+		t.Errorf("duplicate key: err = %v, want AlreadyExistsError", err)
+	}
+}

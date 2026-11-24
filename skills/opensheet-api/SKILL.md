@@ -1,6 +1,6 @@
 ---
 name: opensheet-api
-description: Read and write a published Google Sheet tab over opensheet's HTTP data plane — auth with an API key, filtered and sorted reads, row CRUD, batch writes, caching and concurrency headers, and the JSON error envelope. Use this whenever calling an opensheet endpoint under /api/v1, minting or scoping an API key for one, debugging a 404, 403, 409 or 412 from a sheet URL, or when the task mentions opensheet, a published sheet, a sheet slug, or "read/write my Google Sheet over HTTP".
+description: Read and write a published Google Sheet tab over opensheet's HTTP data plane — auth with an API key or an OAuth access token, filtered and sorted reads, row CRUD, batch writes, caching and concurrency headers, and the JSON error envelope. Use this whenever calling an opensheet endpoint under /api/v1, minting or scoping an API key for one, debugging a 404, 403, 409 or 412 from a sheet URL, or when the task mentions opensheet, a published sheet, a sheet slug, or "read/write my Google Sheet over HTTP".
 license: Proprietary
 metadata:
   data-plane: internal/dataplane
@@ -93,10 +93,23 @@ overwritten silently. Take the ETag from the read that produced the row.
 **Row ids come from an `id` column in the tab**, not from a row number. A tab without one
 rejects every by-id route; `capabilities.idColumn` reports this, and the UI offers to add it.
 
-**There is no `401`; a bad key returns `404`.** A missing header, a revoked token, a key from
-another project and a slug that does not exist are one indistinguishable answer, so slugs
-cannot be enumerated. Never wait for a `401` to detect a bad key — check the key's scopes and
-sheet grants before assuming the slug is wrong.
+**A connecting app can use an OAuth access token instead of a key.** Send the Othra access
+token issued for opensheet's API audience as `Authorization: Bearer <token>`. Its person must be
+a member of the org in the path, and the token's scopes cap what it may do (`sheets:read`,
+`sheets:write`, `spreadsheets:read`, `spreadsheets:write`). It reaches every sheet of the project.
+
+**A bad key returns `404`, never `401`.** A missing header, a key from another project and a
+slug that does not exist are one indistinguishable answer, so slugs cannot be enumerated. Check
+the key's scopes and sheet grants before assuming the slug is wrong. A valid token for a person
+outside the org, or one missing the scope, is the same `404`.
+
+**A `401` means the access token itself was refused; get a new one.** `TKN001` is an expired
+token: refresh it. `GEN002` is a token opensheet cannot accept (wrong audience, bad signature,
+an ID token). Both carry `WWW-Authenticate: Bearer error="invalid_token", resource_metadata="…"`.
+A `401` never means the sheet is gone.
+
+**A `503` with `TKN002` means the credential could not be checked.** It is never a bad key:
+retry with backoff.
 
 ## Verify
 

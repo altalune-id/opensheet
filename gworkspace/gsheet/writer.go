@@ -145,3 +145,48 @@ func (w *Writer) AddTab(ctx context.Context, fileID, title string) error {
 	}
 	return nil
 }
+
+// HeaderRow is the row-1 content UpdateHeaders writes into one tab.
+type HeaderRow struct {
+	Tab   string
+	Cells []any
+}
+
+// UpdateHeaders overwrites row 1 of every tab in rows with one values batchUpdate.
+func (w *Writer) UpdateHeaders(ctx context.Context, fileID string, rows []HeaderRow) error {
+	data := make([]*sheetsapi.ValueRange, 0, len(rows))
+	for _, row := range rows {
+		tab := strings.TrimSpace(row.Tab)
+		if tab == "" {
+			return &TabNotFoundError{Tab: tab}
+		}
+		if len(row.Cells) == 0 {
+			return &InvalidRangeError{Range: tab}
+		}
+		data = append(data, &sheetsapi.ValueRange{
+			Range:  quoteRange(tab) + "!A1:" + ColumnLabel(len(row.Cells)) + "1",
+			Values: [][]any{row.Cells},
+		})
+	}
+	req := &sheetsapi.BatchUpdateValuesRequest{ValueInputOption: valueInputRaw, Data: data}
+	if _, err := w.svc.Spreadsheets.Values.BatchUpdate(fileID, req).Context(ctx).Do(); err != nil {
+		return gworkspace.Translate(err, fileID)
+	}
+	return nil
+}
+
+// CreateSpreadsheet creates a spreadsheet titled title with one tab per entry of tabs and returns its file id.
+func (w *Writer) CreateSpreadsheet(ctx context.Context, title string, tabs []string) (string, error) {
+	sheets := make([]*sheetsapi.Sheet, 0, len(tabs))
+	for _, tab := range tabs {
+		sheets = append(sheets, &sheetsapi.Sheet{Properties: &sheetsapi.SheetProperties{Title: tab}})
+	}
+	resp, err := w.svc.Spreadsheets.Create(&sheetsapi.Spreadsheet{
+		Properties: &sheetsapi.SpreadsheetProperties{Title: title},
+		Sheets:     sheets,
+	}).Context(ctx).Do()
+	if err != nil {
+		return "", gworkspace.Translate(err, "")
+	}
+	return resp.SpreadsheetId, nil
+}

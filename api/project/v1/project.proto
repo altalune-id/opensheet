@@ -24,6 +24,7 @@ message Project {
   // System marks a bootstrap-owned project that cannot be renamed or deleted
   bool system = 5;
   google.protobuf.Timestamp created_at = 6;
+  string org_slug = 7;
 }
 
 message ListProjectsRequest {}

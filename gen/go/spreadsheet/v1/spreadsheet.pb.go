@@ -7,6 +7,7 @@
 package spreadsheetv1
 
 import (
+	v1 "altalune.id/opensheet/gen/go/sheet/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -722,11 +723,199 @@ func (x *ListTabsResponse) GetTabs() []string {
 	return nil
 }
 
+type ProvisionTab struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	Headers       []string               `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty"`
+	Slug          string                 `protobuf:"bytes,3,opt,name=slug,proto3" json:"slug,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionTab) Reset() {
+	*x = ProvisionTab{}
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionTab) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionTab) ProtoMessage() {}
+
+func (x *ProvisionTab) ProtoReflect() protoreflect.Message {
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionTab.ProtoReflect.Descriptor instead.
+func (*ProvisionTab) Descriptor() ([]byte, []int) {
+	return file_spreadsheet_v1_spreadsheet_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ProvisionTab) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ProvisionTab) GetHeaders() []string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *ProvisionTab) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+type ProvisionRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId      string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	CredentialId   string                 `protobuf:"bytes,2,opt,name=credential_id,json=credentialId,proto3" json:"credential_id,omitempty"`
+	Title          string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	Tabs           []*ProvisionTab        `protobuf:"bytes,4,rep,name=tabs,proto3" json:"tabs,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,5,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ProvisionRequest) Reset() {
+	*x = ProvisionRequest{}
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionRequest) ProtoMessage() {}
+
+func (x *ProvisionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionRequest.ProtoReflect.Descriptor instead.
+func (*ProvisionRequest) Descriptor() ([]byte, []int) {
+	return file_spreadsheet_v1_spreadsheet_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ProvisionRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *ProvisionRequest) GetCredentialId() string {
+	if x != nil {
+		return x.CredentialId
+	}
+	return ""
+}
+
+func (x *ProvisionRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ProvisionRequest) GetTabs() []*ProvisionTab {
+	if x != nil {
+		return x.Tabs
+	}
+	return nil
+}
+
+func (x *ProvisionRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type ProvisionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Spreadsheet   *Spreadsheet           `protobuf:"bytes,1,opt,name=spreadsheet,proto3" json:"spreadsheet,omitempty"`
+	Sheets        []*v1.Sheet            `protobuf:"bytes,2,rep,name=sheets,proto3" json:"sheets,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionResponse) Reset() {
+	*x = ProvisionResponse{}
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionResponse) ProtoMessage() {}
+
+func (x *ProvisionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_spreadsheet_v1_spreadsheet_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionResponse.ProtoReflect.Descriptor instead.
+func (*ProvisionResponse) Descriptor() ([]byte, []int) {
+	return file_spreadsheet_v1_spreadsheet_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ProvisionResponse) GetSpreadsheet() *Spreadsheet {
+	if x != nil {
+		return x.Spreadsheet
+	}
+	return nil
+}
+
+func (x *ProvisionResponse) GetSheets() []*v1.Sheet {
+	if x != nil {
+		return x.Sheets
+	}
+	return nil
+}
+
 var File_spreadsheet_v1_spreadsheet_proto protoreflect.FileDescriptor
 
 const file_spreadsheet_v1_spreadsheet_proto_rawDesc = "" +
 	"\n" +
-	" spreadsheet/v1/spreadsheet.proto\x12\x0espreadsheet.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x02\n" +
+	" spreadsheet/v1/spreadsheet.proto\x12\x0espreadsheet.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x14sheet/v1/sheet.proto\"\xaf\x02\n" +
 	"\vSpreadsheet\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -781,14 +970,29 @@ const file_spreadsheet_v1_spreadsheet_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12%\n" +
 	"\x0espreadsheet_id\x18\x02 \x01(\tR\rspreadsheetId\"&\n" +
 	"\x10ListTabsResponse\x12\x12\n" +
-	"\x04tabs\x18\x01 \x03(\tR\x04tabs2\xc1\x03\n" +
+	"\x04tabs\x18\x01 \x03(\tR\x04tabs\"R\n" +
+	"\fProvisionTab\x12\x14\n" +
+	"\x05title\x18\x01 \x01(\tR\x05title\x12\x18\n" +
+	"\aheaders\x18\x02 \x03(\tR\aheaders\x12\x12\n" +
+	"\x04slug\x18\x03 \x01(\tR\x04slug\"\xc7\x01\n" +
+	"\x10ProvisionRequest\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12#\n" +
+	"\rcredential_id\x18\x02 \x01(\tR\fcredentialId\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\x120\n" +
+	"\x04tabs\x18\x04 \x03(\v2\x1c.spreadsheet.v1.ProvisionTabR\x04tabs\x12'\n" +
+	"\x0fidempotency_key\x18\x05 \x01(\tR\x0eidempotencyKey\"{\n" +
+	"\x11ProvisionResponse\x12=\n" +
+	"\vspreadsheet\x18\x01 \x01(\v2\x1b.spreadsheet.v1.SpreadsheetR\vspreadsheet\x12'\n" +
+	"\x06sheets\x18\x02 \x03(\v2\x0f.sheet.v1.SheetR\x06sheets2\x93\x04\n" +
 	"\x12SpreadsheetService\x12A\n" +
 	"\x04List\x12\x1b.spreadsheet.v1.ListRequest\x1a\x1c.spreadsheet.v1.ListResponse\x12G\n" +
 	"\x06Create\x12\x1d.spreadsheet.v1.CreateRequest\x1a\x1e.spreadsheet.v1.CreateResponse\x12>\n" +
 	"\x03Get\x12\x1a.spreadsheet.v1.GetRequest\x1a\x1b.spreadsheet.v1.GetResponse\x12G\n" +
 	"\x06Update\x12\x1d.spreadsheet.v1.UpdateRequest\x1a\x1e.spreadsheet.v1.UpdateResponse\x12G\n" +
 	"\x06Delete\x12\x1d.spreadsheet.v1.DeleteRequest\x1a\x1e.spreadsheet.v1.DeleteResponse\x12M\n" +
-	"\bListTabs\x12\x1f.spreadsheet.v1.ListTabsRequest\x1a .spreadsheet.v1.ListTabsResponseB\xba\x01\n" +
+	"\bListTabs\x12\x1f.spreadsheet.v1.ListTabsRequest\x1a .spreadsheet.v1.ListTabsResponse\x12P\n" +
+	"\tProvision\x12 .spreadsheet.v1.ProvisionRequest\x1a!.spreadsheet.v1.ProvisionResponseB\xba\x01\n" +
 	"\x12com.spreadsheet.v1B\x10SpreadsheetProtoP\x01Z9altalune.id/opensheet/gen/go/spreadsheet/v1;spreadsheetv1\xa2\x02\x03SXX\xaa\x02\x0eSpreadsheet.V1\xca\x02\x0eSpreadsheet\\V1\xe2\x02\x1aSpreadsheet\\V1\\GPBMetadata\xea\x02\x0fSpreadsheet::V1b\x06proto3"
 
 var (
@@ -803,7 +1007,7 @@ func file_spreadsheet_v1_spreadsheet_proto_rawDescGZIP() []byte {
 	return file_spreadsheet_v1_spreadsheet_proto_rawDescData
 }
 
-var file_spreadsheet_v1_spreadsheet_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_spreadsheet_v1_spreadsheet_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_spreadsheet_v1_spreadsheet_proto_goTypes = []any{
 	(*Spreadsheet)(nil),           // 0: spreadsheet.v1.Spreadsheet
 	(*ListRequest)(nil),           // 1: spreadsheet.v1.ListRequest
@@ -818,32 +1022,41 @@ var file_spreadsheet_v1_spreadsheet_proto_goTypes = []any{
 	(*DeleteResponse)(nil),        // 10: spreadsheet.v1.DeleteResponse
 	(*ListTabsRequest)(nil),       // 11: spreadsheet.v1.ListTabsRequest
 	(*ListTabsResponse)(nil),      // 12: spreadsheet.v1.ListTabsResponse
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*ProvisionTab)(nil),          // 13: spreadsheet.v1.ProvisionTab
+	(*ProvisionRequest)(nil),      // 14: spreadsheet.v1.ProvisionRequest
+	(*ProvisionResponse)(nil),     // 15: spreadsheet.v1.ProvisionResponse
+	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
+	(*v1.Sheet)(nil),              // 17: sheet.v1.Sheet
 }
 var file_spreadsheet_v1_spreadsheet_proto_depIdxs = []int32{
-	13, // 0: spreadsheet.v1.Spreadsheet.created_at:type_name -> google.protobuf.Timestamp
-	13, // 1: spreadsheet.v1.Spreadsheet.updated_at:type_name -> google.protobuf.Timestamp
+	16, // 0: spreadsheet.v1.Spreadsheet.created_at:type_name -> google.protobuf.Timestamp
+	16, // 1: spreadsheet.v1.Spreadsheet.updated_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: spreadsheet.v1.ListResponse.spreadsheets:type_name -> spreadsheet.v1.Spreadsheet
 	0,  // 3: spreadsheet.v1.CreateResponse.spreadsheet:type_name -> spreadsheet.v1.Spreadsheet
 	0,  // 4: spreadsheet.v1.GetResponse.spreadsheet:type_name -> spreadsheet.v1.Spreadsheet
 	0,  // 5: spreadsheet.v1.UpdateResponse.spreadsheet:type_name -> spreadsheet.v1.Spreadsheet
-	1,  // 6: spreadsheet.v1.SpreadsheetService.List:input_type -> spreadsheet.v1.ListRequest
-	3,  // 7: spreadsheet.v1.SpreadsheetService.Create:input_type -> spreadsheet.v1.CreateRequest
-	5,  // 8: spreadsheet.v1.SpreadsheetService.Get:input_type -> spreadsheet.v1.GetRequest
-	7,  // 9: spreadsheet.v1.SpreadsheetService.Update:input_type -> spreadsheet.v1.UpdateRequest
-	9,  // 10: spreadsheet.v1.SpreadsheetService.Delete:input_type -> spreadsheet.v1.DeleteRequest
-	11, // 11: spreadsheet.v1.SpreadsheetService.ListTabs:input_type -> spreadsheet.v1.ListTabsRequest
-	2,  // 12: spreadsheet.v1.SpreadsheetService.List:output_type -> spreadsheet.v1.ListResponse
-	4,  // 13: spreadsheet.v1.SpreadsheetService.Create:output_type -> spreadsheet.v1.CreateResponse
-	6,  // 14: spreadsheet.v1.SpreadsheetService.Get:output_type -> spreadsheet.v1.GetResponse
-	8,  // 15: spreadsheet.v1.SpreadsheetService.Update:output_type -> spreadsheet.v1.UpdateResponse
-	10, // 16: spreadsheet.v1.SpreadsheetService.Delete:output_type -> spreadsheet.v1.DeleteResponse
-	12, // 17: spreadsheet.v1.SpreadsheetService.ListTabs:output_type -> spreadsheet.v1.ListTabsResponse
-	12, // [12:18] is the sub-list for method output_type
-	6,  // [6:12] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	13, // 6: spreadsheet.v1.ProvisionRequest.tabs:type_name -> spreadsheet.v1.ProvisionTab
+	0,  // 7: spreadsheet.v1.ProvisionResponse.spreadsheet:type_name -> spreadsheet.v1.Spreadsheet
+	17, // 8: spreadsheet.v1.ProvisionResponse.sheets:type_name -> sheet.v1.Sheet
+	1,  // 9: spreadsheet.v1.SpreadsheetService.List:input_type -> spreadsheet.v1.ListRequest
+	3,  // 10: spreadsheet.v1.SpreadsheetService.Create:input_type -> spreadsheet.v1.CreateRequest
+	5,  // 11: spreadsheet.v1.SpreadsheetService.Get:input_type -> spreadsheet.v1.GetRequest
+	7,  // 12: spreadsheet.v1.SpreadsheetService.Update:input_type -> spreadsheet.v1.UpdateRequest
+	9,  // 13: spreadsheet.v1.SpreadsheetService.Delete:input_type -> spreadsheet.v1.DeleteRequest
+	11, // 14: spreadsheet.v1.SpreadsheetService.ListTabs:input_type -> spreadsheet.v1.ListTabsRequest
+	14, // 15: spreadsheet.v1.SpreadsheetService.Provision:input_type -> spreadsheet.v1.ProvisionRequest
+	2,  // 16: spreadsheet.v1.SpreadsheetService.List:output_type -> spreadsheet.v1.ListResponse
+	4,  // 17: spreadsheet.v1.SpreadsheetService.Create:output_type -> spreadsheet.v1.CreateResponse
+	6,  // 18: spreadsheet.v1.SpreadsheetService.Get:output_type -> spreadsheet.v1.GetResponse
+	8,  // 19: spreadsheet.v1.SpreadsheetService.Update:output_type -> spreadsheet.v1.UpdateResponse
+	10, // 20: spreadsheet.v1.SpreadsheetService.Delete:output_type -> spreadsheet.v1.DeleteResponse
+	12, // 21: spreadsheet.v1.SpreadsheetService.ListTabs:output_type -> spreadsheet.v1.ListTabsResponse
+	15, // 22: spreadsheet.v1.SpreadsheetService.Provision:output_type -> spreadsheet.v1.ProvisionResponse
+	16, // [16:23] is the sub-list for method output_type
+	9,  // [9:16] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_spreadsheet_v1_spreadsheet_proto_init() }
@@ -858,7 +1071,7 @@ func file_spreadsheet_v1_spreadsheet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_spreadsheet_v1_spreadsheet_proto_rawDesc), len(file_spreadsheet_v1_spreadsheet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

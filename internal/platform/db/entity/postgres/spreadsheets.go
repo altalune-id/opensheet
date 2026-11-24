@@ -15,6 +15,7 @@ type Spreadsheets struct {
 	Writable     postgres.ColumnBool
 	CreatedAt    postgres.ColumnTimestampz
 	UpdatedAt    postgres.ColumnTimestampz
+	ProvisionKey postgres.ColumnString
 
 	AllColumns     postgres.ColumnList
 	MutableColumns postgres.ColumnList
@@ -35,8 +36,9 @@ func NewSpreadsheets(schema, tablePrefix string) *Spreadsheets {
 		writable     = postgres.BoolColumn("writable")
 		createdAt    = postgres.TimestampzColumn("created_at")
 		updatedAt    = postgres.TimestampzColumn("updated_at")
+		provisionKey = postgres.StringColumn("provision_key")
 		all          = postgres.ColumnList{
-			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt,
+			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt, provisionKey,
 		}
 		mutable = postgres.ColumnList{
 			orgID, projectID, credentialID, googleFileID, title, writable, updatedAt,
@@ -53,6 +55,7 @@ func NewSpreadsheets(schema, tablePrefix string) *Spreadsheets {
 		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
+		ProvisionKey:   provisionKey,
 		AllColumns:     all,
 		MutableColumns: mutable,
 	}

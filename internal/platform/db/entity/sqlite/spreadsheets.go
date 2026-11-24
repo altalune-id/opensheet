@@ -15,6 +15,7 @@ type Spreadsheets struct {
 	Writable     sqlite.ColumnInteger
 	CreatedAt    sqlite.ColumnString
 	UpdatedAt    sqlite.ColumnString
+	ProvisionKey sqlite.ColumnString
 
 	AllColumns     sqlite.ColumnList
 	MutableColumns sqlite.ColumnList
@@ -32,8 +33,9 @@ func NewSpreadsheets(tablePrefix string) *Spreadsheets {
 		writable     = sqlite.IntegerColumn("writable")
 		createdAt    = sqlite.StringColumn("created_at")
 		updatedAt    = sqlite.StringColumn("updated_at")
+		provisionKey = sqlite.StringColumn("provision_key")
 		all          = sqlite.ColumnList{
-			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt,
+			id, orgID, projectID, credentialID, googleFileID, title, writable, createdAt, updatedAt, provisionKey,
 		}
 		mutable = sqlite.ColumnList{
 			orgID, projectID, credentialID, googleFileID, title, writable, updatedAt,
@@ -50,6 +52,7 @@ func NewSpreadsheets(tablePrefix string) *Spreadsheets {
 		Writable:       writable,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
+		ProvisionKey:   provisionKey,
 		AllColumns:     all,
 		MutableColumns: mutable,
 	}

@@ -177,6 +177,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/spreadsheet.v1.ListTabsResponse'
+  /spreadsheet.v1.SpreadsheetService/Provision:
+    post:
+      tags:
+        - spreadsheet.v1.SpreadsheetService
+      summary: Provision
+      operationId: spreadsheet.v1.SpreadsheetService.Provision
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/spreadsheet.v1.ProvisionRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/spreadsheet.v1.ProvisionResponse'
   /spreadsheet.v1.SpreadsheetService/Update:
     post:
       tags:
@@ -283,6 +318,68 @@ components:
           description: Deserialized error detail payload. The 'type' field indicates the schema. This field is for easier debugging and should not be relied upon for application logic.
       additionalProperties: true
       description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message, with an additional debug field for ConnectRPC error details.
+    google.protobuf.Duration:
+      type: string
+      format: duration
+      description: |-
+        A Duration represents a signed, fixed-length span of time represented
+         as a count of seconds and fractions of seconds at nanosecond
+         resolution. It is independent of any calendar and concepts like "day"
+         or "month". It is related to Timestamp in that the difference between
+         two Timestamp values is a Duration and it can be added or subtracted
+         from a Timestamp. Range is approximately +-10,000 years.
+
+         # Examples
+
+         Example 1: Compute Duration from two Timestamps in pseudo code.
+
+             Timestamp start = ...;
+             Timestamp end = ...;
+             Duration duration = ...;
+
+             duration.seconds = end.seconds - start.seconds;
+             duration.nanos = end.nanos - start.nanos;
+
+             if (duration.seconds < 0 && duration.nanos > 0) {
+               duration.seconds += 1;
+               duration.nanos -= 1000000000;
+             } else if (duration.seconds > 0 && duration.nanos < 0) {
+               duration.seconds -= 1;
+               duration.nanos += 1000000000;
+             }
+
+         Example 2: Compute Timestamp from Timestamp + Duration in pseudo code.
+
+             Timestamp start = ...;
+             Duration duration = ...;
+             Timestamp end = ...;
+
+             end.seconds = start.seconds + duration.seconds;
+             end.nanos = start.nanos + duration.nanos;
+
+             if (end.nanos < 0) {
+               end.seconds -= 1;
+               end.nanos += 1000000000;
+             } else if (end.nanos >= 1000000000) {
+               end.seconds += 1;
+               end.nanos -= 1000000000;
+             }
+
+         Example 3: Compute Duration from datetime.timedelta in Python.
+
+             td = datetime.timedelta(days=3, minutes=10)
+             duration = Duration()
+             duration.FromTimedelta(td)
+
+         # JSON Mapping
+
+         In JSON format, the Duration type is encoded as a string rather than an
+         object, where the string ends in the suffix "s" (indicating seconds) and
+         is preceded by the number of seconds, with nanoseconds expressed as
+         fractional seconds. For example, 3 seconds with 0 nanoseconds should be
+         encoded in JSON format as "3s", while 3 seconds and 1 nanosecond should
+         be expressed in JSON format as "3.000000001s", and 3 seconds and 1
+         microsecond should be expressed in JSON format as "3.000001s".
     google.protobuf.Timestamp:
       type: string
       examples:
@@ -379,6 +476,41 @@ components:
          the Joda Time's [`ISODateTimeFormat.dateTime()`](
          http://joda-time.sourceforge.net/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime()
          ) to obtain a formatter capable of generating timestamps in this format.
+    sheet.v1.Sheet:
+      type: object
+      properties:
+        id:
+          type: string
+          title: id
+        projectId:
+          type: string
+          title: project_id
+        spreadsheetId:
+          type: string
+          title: spreadsheet_id
+        tab:
+          type: string
+          title: tab
+        slug:
+          type: string
+          title: slug
+        visibility:
+          type: string
+          title: visibility
+        cacheTtl:
+          title: cache_ttl
+          $ref: '#/components/schemas/google.protobuf.Duration'
+        createdAt:
+          title: created_at
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
+        updatedAt:
+          title: updated_at
+          $ref: '#/components/schemas/google.protobuf.Timestamp'
+        writable:
+          type: boolean
+          title: writable
+      title: Sheet
+      additionalProperties: false
     spreadsheet.v1.CreateRequest:
       type: object
       properties:
@@ -476,6 +608,57 @@ components:
             type: string
           title: tabs
       title: ListTabsResponse
+      additionalProperties: false
+    spreadsheet.v1.ProvisionRequest:
+      type: object
+      properties:
+        projectId:
+          type: string
+          title: project_id
+        credentialId:
+          type: string
+          title: credential_id
+        title:
+          type: string
+          title: title
+        tabs:
+          type: array
+          items:
+            $ref: '#/components/schemas/spreadsheet.v1.ProvisionTab'
+          title: tabs
+        idempotencyKey:
+          type: string
+          title: idempotency_key
+      title: ProvisionRequest
+      additionalProperties: false
+    spreadsheet.v1.ProvisionResponse:
+      type: object
+      properties:
+        spreadsheet:
+          title: spreadsheet
+          $ref: '#/components/schemas/spreadsheet.v1.Spreadsheet'
+        sheets:
+          type: array
+          items:
+            $ref: '#/components/schemas/sheet.v1.Sheet'
+          title: sheets
+      title: ProvisionResponse
+      additionalProperties: false
+    spreadsheet.v1.ProvisionTab:
+      type: object
+      properties:
+        title:
+          type: string
+          title: title
+        headers:
+          type: array
+          items:
+            type: string
+          title: headers
+        slug:
+          type: string
+          title: slug
+      title: ProvisionTab
       additionalProperties: false
     spreadsheet.v1.Spreadsheet:
       type: object

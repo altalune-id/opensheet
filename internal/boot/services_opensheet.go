@@ -30,6 +30,8 @@ type opensheetServices struct {
 	Spreadsheets *spreadsheet.Service
 	Sheets       *sheet.Service
 
+	Provision *spreadsheet.ProvisionWorkflow
+
 	Read    *sheet.ReadWorkflow
 	Write   *sheet.WriteWorkflow
 	Fix     *sheet.FixWorkflow
@@ -80,6 +82,8 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 	)
 	sheets := sheet.NewService(sheetStore, log, reporter.Unexpected, sheetCaps, snaps, sheetAttempts, publishWorkflow,
 		sheet.WithQueue(k.Queue))
+	provision := spreadsheet.NewProvisionWorkflow(spreadsheets, writers, tokensForSpreadsheetWrite{svc: credentials},
+		sheetsForProvision{svc: sheets}, log, reporter.Unexpected)
 
 	readWorkflow := sheet.NewReadWorkflow(
 		snaps,
@@ -136,6 +140,7 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 		Credentials:      credentials,
 		Spreadsheets:     spreadsheets,
 		Sheets:           sheets,
+		Provision:        provision,
 		Read:             readWorkflow,
 		Write:            writeWorkflow,
 		Fix:              fixWorkflow,
@@ -165,6 +170,7 @@ func assertOpensheetWiring(s opensheetServices) error {
 		{"credentials", s.Credentials != nil},
 		{"spreadsheets", s.Spreadsheets != nil},
 		{"sheets", s.Sheets != nil},
+		{"provision", s.Provision != nil},
 		{"read", s.Read != nil},
 		{"write", s.Write != nil},
 		{"fix", s.Fix != nil},

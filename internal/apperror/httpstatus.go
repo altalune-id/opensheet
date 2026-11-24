@@ -17,6 +17,7 @@ var httpStatusOverrides = map[string]int{
 	CodeSheetBatchTooLarge:         http.StatusUnprocessableEntity,
 	CodeSheetSoftDeleteUnsupported: http.StatusUnprocessableEntity,
 	CodeSheetPreconditionFailed:    http.StatusPreconditionFailed,
+	CodeTokenUnavailable:           http.StatusServiceUnavailable,
 }
 
 // HTTPStatus maps the error to an HTTP status, preferring a per-code override over its gRPC code.

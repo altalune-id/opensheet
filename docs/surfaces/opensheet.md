@@ -8,6 +8,26 @@ is the `opensheet-api` skill in [`skills/opensheet-api/`](../../skills/opensheet
 The registry (credentials, spreadsheets, sheets, API keys) is the control plane: the console and
 Connect-RPC.
 
+## Credentials
+
+The data plane accepts two credential classes, routed by shape (`dataplane.NewCredentialAuthorizer`):
+
+| Credential                      | Admitted when                                    | Reach                                  |
+| ------------------------------- | ------------------------------------------------ | -------------------------------------- |
+| API key (`api.keyPrefix`)       | scope held, path in the key's project            | the project, narrowed by `ResourceIDs` |
+| Othra token (`tokens.audience`) | person is a member of the path's org, scope held | every sheet of the project             |
+
+- An access token is verified before the path resolves. An invalid one (bad signature, unknown
+  key, wrong audience, an ID token) is `GEN002` with `401`, and an expired one is `TKN001` with
+  `401`. Both carry `WWW-Authenticate: Bearer error="invalid_token"` naming the API's RFC 9728
+  document. The answer does not depend on the path, so it reveals no slug.
+- Every other refusal is the masked `SHT001` 404, for either class: a bad key, a person who is
+  unknown or not a member of the path's org, a missing scope.
+- A credential check that cannot run (issuer, key store or membership store down) is `TKN002`
+  with `503`, so a caller retries instead of reading the sheet as gone. An issuer outage answers
+  before the path resolves.
+- With `tokens.issuer` empty, every token gets the masked 404 and the data plane is keys only.
+
 ## Writes
 
 - A write needs `sheets:write` plus `sheets.writable` on the sheet. The tabs routes need

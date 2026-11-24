@@ -20,16 +20,17 @@ type TodoService struct {
 	todos     *todo.Service
 	todoStore todo.Store
 	projects  *project.Service
+	orgs      orgLister
 }
 
 // NewTodoService binds the handler to its collaborators.
-func NewTodoService(todos *todo.Service, todoStore todo.Store, projects *project.Service) *TodoService {
-	return &TodoService{todos: todos, todoStore: todoStore, projects: projects}
+func NewTodoService(todos *todo.Service, todoStore todo.Store, projects *project.Service, orgs orgLister) *TodoService {
+	return &TodoService{todos: todos, todoStore: todoStore, projects: projects, orgs: orgs}
 }
 
 // Create persists a new todo bound to the request's project.
 func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.CreateRequest]) (*connect.Response[todov1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +43,7 @@ func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.Cr
 
 // List returns todos in the request's project.
 func (s *TodoService) List(ctx context.Context, req *connect.Request[todov1.ListRequest]) (*connect.Response[todov1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sheetv1 "altalune.id/opensheet/gen/go/sheet/v1"
-	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 )
@@ -18,16 +17,17 @@ import (
 type SheetService struct {
 	sheets   *sheet.Service
 	projects *project.Service
+	orgs     orgLister
 }
 
 // NewSheetService binds the handler to its collaborators.
-func NewSheetService(sheets *sheet.Service, projects *project.Service) *SheetService {
-	return &SheetService{sheets: sheets, projects: projects}
+func NewSheetService(sheets *sheet.Service, projects *project.Service, orgs orgLister) *SheetService {
+	return &SheetService{sheets: sheets, projects: projects, orgs: orgs}
 }
 
 // List returns the sheets published in the request's project.
 func (s *SheetService) List(ctx context.Context, req *connect.Request[sheetv1.ListRequest]) (*connect.Response[sheetv1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *SheetService) List(ctx context.Context, req *connect.Request[sheetv1.Li
 
 // Create publishes a tab of the referenced spreadsheet under a per-project slug.
 func (s *SheetService) Create(ctx context.Context, req *connect.Request[sheetv1.CreateRequest]) (*connect.Response[sheetv1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -127,19 +127,11 @@ func (s *SheetService) PurgeCache(ctx context.Context, req *connect.Request[shee
 }
 
 func (s *SheetService) scoped(ctx context.Context, projectIDRaw, idRaw string) (context.Context, uuid.UUID, error) {
-	pr, err := principal(ctx)
-	if err != nil {
-		return nil, uuid.Nil, err
-	}
-	pid, err := parseUUID("project_id", projectIDRaw)
-	if err != nil {
-		return nil, uuid.Nil, err
-	}
 	id, err := parseUUID("sheet_id", idRaw)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
-	proj, err := s.projects.ByID(tenant.Into(ctx, tenant.Context{OrgID: pr.ActiveOrgID, UserID: pr.UserID}), pid)
+	ctx, _, proj, err := resolveProject(ctx, s.projects, s.orgs, projectIDRaw)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}

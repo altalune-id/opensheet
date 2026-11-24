@@ -400,3 +400,27 @@ func TestPostgres_Spreadsheet_SaveOfAnotherOrgsIDIsNotFound(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Prices", still.Title, "org B rewrote org A's row across the tenant boundary")
 }
+
+func TestPostgres_Spreadsheet_ProvisionKeyRoundTrips(t *testing.T) {
+	f := newPgFixture(t)
+	sp, err := spreadsheet.New(f.a.tc.OrgID, f.a.tc.ProjectID, f.a.credentialID, "FILE-prov", "Provisioned")
+	require.NoError(t, err)
+	sp.ProvisionKey = "connect-1"
+	require.NoError(t, f.store.Save(f.ctxA(), sp))
+	f.save(t, f.ctxA(), f.a, "FILE-plain", "Plain")
+
+	got, err := f.store.ByProvisionKey(f.ctxA(), f.a.tc.OrgID, f.a.tc.ProjectID, "connect-1")
+	require.NoError(t, err)
+	assert.Equal(t, sp.ID, got.ID)
+	assert.Equal(t, "connect-1", got.ProvisionKey)
+
+	_, err = f.store.ByProvisionKey(f.ctxA(), f.a.tc.OrgID, f.a.tc.ProjectID, "absent")
+	assert.True(t, spreadsheet.IsNotFoundError(err), "absent key: %v", err)
+	_, err = f.store.ByProvisionKey(f.ctxB(), f.a.tc.OrgID, f.a.tc.ProjectID, "connect-1")
+	assert.True(t, spreadsheet.IsNotFoundError(err), "another org's scope: %v", err)
+
+	dup, err := spreadsheet.New(f.a.tc.OrgID, f.a.tc.ProjectID, f.a.credentialID, "FILE-dup", "Dup")
+	require.NoError(t, err)
+	dup.ProvisionKey = "connect-1"
+	assert.True(t, spreadsheet.IsAlreadyExistsError(f.store.Save(f.ctxA(), dup)), "duplicate key must be refused")
+}

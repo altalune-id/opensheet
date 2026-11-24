@@ -120,6 +120,8 @@ const (
 	CodeSpreadsheetInvalidTitle  = "SPR004"
 	CodeSpreadsheetNotWritable   = "SPR005"
 
+	CodeSpreadsheetProvisionInvalid = "SPR006"
+
 	CodeSheetNotFound              = "SHT001"
 	CodeSheetAlreadyExists         = "SHT002"
 	CodeSheetInvalidSlug           = "SHT003"

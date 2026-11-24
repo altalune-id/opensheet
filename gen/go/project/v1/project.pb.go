@@ -32,6 +32,7 @@ type Project struct {
 	// System marks a bootstrap-owned project that cannot be renamed or deleted
 	System        bool                   `protobuf:"varint,5,opt,name=system,proto3" json:"system,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	OrgSlug       string                 `protobuf:"bytes,7,opt,name=org_slug,json=orgSlug,proto3" json:"org_slug,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -106,6 +107,13 @@ func (x *Project) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Project) GetOrgSlug() string {
+	if x != nil {
+		return x.OrgSlug
+	}
+	return ""
 }
 
 type ListProjectsRequest struct {
@@ -193,7 +201,7 @@ var File_project_v1_project_proto protoreflect.FileDescriptor
 const file_project_v1_project_proto_rawDesc = "" +
 	"\n" +
 	"\x18project/v1/project.proto\x12\n" +
-	"project.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18mcp/v1/annotations.proto\"\xab\x01\n" +
+	"project.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18mcp/v1/annotations.proto\"\xc6\x01\n" +
 	"\aProject\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x12\n" +
@@ -201,7 +209,8 @@ const file_project_v1_project_proto_rawDesc = "" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x16\n" +
 	"\x06system\x18\x05 \x01(\bR\x06system\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x15\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x19\n" +
+	"\borg_slug\x18\a \x01(\tR\aorgSlug\"\x15\n" +
 	"\x13ListProjectsRequest\"G\n" +
 	"\x14ListProjectsResponse\x12/\n" +
 	"\bprojects\x18\x01 \x03(\v2\x13.project.v1.ProjectR\bprojects2\x95\x02\n" +

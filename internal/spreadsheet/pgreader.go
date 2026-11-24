@@ -29,6 +29,16 @@ func (s *postgresStore) ByGoogleFileID(ctx context.Context, orgID, projectID uui
 	)
 }
 
+func (s *postgresStore) ByProvisionKey(ctx context.Context, orgID, projectID uuid.UUID, key string) (*Spreadsheet, error) {
+	return s.queryOne(ctx,
+		s.table.OrgID.EQ(postgres.UUID(orgID)).
+			AND(s.table.ProjectID.EQ(postgres.UUID(projectID))).
+			AND(s.table.ProvisionKey.EQ(postgres.String(key))),
+		&NotFoundError{ProjectID: projectID.String()},
+		"ByProvisionKey",
+	)
+}
+
 func (s *postgresStore) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*Spreadsheet, error) {
 	tx, owned, _, err := s.txAcquire(ctx)
 	if err != nil {

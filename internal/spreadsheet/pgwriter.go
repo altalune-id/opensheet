@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	pdb "altalune.id/opensheet/internal/platform/db"
+	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
 )
 
 func (s *postgresStore) Save(ctx context.Context, sp *Spreadsheet) error {
@@ -19,7 +20,7 @@ func (s *postgresStore) Save(ctx context.Context, sp *Spreadsheet) error {
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
 			sp.ID, sp.OrgID, sp.ProjectID, sp.CredentialID,
-			sp.GoogleFileID, sp.Title, sp.Writable, sp.CreatedAt.UTC(), updatedAt,
+			sp.GoogleFileID, sp.Title, sp.Writable, sp.CreatedAt.UTC(), updatedAt, pgProvisionKey(sp.ProvisionKey),
 		).
 		ON_CONFLICT(s.table.ID).
 		// SECURITY: the conflict clause carries the tenant predicate; without it an attacker-supplied row id updates another org's row.
@@ -54,6 +55,13 @@ func (s *postgresStore) Save(ctx context.Context, sp *Spreadsheet) error {
 		return s.endTx(tx, owned, &NotFoundError{ID: sp.ID.String()})
 	}
 	return s.endTx(tx, owned, nil)
+}
+
+func pgProvisionKey(key string) postgres.StringExpression {
+	if key == "" {
+		return pgent.NullText()
+	}
+	return postgres.String(key)
 }
 
 func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {

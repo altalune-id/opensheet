@@ -27,15 +27,16 @@ func newSQLiteStore(db *sql.DB, tablePrefix string) *sqliteStore {
 }
 
 type sqliteSpreadsheetRow struct {
-	ID           string `alias:"spreadsheets.id"`
-	OrgID        string `alias:"spreadsheets.org_id"`
-	ProjectID    string `alias:"spreadsheets.project_id"`
-	CredentialID string `alias:"spreadsheets.credential_id"`
-	GoogleFileID string `alias:"spreadsheets.google_file_id"`
-	Title        string `alias:"spreadsheets.title"`
-	Writable     int64  `alias:"spreadsheets.writable"`
-	CreatedAt    string `alias:"spreadsheets.created_at"`
-	UpdatedAt    string `alias:"spreadsheets.updated_at"`
+	ID           string  `alias:"spreadsheets.id"`
+	OrgID        string  `alias:"spreadsheets.org_id"`
+	ProjectID    string  `alias:"spreadsheets.project_id"`
+	CredentialID string  `alias:"spreadsheets.credential_id"`
+	GoogleFileID string  `alias:"spreadsheets.google_file_id"`
+	Title        string  `alias:"spreadsheets.title"`
+	Writable     int64   `alias:"spreadsheets.writable"`
+	CreatedAt    string  `alias:"spreadsheets.created_at"`
+	UpdatedAt    string  `alias:"spreadsheets.updated_at"`
+	ProvisionKey *string `alias:"spreadsheets.provision_key"`
 }
 
 func (r *sqliteSpreadsheetRow) toSpreadsheet() (*Spreadsheet, error) {
@@ -73,6 +74,7 @@ func (r *sqliteSpreadsheetRow) toSpreadsheet() (*Spreadsheet, error) {
 		Writable:     r.Writable != 0,
 		CreatedAt:    createdAt.UTC(),
 		UpdatedAt:    updatedAt.UTC(),
+		ProvisionKey: derefKey(r.ProvisionKey),
 	}, nil
 }
 
@@ -94,6 +96,7 @@ func (s *sqliteStore) Save(ctx context.Context, sp *Spreadsheet) error {
 			writable,
 			sqliteent.SQLiteTime(sp.CreatedAt),
 			updatedAt,
+			sqliteProvisionKey(sp.ProvisionKey),
 		).
 		ON_CONFLICT(s.table.ID).
 		// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping an attacker-supplied row id from updating another org's row.
@@ -152,6 +155,30 @@ func (s *sqliteStore) ByGoogleFileID(ctx context.Context, orgID, projectID uuid.
 			AND(s.table.GoogleFileID.EQ(sqlite.String(fileID))),
 		&NotFoundError{ProjectID: projectID.String(), GoogleFileID: fileID},
 	)
+}
+
+func (s *sqliteStore) ByProvisionKey(ctx context.Context, orgID, projectID uuid.UUID, key string) (*Spreadsheet, error) {
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	notFound := &NotFoundError{ProjectID: projectID.String()}
+	if tc.OrgID != orgID {
+		return nil, notFound
+	}
+	return s.queryOne(ctx,
+		s.table.OrgID.EQ(sqlite.String(orgID.String())).
+			AND(s.table.ProjectID.EQ(sqlite.String(projectID.String()))).
+			AND(s.table.ProvisionKey.EQ(sqlite.String(key))),
+		notFound,
+	)
+}
+
+func sqliteProvisionKey(key string) sqlite.StringExpression {
+	if key == "" {
+		return sqliteent.NullText()
+	}
+	return sqlite.String(key)
 }
 
 func (s *sqliteStore) listStmt(orgID, projectID uuid.UUID) sqlite.SelectStatement {

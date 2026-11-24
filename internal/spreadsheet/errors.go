@@ -214,3 +214,32 @@ func IsNotWritableError(err error) bool {
 	_, ok := errors.AsType[*NotWritableError](err)
 	return ok
 }
+
+// ProvisionInvalidError reports a Provision request field that breaks its rules.
+type ProvisionInvalidError struct {
+	Field  string
+	Reason string
+}
+
+func (e *ProvisionInvalidError) Error() string {
+	return "spreadsheet: provision: " + e.Field + ": " + e.Reason
+}
+
+// ToAppError converts the typed error into the wire envelope.
+func (e *ProvisionInvalidError) ToAppError() *apperror.AppError {
+	return apperror.New(
+		apperror.CodeSpreadsheetProvisionInvalid,
+		"Invalid provision request: "+e.Field+": "+e.Reason,
+		codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{
+			Code: apperror.CodeSpreadsheetProvisionInvalid,
+			Meta: map[string]string{"field": e.Field, "reason": e.Reason},
+		},
+	)
+}
+
+// IsProvisionInvalidError reports whether err's chain contains a *ProvisionInvalidError.
+func IsProvisionInvalidError(err error) bool {
+	_, ok := errors.AsType[*ProvisionInvalidError](err)
+	return ok
+}

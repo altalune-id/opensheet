@@ -202,7 +202,7 @@ func TestSpreadsheet_ListTabs_ReturnsGoogleTabTitles(t *testing.T) {
 	}
 }
 
-func TestSpreadsheet_List_CrossOrgProject_ReturnsPermissionDenied(t *testing.T) {
+func TestSpreadsheet_List_CrossOrgProject_ReturnsNotFound(t *testing.T) {
 	h := newOSHarness(t, humanPrincipal(uuid.New()))
 	proj := h.seedProject(uuid.New())
 
@@ -210,8 +210,8 @@ func TestSpreadsheet_List_CrossOrgProject_ReturnsPermissionDenied(t *testing.T) 
 	withBearer(req.Header())
 	if _, err := h.spreadsheetClient().List(t.Context(), req); err == nil {
 		t.Fatal("expected error")
-	} else if got := connectCode(err); got != connect.CodePermissionDenied {
-		t.Errorf("code = %v, want PermissionDenied", got)
+	} else if got := connectCode(err); got != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", got)
 	}
 }
 

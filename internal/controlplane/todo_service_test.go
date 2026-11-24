@@ -68,7 +68,7 @@ func TestTodo_Create_And_List_HappyPath(t *testing.T) {
 	}
 }
 
-func TestTodo_Create_CrossTenantProject_ReturnsPermissionDenied(t *testing.T) {
+func TestTodo_Create_CrossTenantProject_ReturnsNotFound(t *testing.T) {
 	userID := uuid.New()
 	orgA := uuid.New()
 	orgB := uuid.New()
@@ -91,8 +91,8 @@ func TestTodo_Create_CrossTenantProject_ReturnsPermissionDenied(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected permission denied, got nil")
 	}
-	if got := connectCode(err); got != connect.CodePermissionDenied {
-		t.Errorf("code = %v, want PermissionDenied", got)
+	if got := connectCode(err); got != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", got)
 	}
 }
 

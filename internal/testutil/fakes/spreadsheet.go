@@ -39,7 +39,8 @@ func (f *Spreadsheet) Save(ctx context.Context, s *spreadsheet.Spreadsheet) erro
 		if existing.ID == s.ID {
 			continue
 		}
-		if existing.ProjectID == s.ProjectID && existing.GoogleFileID == s.GoogleFileID {
+		sameKey := s.ProvisionKey != "" && existing.ProvisionKey == s.ProvisionKey
+		if existing.ProjectID == s.ProjectID && (existing.GoogleFileID == s.GoogleFileID || sameKey) {
 			return &spreadsheet.AlreadyExistsError{
 				ProjectID:    s.ProjectID.String(),
 				GoogleFileID: s.GoogleFileID,
@@ -78,6 +79,19 @@ func (f *Spreadsheet) ByGoogleFileID(ctx context.Context, orgID, projectID uuid.
 		}
 	}
 	return nil, &spreadsheet.NotFoundError{ProjectID: projectID.String(), GoogleFileID: fileID}
+}
+
+// ByProvisionKey implements spreadsheet.Store.
+func (f *Spreadsheet) ByProvisionKey(_ context.Context, orgID, projectID uuid.UUID, key string) (*spreadsheet.Spreadsheet, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.data {
+		if s.OrgID == orgID && s.ProjectID == projectID && key != "" && s.ProvisionKey == key {
+			cp := *s
+			return &cp, nil
+		}
+	}
+	return nil, &spreadsheet.NotFoundError{ProjectID: projectID.String()}
 }
 
 func (f *Spreadsheet) List(ctx context.Context, orgID, projectID uuid.UUID) ([]*spreadsheet.Spreadsheet, error) {

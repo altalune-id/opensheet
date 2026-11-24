@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	projectv1 "altalune.id/opensheet/gen/go/project/v1"
+	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/project"
 )
@@ -36,6 +37,10 @@ func newDiscoveryFixture(t *testing.T) *discoveryFixture {
 
 	p := session.Principal{UserID: uuid.New(), Email: "agent@example.com", ActiveOrgID: orgID, ActiveProjectID: own.ID}
 	h := newHarness(t, p)
+	o, err := org.NewOrg("discovery-org", "Discovery Org", p.UserID)
+	require.NoError(t, err)
+	o.ID = orgID
+	require.NoError(t, h.orgs.Save(ctx, o))
 
 	f := &discoveryFixture{
 		h: h, orgID: orgID, foreignOrgID: foreignOrgID,

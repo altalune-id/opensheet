@@ -135,3 +135,27 @@ func TestInterceptorSkipsScopeCheckForSessionPrincipal(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckScope(t *testing.T) {
+	tests := []struct {
+		name string
+		p    session.Principal
+		ok   bool
+	}{
+		{"session skips", session.Principal{Source: session.SourceOIDC}, true},
+		{"token with scope", session.Principal{Source: session.SourceToken, Scopes: []string{"a:write"}}, true},
+		{"token without scope", session.Principal{Source: session.SourceToken, Scopes: []string{"a:read"}}, false},
+		{"key without scope", session.Principal{Source: session.SourceAPIKey}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := authn.CheckScope(tt.p, "a:write")
+			if tt.ok != (err == nil) {
+				t.Fatalf("err = %v, want ok=%v", err, tt.ok)
+			}
+			if err != nil && !authn.IsInsufficientScopeError(err) {
+				t.Errorf("err = %T, want an InsufficientScopeError", err)
+			}
+		})
+	}
+}

@@ -37,6 +37,7 @@ type pgSpreadsheetRow struct {
 	Writable     bool      `alias:"spreadsheets.writable"`
 	CreatedAt    time.Time `alias:"spreadsheets.created_at"`
 	UpdatedAt    time.Time `alias:"spreadsheets.updated_at"`
+	ProvisionKey *string   `alias:"spreadsheets.provision_key"`
 }
 
 func (r *pgSpreadsheetRow) toSpreadsheet() *Spreadsheet {
@@ -50,7 +51,15 @@ func (r *pgSpreadsheetRow) toSpreadsheet() *Spreadsheet {
 		Writable:     r.Writable,
 		CreatedAt:    r.CreatedAt.UTC(),
 		UpdatedAt:    r.UpdatedAt.UTC(),
+		ProvisionKey: derefKey(r.ProvisionKey),
 	}
+}
+
+func derefKey(k *string) string {
+	if k == nil {
+		return ""
+	}
+	return *k
 }
 
 // NOTE: the spreadsheets row carries no created_by, so the resolved tenant.Context stays inside this helper.
