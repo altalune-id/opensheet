@@ -1004,6 +1004,10 @@ video {
           user-select: all;
 }
 
+.list-disc {
+  list-style-type: disc;
+}
+
 .grid-cols-1 {
   grid-template-columns: repeat(1, minmax(0, 1fr));
 }
@@ -1495,6 +1499,10 @@ video {
   padding-right: 0.75rem;
 }
 
+.ps-5 {
+  padding-inline-start: 1.25rem;
+}
+
 .pt-1 {
   padding-top: 0.25rem;
 }
@@ -1600,6 +1608,10 @@ video {
 .text-amber-900 {
   --tw-text-opacity: 1;
   color: rgb(120 53 15 / var(--tw-text-opacity, 1));
+}
+
+.text-amber-900\/70 {
+  color: rgb(120 53 15 / 0.7);
 }
 
 .text-blue-700 {
@@ -2098,6 +2110,10 @@ video {
 .dark\:text-amber-200:is(.dark *) {
   --tw-text-opacity: 1;
   color: rgb(253 230 138 / var(--tw-text-opacity, 1));
+}
+
+.dark\:text-amber-200\/70:is(.dark *) {
+  color: rgb(253 230 138 / 0.7);
 }
 
 .dark\:text-amber-300:is(.dark *) {
