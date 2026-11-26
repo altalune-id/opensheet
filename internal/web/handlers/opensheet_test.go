@@ -241,7 +241,7 @@ func (f *sheetsFixture) mux(t *testing.T) *http.ServeMux {
 	mux := http.NewServeMux()
 	handlers.NewCredentialHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	handlers.NewSpreadsheetHandler(f.Deps, f.Projects, f.Sprds, f.Creds).Register(mux)
-	handlers.NewSheetHandler(f.Deps, f.Projects, f.Sheets, f.Sprds, f.Read, f.Fix).Register(mux)
+	handlers.NewSheetHandler(f.Deps, f.Projects, f.Sheets, f.Sprds, f.Creds, f.Read, f.Fix).Register(mux)
 	handlers.NewGoogleConnectHandler(f.Deps, f.Projects, f.Creds, f.Connect).Register(mux)
 	return mux
 }
@@ -612,7 +612,7 @@ func TestSpreadsheetHandler_RegisterAndEdit(t *testing.T) {
 		"google_file_id": {"https://docs.google.com/spreadsheets/d/" + testFileID + "/edit#gid=0"},
 		"title":          {"Q1 Report"},
 	}
-	rec := f.do(t, http.MethodPost, f.path("/spreadsheets"), form.Encode())
+	rec := f.doHTMX(t, http.MethodPost, f.path("/spreadsheets"), form.Encode())
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "Q1 Report", "a pasted Drive URL must register as its file id")
 
@@ -692,7 +692,7 @@ func TestOpensheetHandlers_FragmentLinksStayProjectScoped(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := f.do(t, tc.method, f.path(tc.target), tc.body)
+			rec := f.doHTMX(t, tc.method, f.path(tc.target), tc.body)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			assert.Contains(t, rec.Body.String(), f.path(tc.target),
 				"the swapped fragment must keep links under the project")
@@ -726,7 +726,11 @@ func TestOpensheetHandlers_HtmxAndScriptsCarryTheRequestNonce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			csp := middleware.CSP(middleware.CSPOptions{Enabled: true})(f.mux(t))
-			csp.ServeHTTP(rec, f.authedRequest(t, tc.method, tc.target, tc.body, f.Principal))
+			req := f.authedRequest(t, tc.method, tc.target, tc.body, f.Principal)
+			if strings.Contains(tc.name, "fragment") {
+				req.Header.Set("HX-Request", "true")
+			}
+			csp.ServeHTTP(rec, req)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			nonce := regexp.MustCompile(`'nonce-([^']+)'`).FindStringSubmatch(rec.Header().Get("Content-Security-Policy"))
 			require.Len(t, nonce, 2)
@@ -753,7 +757,7 @@ func TestSpreadsheetHandler_RegisterWithABadFileIDRendersInline(t *testing.T) {
 	c := f.seedCredential(t, credential.KindServiceAccount, "Prod")
 	form := url.Values{"credential_id": {c.ID.String()}, "google_file_id": {"not a file id!"}}
 
-	rec := f.do(t, http.MethodPost, f.path("/spreadsheets"), form.Encode())
+	rec := f.doHTMX(t, http.MethodPost, f.path("/spreadsheets"), form.Encode())
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `data-error="spreadsheets"`)
 }
@@ -786,16 +790,27 @@ func TestSpreadsheetHandler_Delete(t *testing.T) {
 func TestSpreadsheetHandler_PickerLinkFollowsTheCapability(t *testing.T) {
 	t.Parallel()
 	on := newSheetsFixture(t)
-	on.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	active := on.seedCredential(t, credential.KindGoogleOAuth, "Connected")
+	stale := on.seedCredential(t, credential.KindGoogleOAuth, "Stale")
+	_, err := on.Creds.MarkReauthNeeded(on.ctx(), stale.ID)
+	require.NoError(t, err)
+	sa := on.seedCredential(t, credential.KindServiceAccount, "Prod")
 	rec := on.do(t, http.MethodGet, on.path("/spreadsheets"), "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "/credentials/google/picker")
+	form := regexp.MustCompile(`(?s)<form[^>]*data-pick-form[^>]*>.*?</form>`).FindString(rec.Body.String())
+	require.NotEmpty(t, form, "the pick form must render beside the register form")
+	assert.Contains(t, form, `method="get"`)
+	assert.Contains(t, form, `action="`+on.path("/spreadsheets/pick")+`"`)
+	assert.Contains(t, form, `value="`+active.ID.String()+`"`)
+	assert.NotContains(t, form, stale.ID.String(), "a credential that needs reconnecting cannot open the Picker")
+	assert.NotContains(t, form, sa.ID.String(), "a service account cannot open the Picker")
 
 	off := newSheetsFixture(t, func(c *capabilities.Capabilities) { c.GooglePicker = false })
 	off.seedCredential(t, credential.KindGoogleOAuth, "Connected")
 	rec = off.do(t, http.MethodGet, off.path("/spreadsheets"), "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.NotContains(t, rec.Body.String(), "/credentials/google/picker")
+	assert.NotContains(t, rec.Body.String(), "data-pick-form")
+	assert.NotContains(t, rec.Body.String(), "/spreadsheets/pick")
 }
 
 func TestSheetHandler_CreateKeyVisibility(t *testing.T) {
@@ -1044,12 +1059,12 @@ func TestGoogleConnectHandler_CallbackStoresTheGrantAndReturnsWhereItStarted(t *
 		url.QueryEscape(strings.Join(gworkspace.Scopes(), " ")) + "&state=" + url.QueryEscape(state)
 	rec := f.do(t, http.MethodGet, target, "")
 	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	assert.Equal(t, f.path("/credentials"), rec.Header().Get("Location"))
 
 	items, err := f.Creds.List(f.ctx())
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	assert.Equal(t, credential.KindGoogleOAuth, items[0].Kind)
+	assert.Equal(t, f.path("/credentials")+"?connected="+items[0].ID.String(), rec.Header().Get("Location"))
 }
 
 func TestGoogleConnectHandler_CallbackRejectsATamperedState(t *testing.T) {
@@ -1151,12 +1166,15 @@ func TestSpreadsheetHandler_TabsFailureCarriesTheErrorCode(t *testing.T) {
 	sp := f.seedSpreadsheet(t, c.ID)
 	f.Google.hideDocument()
 
-	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/tabs"), "")
+	rec := f.doEN(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/tabs"), "", false)
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, `data-error="tabs"`)
 	assert.Contains(t, body, apperror.CodeGoogleNotFound,
 		"a user reporting this banner must be able to quote a code that maps to the log line")
+	assert.Contains(t, body, `data-no-access="google_oauth"`)
+	assert.Contains(t, text(rec), "OpenSheet lost access to this file")
+	assert.Contains(t, text(rec), `href="`+f.pickRoute(c.ID)+`"`)
 }
 
 func TestSheetHandler_BulkTabsUnavailableCarriesTheErrorCode(t *testing.T) {
@@ -1166,11 +1184,14 @@ func TestSheetHandler_BulkTabsUnavailableCarriesTheErrorCode(t *testing.T) {
 	sp := f.seedSpreadsheet(t, c.ID)
 	f.Google.hideDocument()
 
-	rec := f.do(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "")
+	rec := f.doEN(t, http.MethodGet, f.path("/spreadsheets/"+sp.ID.String()+"/publish"), "", false)
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, `data-notice="bulk-tabs-unavailable"`)
 	assert.Contains(t, body, apperror.CodeGoogleNotFound)
+	assert.Contains(t, body, `data-no-access="google_oauth"`)
+	assert.Contains(t, text(rec), "Pick it again in Google Drive")
+	assert.Contains(t, text(rec), `href="`+f.pickRoute(c.ID)+`"`)
 }
 
 func TestSheetHandler_PreviewFailureCarriesTheErrorCode(t *testing.T) {

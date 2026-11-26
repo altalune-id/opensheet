@@ -37,14 +37,15 @@ type SheetHandler struct {
 	Deps
 	Sheets       *sheet.Service
 	Spreadsheets *spreadsheet.Service
+	Credentials  *credential.Service
 	Read         *sheet.ReadWorkflow
 	Fix          *sheet.FixWorkflow
 }
 
 // NewSheetHandler wires the handler.
-func NewSheetHandler(d Deps, projects *project.Service, sheets *sheet.Service, spreadsheets *spreadsheet.Service, read *sheet.ReadWorkflow, fix *sheet.FixWorkflow) *SheetHandler {
+func NewSheetHandler(d Deps, projects *project.Service, sheets *sheet.Service, spreadsheets *spreadsheet.Service, credentials *credential.Service, read *sheet.ReadWorkflow, fix *sheet.FixWorkflow) *SheetHandler {
 	d.Projects = projects
-	return &SheetHandler{Deps: d, Sheets: sheets, Spreadsheets: spreadsheets, Read: read, Fix: fix}
+	return &SheetHandler{Deps: d, Sheets: sheets, Spreadsheets: spreadsheets, Credentials: credentials, Read: read, Fix: fix}
 }
 
 // GetList renders the published sheets.
@@ -301,6 +302,7 @@ func (h *SheetHandler) bulkPanel(sc ProjectScope, sp *spreadsheet.Spreadsheet) t
 	if err != nil {
 		h.LogErr("web sheet: bulk list tabs", err)
 		view.Unavailable, view.UnavailableCode = tabsMessage(err), ErrorRef(err)
+		view.NoAccess = noAccessFor(sc, h.Credentials, h.Cfg.HTTP.BasePath, sp.CredentialID, err)
 		return view
 	}
 	published := h.publishedTabs(sc, sp.ID)

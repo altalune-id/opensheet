@@ -237,8 +237,13 @@ func googleFactory(t *testing.T) gsheet.Factory {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, valuesBody)
 	})
-	mux.HandleFunc("/v4/spreadsheets/{file}", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v4/spreadsheets/{file}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.PathValue("file") == hiddenFileID {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":404}}`)
+			return
+		}
 		_, _ = io.WriteString(w, tabsBody)
 	})
 	srv := httptest.NewServer(mux)
