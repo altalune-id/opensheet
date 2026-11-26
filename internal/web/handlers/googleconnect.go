@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
@@ -128,12 +130,24 @@ func (h *GoogleConnectHandler) GetCallback(w http.ResponseWriter, r *http.Reques
 			"opensheet needs the Google Drive file permission to read the sheets you pick. Connect again and leave that permission ticked.")
 		return
 	}
-	if _, err := h.Connect.Complete(r.Context(), q.Get("code"), state, p.UserID); err != nil {
+	c, err := h.Connect.Complete(r.Context(), q.Get("code"), state, p.UserID)
+	if err != nil {
 		h.LogErr("web google connect: complete", err)
 		h.ErrorPage(w, r, connectStatus(err), "Connect failed", connectMessage(err), err)
 		return
 	}
-	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, target.ReturnTo), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	http.Redirect(w, r, withConnected(ResolveReturnTo(h.Cfg.HTTP.BasePath, target.ReturnTo), c.ID), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+}
+
+func withConnected(dest string, credID uuid.UUID) string {
+	u, err := url.Parse(dest)
+	if err != nil {
+		return dest
+	}
+	q := u.Query()
+	q.Set("connected", credID.String())
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // SECURITY: a connect may only land in a project of an org the signed-in user still belongs to, the same gate RequireProject applies when the connect starts.
@@ -171,19 +185,21 @@ func (h *GoogleConnectHandler) GetPicker(w http.ResponseWriter, r *http.Request)
 		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad picker link", "Open the Picker from the spreadsheets page.")
 		return
 	}
-	token, ok := h.browserToken(w, sc, credID)
+	c, token, ok := h.browserToken(w, sc, credID)
 	if !ok {
 		return
 	}
 	widenCSP(w.Header(), googlePickerCSP())
+	w.Header().Set("Cache-Control", "no-store")
 	Render(w, sc.req, templates.GooglePickerLayout(
 		h.LayoutForProject(sc.req, "Pick a spreadsheet · "+sc.project.Name, sc.org.Slug, sc.project, "spreadsheets"),
 		templates.GooglePickerView{
-			ProjectSlug: sc.project.Slug,
-			APIKey:      h.Cfg.Google.Picker.APIKey,
-			AppID:       gworkspace.ProjectNumber(h.Cfg.Google.OAuth.ClientID),
-			AccessToken: token,
-			ReturnURL:   web.Path(h.Cfg.HTTP.BasePath, projectPath(sc.org.Slug, sc.project.Slug, "/spreadsheets")),
+			ProjectSlug:  sc.project.Slug,
+			APIKey:       h.Cfg.Google.Picker.APIKey,
+			AppID:        gworkspace.ProjectNumber(h.Cfg.Google.OAuth.ClientID),
+			AccessToken:  token,
+			Email:        c.GoogleAccountEmail,
+			CredentialID: c.ID.String(),
 		},
 	))
 }
@@ -195,31 +211,45 @@ func (h *GoogleConnectHandler) Register(mux web.Mux) {
 }
 
 // SECURITY: only a google_oauth grant is eligible — a service-account token would let the browser act as the service account.
-func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc ProjectScope, credID uuid.UUID) (string, bool) {
+func (h *GoogleConnectHandler) browserToken(w http.ResponseWriter, sc ProjectScope, credID uuid.UUID) (*credential.Credential, string, bool) {
 	c, err := h.Credentials.ByID(sc.req.Context(), credID)
 	if err != nil {
 		h.ErrorPage(w, sc.req, http.StatusNotFound, "Credential not found", "That credential no longer exists in this project.", err)
-		return "", false
+		return nil, "", false
 	}
 	if c.Kind != credential.KindGoogleOAuth {
 		h.ErrorPage(w, sc.req, http.StatusConflict, "Not a Google account",
 			"The Picker needs a connected Google account. A service-account credential cannot open it.")
-		return "", false
+		return nil, "", false
+	}
+	if !h.refuseNonConnector(w, sc, c) {
+		return nil, "", false
 	}
 	ts, err := h.Credentials.TokenSourceFor(sc.req.Context(), credID, driveFileScope)
 	if err != nil {
 		h.LogErr("web google picker: token source", err)
 		h.ErrorPage(w, sc.req, http.StatusBadGateway, "Google is unreachable", connectMessage(err), err)
-		return "", false
+		return nil, "", false
 	}
 	token, err := ts.Token()
 	if err != nil {
 		h.LogErr("web google picker: token", err)
 		h.ErrorPage(w, sc.req, http.StatusBadGateway, "Google is unreachable",
 			"Could not mint an access token for that Google account. Reconnect it and try again.")
-		return "", false
+		return nil, "", false
 	}
-	return token.AccessToken, true
+	return c, token.AccessToken, true
+}
+
+//i18n:use picker.not_connector
+
+// SECURITY: a Google grant is personal, so only the member who connected it may browse its Drive through the Picker, owners included.
+func (d Deps) refuseNonConnector(w http.ResponseWriter, sc ProjectScope, c *credential.Credential) bool {
+	if c.AuthorizedByUserID == sc.principal.UserID {
+		return true
+	}
+	d.ErrorPage(w, sc.req, http.StatusForbidden, "Not your Google account", i18n.TranslatorFrom(sc.req.Context()).T("picker.not_connector"))
+	return false
 }
 
 // NOTE: an absent granted-scopes parameter is not a refusal, so a change in Google's response shape cannot become a total connect outage.

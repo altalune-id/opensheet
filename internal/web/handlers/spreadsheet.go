@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -48,7 +49,7 @@ func (h *SpreadsheetHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	))
 }
 
-// PostCreate registers a Google document and returns the refreshed section.
+// PostCreate registers a Google document; an htmx post gets the refreshed section, a plain post lands on the new document.
 func (h *SpreadsheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	sc, ok := h.RequireProject(w, r)
 	if !ok {
@@ -63,20 +64,102 @@ func (h *SpreadsheetHandler) PostCreate(w http.ResponseWriter, r *http.Request) 
 	title := strings.TrimSpace(form.Get("title"))
 	credID, err := uuid.Parse(strings.TrimSpace(form.Get("credential_id")))
 	if err != nil {
-		h.writeSection(w, sc, templates.SpreadsheetsView{
+		h.createFailed(w, sc, templates.SpreadsheetsView{
 			GoogleFileID: fileID, Title: title, Error: "Choose a credential to read this document with.",
 		})
 		return
 	}
-	if _, err := h.Spreadsheets.Register(sc.req.Context(), credID, fileID, title); err != nil {
+	sp, err := h.Spreadsheets.Register(sc.req.Context(), credID, fileID, title)
+	if err != nil {
+		if existing, ok := h.registeredByPick(sc, fileID, err); ok {
+			suffix := "/spreadsheets/" + existing.ID.String()
+			if existing.CredentialID == credID {
+				suffix += "?restored=1"
+			}
+			h.redirect(w, sc, suffix)
+			return
+		}
 		h.LogErr("web spreadsheet: register", err)
-		h.writeSection(w, sc, templates.SpreadsheetsView{
+		h.createFailed(w, sc, templates.SpreadsheetsView{
 			CredentialID: credID.String(), GoogleFileID: fileID, Title: title,
 			Error: registerMessage(err), ErrorCode: ErrorRef(err),
+			NoAccess: noAccessFor(sc, h.Credentials, h.Cfg.HTTP.BasePath, credID, err),
 		})
 		return
 	}
+	if !web.IsHTMXRequest(sc.req) {
+		h.redirect(w, sc, "/spreadsheets/"+sp.ID.String()+"?added=1")
+		return
+	}
 	h.writeSection(w, sc, templates.SpreadsheetsView{})
+}
+
+func (h *SpreadsheetHandler) registeredByPick(sc ProjectScope, fileID string, err error) (*spreadsheet.Spreadsheet, bool) {
+	if web.IsHTMXRequest(sc.req) || !spreadsheet.IsAlreadyExistsError(err) {
+		return nil, false
+	}
+	existing, lookupErr := h.Spreadsheets.ByGoogleFileID(sc.req.Context(), fileID)
+	if lookupErr != nil {
+		h.LogErr("web spreadsheet: registered lookup", lookupErr)
+		return nil, false
+	}
+	return existing, true
+}
+
+func (h *SpreadsheetHandler) createFailed(w http.ResponseWriter, sc ProjectScope, view templates.SpreadsheetsView) {
+	if web.IsHTMXRequest(sc.req) {
+		h.writeSection(w, sc, view)
+		return
+	}
+	filled, ok := h.fill(w, sc, view)
+	if !ok {
+		return
+	}
+	Render(w, sc.req, templates.SpreadsheetsLayout(
+		h.LayoutForProject(sc.req, "Spreadsheets · "+sc.project.Name, sc.org.Slug, sc.project, "spreadsheets"),
+		filled,
+	))
+}
+
+// GetPick opens the Google Picker as the chosen Google account.
+func (h *SpreadsheetHandler) GetPick(w http.ResponseWriter, r *http.Request) {
+	if !h.Caps.GooglePicker {
+		h.ErrorPage(w, r, http.StatusNotFound, "Not available", "This deployment has no Google Picker API key configured.")
+		return
+	}
+	sc, ok := h.RequireProject(w, r)
+	if !ok {
+		return
+	}
+	credID, err := uuid.Parse(strings.TrimSpace(sc.req.URL.Query().Get("credential_id")))
+	if err != nil {
+		h.ErrorPage(w, sc.req, http.StatusBadRequest, "Bad picker link", "Open the Picker from the spreadsheets page.")
+		return
+	}
+	c, err := h.Credentials.ByID(sc.req.Context(), credID)
+	if err != nil {
+		if credential.IsNotFoundError(err) {
+			h.ErrorPage(w, sc.req, http.StatusNotFound, "Credential not found", "That credential no longer exists in this project.")
+			return
+		}
+		h.LogErr("web spreadsheet: pick credential", err)
+		h.ErrorPage(w, sc.req, http.StatusInternalServerError, "Lookup failed", "Could not load that credential.", err)
+		return
+	}
+	if c.Kind != credential.KindGoogleOAuth {
+		h.ErrorPage(w, sc.req, http.StatusConflict, "Not a Google account",
+			"The Picker needs a connected Google account. A service-account credential cannot open it.")
+		return
+	}
+	if c.Status == credential.StatusReauthNeeded {
+		h.ErrorPage(w, sc.req, http.StatusConflict, "Reconnect needed", connectMessage(&credential.ReauthNeededError{ID: c.ID.String()}))
+		return
+	}
+	if !h.refuseNonConnector(w, sc, c) {
+		return
+	}
+	state := PickerStateFor(h.Key(web.PurposeGooglePicker), sc.org.Slug, sc.project.Slug, c.ID)
+	http.Redirect(w, sc.req, web.Path(h.Cfg.HTTP.BasePath, googlePickerPath)+"?state="+url.QueryEscape(state), http.StatusSeeOther)
 }
 
 // GetShow renders one registered spreadsheet.
@@ -85,7 +168,8 @@ func (h *SpreadsheetHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, ok := h.detail(w, sc, sp, templates.SpreadsheetView{})
+	q := sc.req.URL.Query()
+	view, ok := h.detail(w, sc, sp, templates.SpreadsheetView{Added: q.Has("added"), Restored: q.Has("restored")})
 	if !ok {
 		return
 	}
@@ -150,16 +234,18 @@ func (h *SpreadsheetHandler) GetTabs(w http.ResponseWriter, r *http.Request) {
 	tabs, err := h.Spreadsheets.ListTabs(sc.req.Context(), sp.ID)
 	if err != nil {
 		h.LogErr("web spreadsheet: list tabs", err)
-		Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), nil, tabsMessage(err), ErrorRef(err)))
+		Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), nil, tabsMessage(err), ErrorRef(err),
+			noAccessFor(sc, h.Credentials, h.Cfg.HTTP.BasePath, sp.CredentialID, err)))
 		return
 	}
-	Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), tabs, "", ""))
+	Render(w, sc.req, templates.SpreadsheetTabs(h.ProjectFragmentBase(sc), tabs, "", "", nil))
 }
 
 // Register wires the spreadsheet routes onto mux.
 func (h *SpreadsheetHandler) Register(mux web.Mux) {
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets", h.GetList)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets", h.PostCreate)
+	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/pick", h.GetPick)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}", h.GetShow)
 	mux.HandleFunc("POST /orgs/{org}/projects/{project}/spreadsheets/{id}", h.PostUpdate)
 	mux.HandleFunc("GET /orgs/{org}/projects/{project}/spreadsheets/{id}/tabs", h.GetTabs)
@@ -214,7 +300,9 @@ func (h *SpreadsheetHandler) fill(w http.ResponseWriter, sc ProjectScope, view t
 	names := credentialNames(creds)
 	view.ProjectSlug = sc.project.Slug
 	view.Credentials = credentialSelect(creds)
-	view.PickerURL = h.pickerURL(sc, creds)
+	if h.Caps.GooglePicker {
+		view.PickCredentials = pickableCredentials(creds, sc.principal.UserID)
+	}
 	view.Rows = make([]templates.SpreadsheetRow, 0, len(items))
 	for _, sp := range items {
 		view.Rows = append(view.Rows, templates.SpreadsheetRow{
@@ -264,18 +352,34 @@ func (h *SpreadsheetHandler) credentialOptions(w http.ResponseWriter, sc Project
 	return creds, true
 }
 
-func (h *SpreadsheetHandler) pickerURL(sc ProjectScope, creds []*credential.Credential) string {
-	if !h.Caps.GooglePicker {
-		return ""
-	}
+func pickableCredentials(creds []*credential.Credential, userID uuid.UUID) []templates.OptionRow {
+	out := make([]templates.OptionRow, 0, len(creds))
 	for _, c := range creds {
-		if c.Kind != credential.KindGoogleOAuth {
+		if c.Kind != credential.KindGoogleOAuth || c.Status != credential.StatusActive || c.AuthorizedByUserID != userID {
 			continue
 		}
-		state := PickerStateFor(h.Key(web.PurposeGooglePicker), sc.org.Slug, sc.project.Slug, c.ID)
-		return web.Path(h.Cfg.HTTP.BasePath, googlePickerPath) + "?state=" + url.QueryEscape(state)
+		label := c.Name
+		if c.GoogleAccountEmail != "" {
+			label += " (" + c.GoogleAccountEmail + ")"
+		}
+		out = append(out, templates.OptionRow{Value: c.ID.String(), Label: label})
 	}
-	return ""
+	return out
+}
+
+func noAccessFor(sc ProjectScope, creds *credential.Service, basePath string, credID uuid.UUID, err error) *templates.NoAccessView {
+	if code := ErrorRef(err); code != apperror.CodeGoogleNotFound && code != apperror.CodeGooglePermissionDenied {
+		return nil
+	}
+	c, lookupErr := creds.ByID(sc.req.Context(), credID)
+	if lookupErr != nil {
+		return nil
+	}
+	if c.Kind != credential.KindGoogleOAuth || c.AuthorizedByUserID != sc.principal.UserID {
+		return &templates.NoAccessView{Kind: string(c.Kind), Email: c.GoogleAccountEmail}
+	}
+	pick := web.Path(basePath, projectPath(sc.org.Slug, sc.project.Slug, "/spreadsheets/pick")) + "?credential_id=" + c.ID.String()
+	return &templates.NoAccessView{Kind: string(c.Kind), Email: c.GoogleAccountEmail, PickURL: pick}
 }
 
 func credentialSelect(creds []*credential.Credential) []templates.OptionRow {

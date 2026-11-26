@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/project"
@@ -35,7 +37,7 @@ func (h *CredentialHandler) GetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.remember(sc)
-	view, ok := h.view(w, sc)
+	view, ok := h.fill(w, sc, templates.CredentialsView{ConnectedEmail: h.connectedEmail(sc)})
 	if !ok {
 		return
 	}
@@ -119,8 +121,17 @@ func (h *CredentialHandler) writeSection(w http.ResponseWriter, sc ProjectScope,
 	Render(w, sc.req, templates.CredentialSection(h.ProjectFragmentBase(sc), filled))
 }
 
-func (h *CredentialHandler) view(w http.ResponseWriter, sc ProjectScope) (templates.CredentialsView, bool) {
-	return h.fill(w, sc, templates.CredentialsView{})
+// SECURITY: the id comes from the query string, so it is resolved in the project scope and anything else shows nothing.
+func (h *CredentialHandler) connectedEmail(sc ProjectScope) string {
+	id, err := uuid.Parse(sc.req.URL.Query().Get("connected"))
+	if err != nil {
+		return ""
+	}
+	c, err := h.Credentials.ByID(sc.req.Context(), id)
+	if err != nil || c.Kind != credential.KindGoogleOAuth {
+		return ""
+	}
+	return c.GoogleAccountEmail
 }
 
 func (h *CredentialHandler) fill(w http.ResponseWriter, sc ProjectScope, view templates.CredentialsView) (templates.CredentialsView, bool) {

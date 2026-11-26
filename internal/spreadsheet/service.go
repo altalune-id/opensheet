@@ -56,7 +56,7 @@ func NewService(
 	}
 }
 
-// Register records a Google document in the caller's project, bound to one credential.
+// Register records a Google document in the caller's project, bound to one credential, once the credential can read it.
 func (s *Service) Register(ctx context.Context, credentialID uuid.UUID, googleFileID, title string) (*Spreadsheet, error) {
 	ctx, span := tracer.Start(ctx, "spreadsheet.Register")
 	defer span.End()
@@ -72,6 +72,10 @@ func (s *Service) Register(ctx context.Context, credentialID uuid.UUID, googleFi
 
 	sp, err := New(tc.OrgID, tc.ProjectID, credentialID, googleFileID, title)
 	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	if _, err := s.tabs(ctx, sp, "spreadsheet.Register"); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
@@ -251,23 +255,28 @@ func (s *Service) ListTabs(ctx context.Context, id uuid.UUID) ([]string, error) 
 		span.RecordError(err)
 		return nil, err
 	}
-
-	ts, err := s.tokens.TokenSourceFor(ctx, sp.CredentialID)
+	tabs, err := s.tabs(ctx, sp, "spreadsheet.ListTabs")
 	if err != nil {
 		span.RecordError(err)
-		return nil, s.translate(ctx, "spreadsheet.ListTabs: token source", err, sp)
+		return nil, err
+	}
+	span.SetAttributes(attribute.Int("spreadsheet.tabs", len(tabs)))
+	return tabs, nil
+}
+
+func (s *Service) tabs(ctx context.Context, sp *Spreadsheet, op string) ([]string, error) {
+	ts, err := s.tokens.TokenSourceFor(ctx, sp.CredentialID)
+	if err != nil {
+		return nil, s.translate(ctx, op+": token source", err, sp)
 	}
 	client, err := s.clients(ctx, ts)
 	if err != nil {
-		span.RecordError(err)
-		return nil, s.translate(ctx, "spreadsheet.ListTabs: build client", err, sp)
+		return nil, s.translate(ctx, op+": build client", err, sp)
 	}
 	tabs, err := client.Tabs(ctx, sp.GoogleFileID)
 	if err != nil {
-		span.RecordError(err)
-		return nil, s.translate(ctx, "spreadsheet.ListTabs: tabs", gwerr.AppError(err), sp)
+		return nil, s.translate(ctx, op+": tabs", gwerr.AppError(err), sp)
 	}
-	span.SetAttributes(attribute.Int("spreadsheet.tabs", len(tabs)))
 	return tabs, nil
 }
 

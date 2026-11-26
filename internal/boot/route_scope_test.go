@@ -64,6 +64,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, pbase + "/overview", nil},
 		{http.MethodGet, pbase + "/credentials", nil},
 		{http.MethodGet, pbase + "/spreadsheets", nil},
+		{http.MethodGet, pbase + "/spreadsheets/pick", nil},
 		{http.MethodGet, pbase + "/spreadsheets/" + id, nil},
 		{http.MethodGet, pbase + "/spreadsheets/" + id + "/tabs", nil},
 		{http.MethodGet, pbase + "/spreadsheets/" + id + "/publish", nil},

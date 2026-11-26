@@ -11,7 +11,10 @@ import (
 	"altalune.id/opensheet/internal/spreadsheet"
 )
 
-const googleFileID = "1AbC-_dEf"
+const (
+	googleFileID = "1AbC-_dEf"
+	hiddenFileID = "1HiddenFromThisCredential"
+)
 
 func (h *osHarness) seedSpreadsheet(orgID, projectID uuid.UUID) *spreadsheet.Spreadsheet {
 	h.t.Helper()
@@ -240,6 +243,34 @@ func TestSpreadsheet_Create_APIKeyPrincipal_Succeeds(t *testing.T) {
 	withBearer(req.Header())
 	if _, err := h.spreadsheetClient().Create(t.Context(), req); err != nil {
 		t.Fatalf("Create with an api-key principal: %v", err)
+	}
+}
+
+func TestSpreadsheet_Create_FileGoogleHides_IsRefusedAndSavesNothing(t *testing.T) {
+	orgID := uuid.New()
+	h := newOSHarness(t, humanPrincipal(orgID))
+	proj := h.seedProject(orgID)
+
+	req := connect.NewRequest(&spreadsheetv1.CreateRequest{
+		ProjectId:    proj.ID.String(),
+		CredentialId: uuid.New().String(),
+		GoogleFileId: hiddenFileID,
+		Title:        "Hidden",
+	})
+	withBearer(req.Header())
+	_, err := h.spreadsheetClient().Create(t.Context(), req)
+	if err == nil {
+		t.Fatal("Create for a file Google hides must be refused")
+	}
+	if got := connectCode(err); got != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", got)
+	}
+	rows, listErr := h.sprds.List(t.Context(), orgID, proj.ID)
+	if listErr != nil {
+		t.Fatalf("list: %v", listErr)
+	}
+	if len(rows) != 0 {
+		t.Errorf("a refused Create must save no row, got %d", len(rows))
 	}
 }
 

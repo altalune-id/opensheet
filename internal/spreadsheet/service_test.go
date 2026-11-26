@@ -112,9 +112,11 @@ func newWriteSvc(t *testing.T, store spreadsheet.Store, writeTokens spreadsheet.
 	return newFullSvc(t, store, &fakeTokenSources{}, factoryFor(t, "http://127.0.0.1:1"), writeTokens, writers)
 }
 
+const readableTabsBody = `{"properties":{"title":"Prices"},"sheets":[{"properties":{"title":"Q1"}}]}`
+
 func newStoreSvc(t *testing.T, store spreadsheet.Store) (*spreadsheet.Service, *int) {
 	t.Helper()
-	return newSvc(t, store, &fakeTokenSources{}, factoryFor(t, "http://127.0.0.1:1"))
+	return newSvc(t, store, &fakeTokenSources{}, factoryFor(t, sheetsServer(t, http.StatusOK, readableTabsBody).URL))
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
@@ -219,6 +221,44 @@ func TestService_Register(t *testing.T) {
 			t.Errorf("unexpected() called %d times, want 1", *unex)
 		}
 	})
+}
+
+func TestService_RegisterRefusesAFileGoogleHides(t *testing.T) {
+	store := fakes.NewSpreadsheet()
+	tokens := &fakeTokenSources{}
+	svc, unex := newSvc(t, store, tokens, factoryFor(t, sheetsServer(t, http.StatusNotFound, `{"error":{"code":404}}`).URL))
+	ctx, tc := tenantCtx(t)
+	credID := uuid.New()
+
+	_, err := svc.Register(ctx, credID, goodFileID, "Prices")
+	appErr, ok := apperror.AsAppError(err)
+	if !ok || appErr.Code() != apperror.CodeGoogleNotFound {
+		t.Fatalf("want %s, got %T: %v", apperror.CodeGoogleNotFound, err, err)
+	}
+	if len(tokens.calls) != 1 || tokens.calls[0] != credID {
+		t.Errorf("access must be checked with the chosen credential, token calls = %v", tokens.calls)
+	}
+	if rows, _ := store.List(ctx, tc.OrgID, tc.ProjectID); len(rows) != 0 {
+		t.Errorf("a file Google hides must not be saved, store has %d rows", len(rows))
+	}
+	if *unex != 0 {
+		t.Error("a google refusal is expected, not an incident")
+	}
+}
+
+func TestService_RegisterRefusesAFileGoogleDenies(t *testing.T) {
+	store := fakes.NewSpreadsheet()
+	svc, _ := newSvc(t, store, &fakeTokenSources{}, factoryFor(t, sheetsServer(t, http.StatusForbidden, `{"error":{"code":403}}`).URL))
+	ctx, tc := tenantCtx(t)
+
+	_, err := svc.Register(ctx, uuid.New(), goodFileID, "Prices")
+	appErr, ok := apperror.AsAppError(err)
+	if !ok || appErr.Code() != apperror.CodeGooglePermissionDenied {
+		t.Fatalf("want %s, got %T: %v", apperror.CodeGooglePermissionDenied, err, err)
+	}
+	if rows, _ := store.List(ctx, tc.OrgID, tc.ProjectID); len(rows) != 0 {
+		t.Errorf("a file Google denies must not be saved, store has %d rows", len(rows))
+	}
 }
 
 func TestService_List(t *testing.T) {

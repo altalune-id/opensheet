@@ -1,16 +1,20 @@
 package templates
 
-import "altalune.id/opensheet/internal/web"
+import (
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
 
 type GooglePickerView struct {
-	ProjectSlug string
-	APIKey      string
-	AppID       string
-	AccessToken string
-	ReturnURL   string
+	ProjectSlug  string
+	APIKey       string
+	AppID        string
+	AccessToken  string
+	Email        string
+	CredentialID string
 }
 
-// GooglePickerPage opens Google's file chooser and hands the picked document back to the registry form.
+// GooglePickerPage opens Google's file chooser and registers the picked document in the project.
 // NOTE: setAppId is what records the drive.file grant for the picked document. Without it the Picker still
 // returns a file id, but every later Sheets read of that id fails with 404.
 // https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setappid
@@ -23,49 +27,143 @@ templ GooglePickerPage(d web.LayoutData, v GooglePickerView) {
 			<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } class="text-xs text-muted-foreground hover:text-foreground">{ "← " + d.Tr("nav.spreadsheets") }</a>
 			<h1 class="mt-2 text-2xl font-semibold text-foreground">{ d.Tr("picker.title") }</h1>
 			<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("picker.subtitle") }</p>
+			if v.Email != "" {
+				<p data-picker-account class="mt-1 text-xs text-muted-foreground">{ d.Tr("picker.as_account", "Email", v.Email) }</p>
+			}
 		</header>
 		<div
 			id="opensheet-picker"
 			data-api-key={ v.APIKey }
 			data-app-id={ v.AppID }
 			data-access-token={ v.AccessToken }
-			data-return-url={ v.ReturnURL }
 			class="mt-6 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm"
 		>
-			{ d.Tr("picker.loading") }
+			<p data-picker-state="loading" role="status">{ d.Tr("picker.loading") }</p>
+			<div data-picker-state="registering" role="status" hidden>
+				<p>{ d.Tr("picker.registering") }</p>
+				<p data-picker-title class="mt-1 font-medium text-foreground"></p>
+			</div>
+			<div data-picker-state="cancelled" hidden>
+				<p class="font-medium text-foreground">{ d.Tr("picker.cancelled_title") }</p>
+				<p class="mt-1">{ d.Tr("picker.cancelled_body") }</p>
+				<div class="mt-4 flex flex-wrap items-center gap-3">
+					<button type="button" data-picker-retry class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+						@icons.Icon("file-spreadsheet", "h-4 w-4")
+						<span>{ d.Tr("picker.try_again") }</span>
+					</button>
+					<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("picker.back") }</a>
+				</div>
+			</div>
+			<div data-picker-state="stuck" role="alert" hidden class="text-amber-900 dark:text-amber-200">
+				<p class="font-medium">{ d.Tr("picker.stuck_title") }</p>
+				<p class="mt-1">{ d.Tr("picker.stuck_body") }</p>
+				<div class="mt-4 flex flex-wrap items-center gap-3">
+					<button type="button" data-picker-reload class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+						@icons.Icon("refresh-cw", "h-4 w-4")
+						<span>{ d.Tr("picker.reload") }</span>
+					</button>
+					<a href={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } class="text-sm text-muted-foreground hover:text-foreground">{ d.Tr("picker.back") }</a>
+				</div>
+			</div>
 		</div>
+		<form method="post" action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets")) } data-picker-register hidden>
+			<input type="hidden" name="credential_id" value={ v.CredentialID }/>
+			<input type="hidden" name="google_file_id" value=""/>
+			<input type="hidden" name="title" value=""/>
+		</form>
+		<details data-picker-help class="mt-4 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
+			<summary class="cursor-pointer font-medium text-foreground">{ d.Tr("picker.help_toggle") }</summary>
+			<p class="mt-2">{ d.Tr("picker.stuck_body") }</p>
+			<ul class="mt-2 list-disc space-y-1 ps-5">
+				<li>{ d.Tr("picker.stuck_brave") }</li>
+				<li>{ d.Tr("picker.stuck_safari") }</li>
+				<li>{ d.Tr("picker.stuck_chrome") }</li>
+			</ul>
+			<p class="mt-2">{ d.Tr("picker.help_paste") }</p>
+		</details>
 		<noscript>
 			<p class="mt-4 text-sm text-muted-foreground">{ d.Tr("picker.noscript") }</p>
 		</noscript>
 		<script nonce={ d.Nonce }>
-		function opensheetPickerReady() {
+		(function() {
+			var pickerLoadTimeoutMs = 15000;
 			var host = document.getElementById('opensheet-picker');
-			if (!host || !window.gapi) return;
-			gapi.load('picker', function() {
-				var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
-				view.setIncludeFolders(true);
-				var builder = new google.picker.PickerBuilder()
-					.setDeveloperKey(host.getAttribute('data-api-key'))
-					.setOAuthToken(host.getAttribute('data-access-token'))
-					.addView(view);
-				var appId = host.getAttribute('data-app-id');
-				if (appId) builder.setAppId(appId);
-				var picker = builder
-					.setCallback(function(data) {
-						if (data.action !== google.picker.Action.PICKED) return;
-						var doc = data.docs[0];
-						var url = host.getAttribute('data-return-url') +
-							'?google_file_id=' + encodeURIComponent(doc.id) +
-							'&title=' + encodeURIComponent(doc.name || '');
-						window.location.assign(url);
-					})
-					.build();
-				picker.setVisible(true);
+			if (!host) return;
+			var nonce = document.currentScript ? document.currentScript.nonce : '';
+			var picker = null, loadedOnce = false, timer = null;
+			function show(state) {
+				host.querySelectorAll('[data-picker-state]').forEach(function(el) {
+					el.hidden = el.getAttribute('data-picker-state') !== state;
+				});
+			}
+			function showStuck() {
+				clearTimeout(timer);
+				show('stuck');
+				var help = document.querySelector('[data-picker-help]');
+				if (help) help.open = true;
+			}
+			function arm() {
+				clearTimeout(timer);
+				if (!loadedOnce) timer = setTimeout(showStuck, pickerLoadTimeoutMs);
+			}
+			function onAction(data) {
+				var action = google.picker.Action;
+				if (data.action === action.LOADED) {
+					loadedOnce = true;
+					clearTimeout(timer);
+					show('loading');
+					return;
+				}
+				if (data.action === action.CANCEL) {
+					show('cancelled');
+					return;
+				}
+				if (data.action !== action.PICKED) return;
+				var doc = data.docs[0];
+				var form = document.querySelector('[data-picker-register]');
+				form.elements.google_file_id.value = doc.id;
+				form.elements.title.value = doc.name || '';
+				host.querySelector('[data-picker-title]').textContent = doc.name || '';
+				show('registering');
+				form.submit();
+			}
+			function open() {
+				show('loading');
+				arm();
+				if (picker) {
+					picker.setVisible(true);
+					return;
+				}
+				gapi.load('picker', function() {
+					var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
+					view.setIncludeFolders(true);
+					var builder = new google.picker.PickerBuilder()
+						.setDeveloperKey(host.getAttribute('data-api-key'))
+						.setOAuthToken(host.getAttribute('data-access-token'))
+						.addView(view);
+					var appId = host.getAttribute('data-app-id');
+					if (appId) builder.setAppId(appId);
+					picker = builder.setCallback(onAction).build();
+					picker.setVisible(true);
+				});
+			}
+			document.querySelector('[data-picker-retry]').addEventListener('click', open);
+			document.querySelector('[data-picker-reload]').addEventListener('click', function() { window.location.reload(); });
+			var api = document.createElement('script');
+			api.src = 'https://apis.google.com/js/api.js';
+			api.nonce = nonce;
+			api.addEventListener('error', showStuck);
+			api.addEventListener('load', function() {
+				if (!window.gapi) {
+					showStuck();
+					return;
+				}
+				open();
 			});
-		}
+			arm();
+			document.head.appendChild(api);
+		})();
 		</script>
-		<script src="https://apis.google.com/js/api.js" nonce={ d.Nonce }></script>
-		<script nonce={ d.Nonce }>opensheetPickerReady();</script>
 	</div>
 }
 

@@ -20,15 +20,23 @@ type SpreadsheetRow struct {
 }
 
 type SpreadsheetsView struct {
-	ProjectSlug  string
-	Rows         []SpreadsheetRow
-	Credentials  []OptionRow
-	CredentialID string
-	GoogleFileID string
-	Title        string
-	PickerURL    string
-	Error        string
-	ErrorCode    string
+	ProjectSlug     string
+	Rows            []SpreadsheetRow
+	Credentials     []OptionRow
+	PickCredentials []OptionRow
+	CredentialID    string
+	GoogleFileID    string
+	Title           string
+	Error           string
+	ErrorCode       string
+	NoAccess        *NoAccessView
+}
+
+// NoAccessView explains why Google refused to open a file, for the credential kind that was refused.
+type NoAccessView struct {
+	Kind    string
+	Email   string
+	PickURL string
 }
 
 type SpreadsheetView struct {
@@ -39,6 +47,8 @@ type SpreadsheetView struct {
 	CredentialID string
 	Credentials  []OptionRow
 	Writable     bool
+	Added        bool
+	Restored     bool
 	Error        string
 	ErrorCode    string
 }
@@ -67,13 +77,18 @@ type BulkPublishView struct {
 	Manual          BulkTabRow
 	Unavailable     string
 	UnavailableCode string
+	NoAccess        *NoAccessView
 	NoneSelected    bool
 	Notice          string
 }
 
 templ SpreadsheetSection(d web.LayoutData, v SpreadsheetsView) {
 	<section id="spreadsheets-section">
-		if v.Error != "" {
+		if v.NoAccess != nil {
+			<div data-error="spreadsheets">
+				@NoAccessCallout(d, *v.NoAccess, false, v.ErrorCode)
+			</div>
+		} else if v.Error != "" {
 			<div data-error="spreadsheets">
 				@ErrorBanner(d, v.Error, v.ErrorCode)
 			</div>
@@ -122,14 +137,29 @@ templ SpreadsheetSection(d web.LayoutData, v SpreadsheetsView) {
 						@icons.Icon("plus", "h-4 w-4")
 						<span>{ d.Tr("spreadsheets.register_submit") }</span>
 					</button>
-					if v.PickerURL != "" {
-						<a href={ templ.SafeURL(v.PickerURL) } class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-							@icons.Icon("file-spreadsheet", "h-4 w-4")
-							<span>{ d.Tr("spreadsheets.pick_from_drive") }</span>
-						</a>
-					}
 				</div>
 			</form>
+			if len(v.PickCredentials) > 0 {
+				<form
+					method="get"
+					action={ templ.SafeURL(d.ProjectPath(v.ProjectSlug, "/spreadsheets/pick")) }
+					data-pick-form
+					class="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4 shadow-sm"
+				>
+					<div class="min-w-0 flex-1">
+						<label for="spreadsheet-pick-credential" class="block text-sm font-medium text-foreground/90">{ d.Tr("nav.credentials") }</label>
+						<select id="spreadsheet-pick-credential" name="credential_id" required class="mt-1.5 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring">
+							for _, c := range v.PickCredentials {
+								<option value={ c.Value } selected?={ c.Value == v.CredentialID }>{ c.Label }</option>
+							}
+						</select>
+					</div>
+					<button type="submit" class="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted">
+						@icons.Icon("file-spreadsheet", "h-4 w-4")
+						<span>{ d.Tr("spreadsheets.pick_from_drive") }</span>
+					</button>
+				</form>
+			}
 		}
 		if len(v.Rows) == 0 {
 			<div data-empty="spreadsheets" class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
@@ -181,6 +211,11 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 			<h1 class="mt-2 text-2xl font-semibold text-foreground">{ v.Title }</h1>
 			<p class="mt-1 font-mono text-xs text-muted-foreground">{ v.GoogleFileID }</p>
 		</header>
+		if v.Added {
+			@spreadsheetNotice("spreadsheet-added", d.Tr("spreadsheets.added_notice"))
+		} else if v.Restored {
+			@spreadsheetNotice("spreadsheet-restored", d.Tr("spreadsheets.restored_notice"))
+		}
 		if v.Error != "" {
 			<div data-error="spreadsheet">
 				@ErrorBanner(d, v.Error, v.ErrorCode)
@@ -239,6 +274,59 @@ templ SpreadsheetPage(d web.LayoutData, v SpreadsheetView) {
 	</div>
 }
 
+templ spreadsheetNotice(marker, msg string) {
+	<p data-notice={ marker } class="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+		@icons.Icon("check", "mr-1.5 inline h-4 w-4 align-text-bottom")
+		{ msg }
+	</p>
+}
+
+// NoAccessCallout tells the person how to let OpenSheet open a file Google refused; lost marks a file that was readable before.
+templ NoAccessCallout(d web.LayoutData, v NoAccessView, lost bool, code string) {
+	<div data-no-access={ v.Kind } class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">
+		<p class="font-medium">
+			if lost {
+				{ d.Tr("spreadsheets.tabs_no_access_title") }
+			} else {
+				{ d.Tr("spreadsheets.no_access_title") }
+			}
+		</p>
+		if v.PickURL != "" {
+			<p class="mt-1">
+				if lost {
+					{ d.Tr("spreadsheets.tabs_no_access_google") }
+				} else {
+					{ d.Tr("spreadsheets.no_access_google") }
+				}
+			</p>
+			<a href={ templ.SafeURL(v.PickURL) } class="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+				@icons.Icon("file-spreadsheet", "h-4 w-4")
+				if lost {
+					<span>{ d.Tr("spreadsheets.pick_again") }</span>
+				} else {
+					<span>{ d.Tr("spreadsheets.pick_it") }</span>
+				}
+			</a>
+		} else if v.Kind == "google_oauth" {
+			<p class="mt-1">{ d.Tr("spreadsheets.ask_connector", "Email", v.Email) }</p>
+		} else {
+			<p class="mt-1">
+				if lost {
+					{ d.Tr("spreadsheets.tabs_no_access_sa", "Email", v.Email) }
+				} else {
+					{ d.Tr("spreadsheets.no_access_sa", "Email", v.Email) }
+				}
+			</p>
+		}
+		if code != "" {
+			<p class="mt-2 text-xs text-amber-900/70 dark:text-amber-200/70">
+				{ d.Tr("error.code") }
+				<code class="select-all font-mono">{ code }</code>
+			</p>
+		}
+	</div>
+}
+
 // SECURITY: the flag is enforced on the server; this checkbox only carries the operator's intent.
 templ spreadsheetWritableField(d web.LayoutData, writable bool) {
 	<fieldset>
@@ -257,8 +345,12 @@ templ SpreadsheetLayout(d web.LayoutData, v SpreadsheetView) {
 }
 
 // SpreadsheetTabs is the HTMX partial listing a document's tabs, which is a Google round-trip.
-templ SpreadsheetTabs(d web.LayoutData, tabs []string, failure, code string) {
-	if failure != "" {
+templ SpreadsheetTabs(d web.LayoutData, tabs []string, failure, code string, noAccess *NoAccessView) {
+	if noAccess != nil {
+		<div data-error="tabs">
+			@NoAccessCallout(d, *noAccess, true, code)
+		</div>
+	} else if failure != "" {
 		<div data-error="tabs">
 			@ErrorBanner(d, failure, code)
 		</div>
@@ -298,7 +390,11 @@ templ SpreadsheetBulkPublish(d web.LayoutData, v BulkPublishView) {
 		>
 			if v.Unavailable != "" {
 				<p data-notice="bulk-tabs-unavailable" class="text-xs text-amber-700 dark:text-amber-400">{ d.Tr("spreadsheets.bulk_tabs_unavailable") }</p>
-				@ErrorBanner(d, v.Unavailable, v.UnavailableCode)
+				if v.NoAccess != nil {
+					@NoAccessCallout(d, *v.NoAccess, true, v.UnavailableCode)
+				} else {
+					@ErrorBanner(d, v.Unavailable, v.UnavailableCode)
+				}
 				<div class="mt-3 grid gap-3 sm:grid-cols-2">
 					<div>
 						<label for="bulk-manual-tab" class="block text-sm font-medium text-foreground/90">{ d.Tr("sheets.tab") }</label>
