@@ -14,24 +14,26 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/project"
 )
 
 // APIKeyService implements apikey.v1.APIKeyService.
 type APIKeyService struct {
+	authz    *authz.Resolver
 	keys     *apikey.Service
 	projects *project.Service
 	orgs     orgLister
 }
 
 // NewAPIKeyService binds the handler to its collaborators.
-func NewAPIKeyService(keys *apikey.Service, projects *project.Service, orgs orgLister) *APIKeyService {
-	return &APIKeyService{keys: keys, projects: projects, orgs: orgs}
+func NewAPIKeyService(rz *authz.Resolver, keys *apikey.Service, projects *project.Service, orgs orgLister) *APIKeyService {
+	return &APIKeyService{authz: rz, keys: keys, projects: projects, orgs: orgs}
 }
 
 // List returns the keys in the request's project, never carrying a plaintext secret.
 func (s *APIKeyService) List(ctx context.Context, req *connect.Request[apikeyv1.ListRequest]) (*connect.Response[apikeyv1.ListResponse], error) {
-	tctx, proj, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, proj, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +50,7 @@ func (s *APIKeyService) List(ctx context.Context, req *connect.Request[apikeyv1.
 
 // Create mints a new key in the request's project. SECURITY: the plaintext secret is returned here only and cannot be recovered afterwards.
 func (s *APIKeyService) Create(ctx context.Context, req *connect.Request[apikeyv1.CreateRequest]) (*connect.Response[apikeyv1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +78,7 @@ func (s *APIKeyService) Create(ctx context.Context, req *connect.Request[apikeyv
 
 // Revoke marks the referenced key permanently unusable. SECURITY: a key outside the request's own project reports the same NotFound as a made-up id.
 func (s *APIKeyService) Revoke(ctx context.Context, req *connect.Request[apikeyv1.RevokeRequest]) (*connect.Response[apikeyv1.RevokeResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}

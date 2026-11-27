@@ -60,7 +60,11 @@ func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Princip
 	if h.Projects == nil {
 		return p
 	}
-	tctx := tenant.Into(ctx, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
+	tctx, err := h.Authz.Bind(ctx, p, tenant.Context{OrgID: p.ActiveOrgID, UserID: p.UserID})
+	if err != nil {
+		h.LogErr("web auth: bind", err)
+		return p
+	}
 	projects, err := h.Projects.List(tctx, p.ActiveOrgID)
 	if err != nil || len(projects) == 0 {
 		if err != nil {

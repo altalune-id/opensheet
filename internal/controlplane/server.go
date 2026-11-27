@@ -33,6 +33,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
@@ -54,6 +55,7 @@ type Deps struct {
 	Spreadsheets      *spreadsheet.Service
 	Sheets            *sheet.Service
 	Provision         *spreadsheet.ProvisionWorkflow
+	Authz             *authz.Resolver
 }
 
 // Server holds the wired Connect handlers and their runtime configuration.
@@ -66,6 +68,7 @@ type Server struct {
 	Orgs     *org.Service
 	Projects *project.Service
 	Invites  *invite.Service
+	Authz    *authz.Resolver
 
 	// APIKeys is set by boot after New returns, mirroring Authn below.
 	APIKeys *apikey.Service
@@ -98,13 +101,15 @@ func New(cfg *config.Config, kernel *platform.Kernel, d Deps) *Server {
 		Projects: d.Projects,
 		Invites:  d.Invites,
 
-		AuthSvc:    NewAuthService(d.Orgs),
-		ProjectSvc: NewProjectService(d.Projects, d.Orgs),
-		MemberSvc:  NewMemberService(d.Orgs),
+		Authz: d.Authz,
 
-		CredentialSvc:  NewCredentialService(d.Credentials, d.CredentialConnect, d.Projects, d.Orgs),
-		SpreadsheetSvc: NewSpreadsheetService(d.Spreadsheets, d.Projects, d.Orgs, d.Sheets, d.Provision),
-		SheetSvc:       NewSheetService(d.Sheets, d.Projects, d.Orgs),
+		AuthSvc:    NewAuthService(d.Authz, d.Orgs),
+		ProjectSvc: NewProjectService(d.Authz, d.Projects, d.Orgs),
+		MemberSvc:  NewMemberService(d.Authz, d.Orgs),
+
+		CredentialSvc:  NewCredentialService(d.Authz, d.Credentials, d.CredentialConnect, d.Projects, d.Orgs),
+		SpreadsheetSvc: NewSpreadsheetService(d.Authz, d.Spreadsheets, d.Projects, d.Orgs, d.Sheets, d.Provision),
+		SheetSvc:       NewSheetService(d.Authz, d.Sheets, d.Projects, d.Orgs),
 	}
 	if cfg != nil {
 		s.OpenAPIEnabled = cfg.API.OpenAPI.Enabled
@@ -133,7 +138,7 @@ var (
 func (s *Server) Handler(basePath string) http.Handler {
 	opts := s.handlerOptions()
 	// NOTE: built here, not in New, since s.APIKeys isn't set until after New returns.
-	s.APIKeySvc = NewAPIKeyService(s.APIKeys, s.Projects, s.Orgs)
+	s.APIKeySvc = NewAPIKeyService(s.Authz, s.APIKeys, s.Projects, s.Orgs)
 
 	inner := http.NewServeMux()
 	for _, m := range []mountedHandler{

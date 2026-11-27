@@ -76,10 +76,12 @@ type fakeReader struct {
 	page      sheet.FilteredRows
 	pageErr   error
 	pageCalls []sheet.RowFilter
+	ctxs      []context.Context
 }
 
-func (f *fakeReader) Rows(_ context.Context, sh *sheet.Sheet) (sheet.Rows, error) {
+func (f *fakeReader) Rows(ctx context.Context, sh *sheet.Sheet) (sheet.Rows, error) {
 	f.calls = append(f.calls, sh.ID)
+	f.ctxs = append(f.ctxs, ctx)
 	return f.rows, f.err
 }
 
@@ -168,6 +170,7 @@ type fakeWriter struct {
 	batches    []batchCall
 	replaces   []rowWriteCall
 	deletes    []deleteCall
+	ctxs       []context.Context
 }
 
 func (f *fakeWriter) Append(_ context.Context, sh *sheet.Sheet, cells []any, idemKey, bodyHash string) (int, error) {
@@ -189,8 +192,9 @@ func (f *fakeWriter) PatchRow(
 }
 
 func (f *fakeWriter) CreateRow(
-	_ context.Context, sh *sheet.Sheet, fields map[string]any, idemKey, bodyHash string,
+	ctx context.Context, sh *sheet.Sheet, fields map[string]any, idemKey, bodyHash string,
 ) (sheet.WrittenRow, error) {
+	f.ctxs = append(f.ctxs, ctx)
 	f.creates = append(f.creates, rowWriteCall{
 		sheetID: sh.ID, fields: fields, idemKey: idemKey, bodyHash: bodyHash,
 	})
@@ -236,17 +240,20 @@ type fakeTabber struct {
 	addErr  error
 	lists   []uuid.UUID
 	adds    []addTabCall
+	ctxs    []context.Context
 }
 
-func (f *fakeTabber) ListTabs(_ context.Context, spreadsheetID uuid.UUID) ([]string, error) {
+func (f *fakeTabber) ListTabs(ctx context.Context, spreadsheetID uuid.UUID) ([]string, error) {
 	f.lists = append(f.lists, spreadsheetID)
+	f.ctxs = append(f.ctxs, ctx)
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	return f.tabs, nil
 }
 
-func (f *fakeTabber) AddTab(_ context.Context, spreadsheetID uuid.UUID, title string) error {
+func (f *fakeTabber) AddTab(ctx context.Context, spreadsheetID uuid.UUID, title string) error {
+	f.ctxs = append(f.ctxs, ctx)
 	f.adds = append(f.adds, addTabCall{spreadsheetID: spreadsheetID, title: title})
 	return f.addErr
 }
@@ -254,10 +261,12 @@ func (f *fakeTabber) AddTab(_ context.Context, spreadsheetID uuid.UUID, title st
 type fakePurger struct {
 	err   error
 	calls []uuid.UUID
+	ctxs  []context.Context
 }
 
-func (f *fakePurger) PurgeCache(_ context.Context, sheetID uuid.UUID) error {
+func (f *fakePurger) PurgeCache(ctx context.Context, sheetID uuid.UUID) error {
 	f.calls = append(f.calls, sheetID)
+	f.ctxs = append(f.ctxs, ctx)
 	return f.err
 }
 
@@ -282,20 +291,22 @@ func (f *fakeAuthorizer) Authenticate(_ context.Context, _ string) (session.Prin
 	return session.Principal{Source: session.SourceAPIKey}, nil
 }
 
-func (f *fakeAuthorizer) Authorize(_ context.Context, raw, scope string, orgID, projectID, sheetID uuid.UUID) (session.Principal, error) {
+func (f *fakeAuthorizer) Authorize(ctx context.Context, raw, scope string, orgID, projectID, sheetID uuid.UUID) (context.Context, session.Principal, error) {
 	f.calls = append(f.calls, authorizeCall{raw: raw, scope: scope, orgID: orgID, projectID: projectID, sheetID: sheetID})
-	if f.err != nil {
-		return session.Principal{}, f.err
-	}
-	return session.Principal{Source: session.SourceAPIKey, ActiveOrgID: orgID, ActiveProjectID: projectID}, nil
+	return f.bind(ctx, orgID)
 }
 
-func (f *fakeAuthorizer) AuthorizeProject(_ context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
+func (f *fakeAuthorizer) AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (context.Context, session.Principal, error) {
 	f.projectCalls = append(f.projectCalls, authorizeCall{raw: raw, scope: scope, orgID: orgID, projectID: projectID})
+	return f.bind(ctx, orgID)
+}
+
+func (f *fakeAuthorizer) bind(ctx context.Context, orgID uuid.UUID) (context.Context, session.Principal, error) {
 	if f.err != nil {
-		return session.Principal{}, f.err
+		return nil, session.Principal{}, f.err
 	}
-	return session.Principal{Source: session.SourceAPIKey, ActiveOrgID: orgID, ActiveProjectID: projectID}, nil
+	p := session.Principal{Source: session.SourceAPIKey, ActiveOrgID: orgID, HeldOrgID: orgID}
+	return session.PrincipalInto(ctx, p), p, nil
 }
 
 type rig struct {
@@ -2386,5 +2397,31 @@ func TestHandler_ReportsAFailedRowPreconditionAs412(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), apperror.CodeSheetPreconditionFailed) {
 		t.Errorf("body = %s, want the %s code", rec.Body.String(), apperror.CodeSheetPreconditionFailed)
+	}
+}
+
+func TestSheetHandler_ServesOnTheBoundContext(t *testing.T) {
+	g := newRig()
+	g.sheets.ref.Writable = true
+	g.send(t, http.MethodGet, rowsPath, nil, keyHeader())
+	g.send(t, http.MethodPost, rowsPath+"/rows", []byte(`{"name":"ada"}`), keyHeader())
+	g.send(t, http.MethodDelete, rowsPath+"/cache", nil, keyHeader())
+	g.send(t, http.MethodGet, g.tabsPath(), nil, keyHeader())
+	g.send(t, http.MethodPost, g.tabsPath(), []byte(`{"title":"Q2"}`), keyHeader())
+
+	for name, ctxs := range map[string][]context.Context{
+		"rows": g.reader.ctxs, "create row": g.writer.ctxs, "purge": g.purger.ctxs, "tabs": g.tabs.ctxs,
+	} {
+		if len(ctxs) == 0 {
+			t.Errorf("%s: never reached", name)
+		}
+		for _, ctx := range ctxs {
+			if got := session.PrincipalFrom(ctx).HeldOrgID; got != g.orgs.ref.ID {
+				t.Errorf("%s ran on a context bound to %s, want %s", name, got, g.orgs.ref.ID)
+			}
+		}
+	}
+	if len(g.tabs.ctxs) != 2 {
+		t.Errorf("tabs reached %d times, want list and add", len(g.tabs.ctxs))
 	}
 }

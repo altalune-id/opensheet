@@ -355,3 +355,35 @@ func TestPostgres_APIKey_OtherOrgIsInvisible(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, k.ID, stillThere.ID)
 }
+
+func TestDeletingAUserRevokesTheirOrgAndProjectKeysPostgres(t *testing.T) {
+	f := newPgFixture(t)
+	creator := uuid.New()
+	_, err := f.sqlDB.ExecContext(t.Context(),
+		"INSERT INTO "+f.prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) VALUES ($1, $2, '', '', false, now(), now())",
+		creator, creator.String()+"@example.com")
+	require.NoError(t, err)
+	gone, kept := mintKeysOf(t, f.store, f.tc, creator), mintKeysOf(t, f.store, f.tc, f.tc.UserID)
+
+	_, err = f.sqlDB.ExecContext(t.Context(), "DELETE FROM "+f.prefix+"users WHERE id = $1", creator)
+	require.NoError(t, err)
+	assertRevokedOnDelete(t, f.store, f.tc, gone, kept)
+}
+
+func TestDeletingAUserRevokesTheirKeysInEveryOrgUnderRLSPostgres(t *testing.T) {
+	store, migDB, appConn, prefix := newPgRLSFixture(t)
+	a := seedRLSTenant(t, migDB, prefix)
+	b := seedRLSTenant(t, migDB, prefix)
+	creator := uuid.New()
+	_, err := migDB.ExecContext(t.Context(),
+		"INSERT INTO public."+prefix+"users (id, email, name, avatar_url, is_admin, created_at, updated_at) VALUES ($1, $2, '', '', false, now(), now())",
+		creator, creator.String()+"@example.com")
+	require.NoError(t, err)
+	goneA, keptA := mintKeysOf(t, store, a, creator), mintKeysOf(t, store, a, a.UserID)
+	goneB, keptB := mintKeysOf(t, store, b, creator), mintKeysOf(t, store, b, b.UserID)
+
+	_, err = appConn.ExecContext(t.Context(), "DELETE FROM public."+prefix+"users WHERE id = $1", creator)
+	require.NoError(t, err, "the app role deletes the user; the trigger runs as its definer")
+	assertRevokedOnDelete(t, store, a, goneA, keptA)
+	assertRevokedOnDelete(t, store, b, goneB, keptB)
+}

@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 func withCfg(cmd *cobra.Command) (*config.Config, error) {
@@ -23,6 +27,19 @@ func withPrincipal(cmd *cobra.Command) (Principal, error) {
 		return Principal{}, err
 	}
 	return resolveLocal(cmd)
+}
+
+// SECURITY: a local command acts on the active org only after Bind admits the profile's person there; with no active org it stays unbound and holds nothing.
+func bindLocal(ctx context.Context, s *boot.Server, p Principal) (context.Context, error) {
+	tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
+	if p.OrgID == uuid.Nil {
+		return tenant.Into(ctx, tc), nil
+	}
+	sp := session.Principal{
+		UserID: p.UserID, Email: p.Email, Name: p.Name, Source: session.Source(p.Source),
+		ActiveOrgID: p.OrgID, ActiveProjectID: p.ProjectID,
+	}
+	return s.Authz.Bind(ctx, sp, tc)
 }
 
 func connFromCmd(cmd *cobra.Command, bootClient ClientBootFn) (*controlplane.Client, error) {

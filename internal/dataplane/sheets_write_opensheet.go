@@ -63,7 +63,8 @@ func (h *sheetHandler) appendRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -97,7 +98,8 @@ func (h *sheetHandler) patchRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -127,7 +129,8 @@ func (h *sheetHandler) createRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -161,7 +164,8 @@ func (h *sheetHandler) createRows(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -195,7 +199,8 @@ func (h *sheetHandler) replaceRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -225,7 +230,8 @@ func (h *sheetHandler) deleteRow(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeSheetsWrite); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeSheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -243,7 +249,8 @@ func (h *sheetHandler) listTabs(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorizeProject(r, sc, authn.ScopeSpreadsheetsRead); aErr != nil {
+	r, aErr := h.authorizeProject(r, sc, authn.ScopeSpreadsheetsRead)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -271,7 +278,8 @@ func (h *sheetHandler) createTab(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorizeProject(r, sc, authn.ScopeSpreadsheetsWrite); aErr != nil {
+	r, aErr := h.authorizeProject(r, sc, authn.ScopeSpreadsheetsWrite)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}

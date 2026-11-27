@@ -12,7 +12,9 @@ import (
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/sealer"
@@ -38,6 +40,8 @@ type opensheetServices struct {
 	Connect *credential.ConnectWorkflow
 
 	SnapshotListener *sheet.SnapshotListener
+
+	Authz *authz.Resolver
 }
 
 func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities) (opensheetServices, error) {
@@ -146,6 +150,7 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 		Fix:              fixWorkflow,
 		Connect:          connectWorkflow,
 		SnapshotListener: sheet.NewSnapshotListener(snaps),
+		Authz:            newAuthzResolver(org.NewStore(cfg.DB, pool, pgConn)),
 	}
 	if err := assertOpensheetWiring(s); err != nil {
 		return opensheetServices{}, err
@@ -176,6 +181,7 @@ func assertOpensheetWiring(s opensheetServices) error {
 		{"fix", s.Fix != nil},
 		{"connect", s.Connect != nil},
 		{"snapshot listener", s.SnapshotListener != nil},
+		{"authz", s.Authz != nil},
 	}
 	missing := make([]string, 0, len(slots))
 	for _, slot := range slots {

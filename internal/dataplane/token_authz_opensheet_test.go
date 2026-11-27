@@ -14,10 +14,10 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"altalune.id/opensheet/internal/apperror"
-	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
-	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 const (
@@ -44,56 +44,54 @@ func (f *fakeIdentity) Authenticate(_ context.Context, raw string) (session.Prin
 	return p, nil
 }
 
-type fakeMembers struct {
-	seated map[[2]uuid.UUID]bool
-	err    error
-	ctxs   []context.Context
-}
-
-func (f *fakeMembers) RequireMember(ctx context.Context, orgID, userID uuid.UUID) error {
-	f.ctxs = append(f.ctxs, ctx)
-	if f.err != nil {
-		return f.err
-	}
-	if !f.seated[[2]uuid.UUID{orgID, userID}] {
-		return &org.MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
-	}
-	return nil
-}
-
 type tokenRig struct {
 	*rig
-	keys     *fakeAuthorizer
+	keys     *fakeIdentity
 	identity *fakeIdentity
-	members  *fakeMembers
+	roles    *fakes.Roles
 	userID   uuid.UUID
+	creator  uuid.UUID
 }
 
 func newTokenRig(scopes ...string) *tokenRig {
 	g := &tokenRig{
 		rig:     newRig(),
-		keys:    &fakeAuthorizer{},
-		members: &fakeMembers{seated: map[[2]uuid.UUID]bool{}},
+		roles:   fakes.NewRoles(),
 		userID:  uuid.Must(uuid.NewV7()),
+		creator: uuid.Must(uuid.NewV7()),
 	}
 	g.identity = &fakeIdentity{principals: map[string]session.Principal{
 		testToken: {Source: session.SourceToken, UserID: g.userID, Scopes: scopes},
 	}}
+	g.keys = &fakeIdentity{principals: map[string]session.Principal{
+		testKey: {
+			Source: session.SourceAPIKey, KeyID: uuid.Must(uuid.NewV7()), KeyOwnerID: g.creator, Scopes: scopes,
+			ActiveOrgID: g.orgs.ref.ID, ProjectIDs: []uuid.UUID{g.projects.ref.ID},
+		},
+	}}
 	g.seat()
+	g.roles.Set(g.orgs.ref.ID, g.creator, "admin")
 	g.authz = nil
 	return g
 }
 
-func (g *tokenRig) seat() { g.members.seated[[2]uuid.UUID{g.orgs.ref.ID, g.userID}] = true }
+func (g *tokenRig) seat() { g.roles.Set(g.orgs.ref.ID, g.userID, "member") }
 
-func (g *tokenRig) unseat() { delete(g.members.seated, [2]uuid.UUID{g.orgs.ref.ID, g.userID}) }
+func (g *tokenRig) unseat() { g.roles.Set(g.orgs.ref.ID, g.userID, "") }
+
+func (g *tokenRig) authorizer() Authorizer {
+	var people identity
+	if g.identity != nil {
+		people = g.identity
+	}
+	return NewCredentialAuthorizer(g.keys, people, authz.NewResolver(g.roles), authn.Scheme{Prefix: "osk_", TokenPrefix: "othra_pt_"})
+}
 
 func (g *tokenRig) handler() http.Handler {
 	h := g.rig
-	authz := NewCredentialAuthorizer(g.keys, g.identity, g.members, authn.Scheme{Prefix: "osk_", TokenPrefix: "othra_pt_"})
 	return NewSheetHandler(SheetHandlerParams{
 		Orgs: h.orgs, Projects: h.projects, Sheets: h.sheets, Reader: h.reader, Inspector: h.inspector,
-		Purger: h.purger, Writer: h.writer, Tabs: h.tabs, Authz: authz, Caps: h.caps,
+		Purger: h.purger, Writer: h.writer, Tabs: h.tabs, Authz: g.authorizer(), Caps: h.caps,
 		Log: discardLog(),
 	})
 }
@@ -125,49 +123,29 @@ func (g *tokenRig) missingSlugBody(t *testing.T) string {
 	return body
 }
 
-func TestCredentialAuthorizer_KeyPathUnchanged(t *testing.T) {
+func TestCredentialAuthorizer_KeysAndTokensStayApart(t *testing.T) {
 	g := newTokenRig(authn.ScopeSheetsRead)
-	g.identity = nil
 
-	code, body := g.callNilTokens(t, http.MethodGet, rowsPath, testKey)
-	if code != http.StatusOK {
+	if code, body := g.call(t, http.MethodGet, rowsPath, nil, testKey); code != http.StatusOK {
 		t.Fatalf("key read status = %d, want 200; body=%s", code, body)
 	}
-	if len(g.keys.calls) != 1 {
-		t.Fatalf("key reached the key authorizer %d times, want 1", len(g.keys.calls))
+	if g.keys.calls != 1 || g.identity.calls != 0 {
+		t.Fatalf("key reached keys %d times and tokens %d times, want 1 and 0", g.keys.calls, g.identity.calls)
 	}
-	call := g.keys.calls[0]
-	if call.raw != testKey || call.scope != authn.ScopeSheetsRead || call.orgID != g.orgs.ref.ID ||
-		call.projectID != g.projects.ref.ID || call.sheetID != g.sheets.ref.ID {
-		t.Errorf("key call = %+v, want the raw key, scope and path ids passed unchanged", call)
+	if code, body := g.call(t, http.MethodGet, rowsPath, nil, testToken); code != http.StatusOK {
+		t.Fatalf("token read status = %d, want 200; body=%s", code, body)
 	}
-
-	code, _ = g.callNilTokens(t, http.MethodGet, g.tabsPath(), testKey)
-	if code != http.StatusOK || len(g.keys.projectCalls) != 1 {
-		t.Errorf("project route: status %d, project calls %d; want 200 and 1", code, len(g.keys.projectCalls))
+	if g.keys.calls != 1 {
+		t.Errorf("a token reached the key identity: %d calls, want 1", g.keys.calls)
 	}
 
+	g.identity = nil
+	jwtCode, jwtBody := g.call(t, http.MethodGet, rowsPath, nil, testToken)
 	g.keys.err = &authn.UnauthorizedError{}
-	refusedKey, refusedBody := g.callNilTokens(t, http.MethodGet, rowsPath, testKey)
-	g.keys.err = nil
-	jwtCode, jwtBody := g.callNilTokens(t, http.MethodGet, rowsPath, testToken)
-	if refusedKey != http.StatusNotFound || jwtCode != http.StatusNotFound || jwtBody != refusedBody {
-		t.Errorf("refusals: key %d %s, token %d %s; want one identical 404", refusedKey, refusedBody, jwtCode, jwtBody)
+	keyCode, keyBody := g.call(t, http.MethodGet, rowsPath, nil, testKey)
+	if keyCode != http.StatusNotFound || jwtCode != http.StatusNotFound || jwtBody != keyBody {
+		t.Errorf("refusals: key %d %s, token %d %s; want one identical 404", keyCode, keyBody, jwtCode, jwtBody)
 	}
-	if len(g.keys.calls) != 2 {
-		t.Errorf("a token reached the key authorizer: %d calls, want 2", len(g.keys.calls))
-	}
-}
-
-func (g *tokenRig) callNilTokens(t *testing.T, method, path, cred string) (int, string) {
-	t.Helper()
-	h := g.rig
-	authz := NewCredentialAuthorizer(g.keys, nil, g.members, authn.Scheme{Prefix: "osk_"})
-	rec := serve(t, NewSheetHandler(SheetHandlerParams{
-		Orgs: h.orgs, Projects: h.projects, Sheets: h.sheets, Reader: h.reader, Inspector: h.inspector,
-		Purger: h.purger, Writer: h.writer, Tabs: h.tabs, Authz: authz, Caps: h.caps, Log: discardLog(),
-	}), method, path, nil, http.Header{"Authorization": {"Bearer " + cred}})
-	return rec.Code, rec.Body.String()
 }
 
 func TestTokenAuthz_MemberWithScopeReads(t *testing.T) {
@@ -179,14 +157,8 @@ func TestTokenAuthz_MemberWithScopeReads(t *testing.T) {
 	if code, body := g.call(t, http.MethodGet, g.tabsPath(), nil, testToken); code != http.StatusOK {
 		t.Fatalf("tabs status = %d, want 200; body=%s", code, body)
 	}
-	if len(g.keys.calls)+len(g.keys.projectCalls) != 0 {
-		t.Error("a token reached the key authorizer")
-	}
-	for _, ctx := range g.members.ctxs {
-		tc, err := tenant.From(ctx)
-		if err != nil || tc.OrgID != g.orgs.ref.ID {
-			t.Errorf("membership asked under tenant %+v (%v), want org %s", tc, err, g.orgs.ref.ID)
-		}
+	if g.keys.calls != 0 {
+		t.Error("a token reached the key identity")
 	}
 }
 
@@ -207,7 +179,7 @@ func TestTokenAuthz_WritesNeedSheetsWrite(t *testing.T) {
 	}
 }
 
-func TestTokenAuthz_NonMemberIs404(t *testing.T) {
+func TestDataPlane_TokenOfNonMemberIs404(t *testing.T) {
 	g := newTokenRig(authn.ScopeSheetsRead, authn.ScopeSpreadsheetsRead)
 	g.unseat()
 	want := g.missingSlugBody(t)
@@ -251,9 +223,8 @@ func TestTokenAuthz_IssuerOutageIs503(t *testing.T) {
 		setup func(g *tokenRig)
 	}{
 		{"issuer outage", testToken, func(g *tokenRig) { g.identity.err = outage }},
-		{"membership store failure", testToken, func(g *tokenRig) {
-			g.members.err = apperror.New(apperror.CodeUnexpectedError, "An unexpected error occurred", codes.Internal).WithCause(errors.New("db down"))
-		}},
+		{"membership store failure", testToken, func(g *tokenRig) { g.roles.Err = errors.New("db down") }},
+		{"key creator store failure", testKey, func(g *tokenRig) { g.roles.Err = errors.New("db down") }},
 		{"api key store failure", testKey, func(g *tokenRig) { g.keys.err = outage }},
 	}
 	for _, tt := range tests {

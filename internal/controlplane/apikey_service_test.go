@@ -22,6 +22,7 @@ import (
 	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
@@ -72,7 +73,7 @@ func newAPIKeyFixtureFor(t *testing.T, manager bool, src session.Source) *apikey
 		Verifier: stubVerifier{principal: fullTokenGrant(principal)},
 	}
 
-	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc})
+	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc, Authz: authz.NewResolver(fakes.NewRoles().Set(orgID, principal.UserID, "owner"))})
 	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = keySvc
 	resource, err := tokens.NewResource("https://app.example.com/api")

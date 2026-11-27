@@ -10,11 +10,11 @@ import (
 	"altalune.id/opensheet/internal/platform/session"
 )
 
-// Authorizer authenticates a raw credential and authorizes it against a scope and tenant.
+// Authorizer authenticates a raw credential and authorizes it against a scope and tenant, returning the context bound to that tenant.
 type Authorizer interface {
 	Authenticate(ctx context.Context, raw string) (session.Principal, error)
-	Authorize(ctx context.Context, raw, scope string, orgID, projectID, resourceID uuid.UUID) (session.Principal, error)
-	AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error)
+	Authorize(ctx context.Context, raw, scope string, orgID, projectID, resourceID uuid.UUID) (context.Context, session.Principal, error)
+	AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (context.Context, session.Principal, error)
 }
 
 // Capabilities is the feature-flag snapshot the data plane checks, such as public reads.

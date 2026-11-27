@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"altalune.id/opensheet/internal/cli/render"
-	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 )
 
@@ -40,8 +39,10 @@ func newProjectListCmd(bootServer ServerBootFn) *cobra.Command {
 			}
 			defer func() { _ = s.Close() }()
 
-			tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
-			ctx := tenant.Into(cmd.Context(), tc)
+			ctx, err := bindLocal(cmd.Context(), s, p)
+			if err != nil {
+				return err
+			}
 			items, err := s.Projects.List(ctx, p.OrgID)
 			if err != nil {
 				return err
@@ -82,8 +83,10 @@ func newProjectCreateCmd(bootServer ServerBootFn) *cobra.Command {
 			}
 			defer func() { _ = s.Close() }()
 
-			tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
-			ctx := tenant.Into(cmd.Context(), tc)
+			ctx, err := bindLocal(cmd.Context(), s, p)
+			if err != nil {
+				return err
+			}
 			pr, err := s.Projects.Create(ctx, p.OrgID, slug, name)
 			if err != nil {
 				return err

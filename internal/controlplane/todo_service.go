@@ -11,12 +11,14 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	todov1 "altalune.id/opensheet/gen/go/todo/v1"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
 )
 
 // TodoService implements todo.v1.TodoService.
 type TodoService struct {
+	authz     *authz.Resolver
 	todos     *todo.Service
 	todoStore todo.Store
 	projects  *project.Service
@@ -24,13 +26,13 @@ type TodoService struct {
 }
 
 // NewTodoService binds the handler to its collaborators.
-func NewTodoService(todos *todo.Service, todoStore todo.Store, projects *project.Service, orgs orgLister) *TodoService {
-	return &TodoService{todos: todos, todoStore: todoStore, projects: projects, orgs: orgs}
+func NewTodoService(rz *authz.Resolver, todos *todo.Service, todoStore todo.Store, projects *project.Service, orgs orgLister) *TodoService {
+	return &TodoService{authz: rz, todos: todos, todoStore: todoStore, projects: projects, orgs: orgs}
 }
 
 // Create persists a new todo bound to the request's project.
 func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.CreateRequest]) (*connect.Response[todov1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +45,7 @@ func (s *TodoService) Create(ctx context.Context, req *connect.Request[todov1.Cr
 
 // List returns todos in the request's project.
 func (s *TodoService) List(ctx context.Context, req *connect.Request[todov1.ListRequest]) (*connect.Response[todov1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +86,7 @@ func (s *TodoService) Delete(ctx context.Context, req *connect.Request[todov1.De
 }
 
 func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (context.Context, uuid.UUID, error) {
-	if _, err := principal(ctx); err != nil {
+	if _, _, err := principal(ctx, s.authz); err != nil {
 		return nil, uuid.Nil, err
 	}
 	tid, err := parseUUID("todo_id", todoIDRaw)
@@ -95,7 +97,7 @@ func (s *TodoService) scopeToTodo(ctx context.Context, todoIDRaw string) (contex
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
-	tctx, err := scopeToResource(ctx, t.OrgID, t.ProjectID, t.ID, func() error {
+	tctx, err := scopeToResource(ctx, s.authz, t.OrgID, t.ProjectID, t.ID, func() error {
 		return forbiddenErr("todo is outside this credential's reach", "todo_id", tid.String())
 	})
 	if err != nil {

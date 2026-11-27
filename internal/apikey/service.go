@@ -21,7 +21,7 @@ import (
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer = otel.Tracer("altalune.id/opensheet/internal/apikey")
 
-// Members is the org membership gate: RequireManager guards org and project keys, RequireMember guards a personal token and its use.
+// Members is the org membership gate: RequireManager guards org and project keys, RequireMember guards a personal token.
 type Members interface {
 	RequireManager(ctx context.Context, orgID, userID uuid.UUID) error
 	RequireMember(ctx context.Context, orgID, userID uuid.UUID) error
@@ -300,7 +300,7 @@ func requireMintable(scopes []string) error {
 	return nil
 }
 
-// SECURITY: the one owner rule, asked at mint and on every use — a member, or an owner or admin when the token holds an org-level scope.
+// SECURITY: the one owner rule, asked at mint and on every use of an org-level personal token — a member, or an owner or admin when the token holds an org-level scope.
 func requireOwner(ctx context.Context, m Members, orgID, userID uuid.UUID, scopes []string) error {
 	if hasOrgLevelScope(scopes) {
 		return m.RequireManager(ctx, orgID, userID)
@@ -354,7 +354,7 @@ type Authenticator struct {
 	members Members
 }
 
-// NewAuthenticator binds an Authenticator to its store, usage recorder, key scheme and the membership gate a personal token's owner is checked against on every use. usage may be nil.
+// NewAuthenticator binds an Authenticator to its store, usage recorder, key scheme and the manager gate a personal token's org-level scope is checked against on every use. usage may be nil.
 func NewAuthenticator(s Store, u *UsageWorker, scheme Scheme, members Members) *Authenticator {
 	return &Authenticator{store: s, usage: u, scheme: scheme, members: members}
 }
@@ -373,38 +373,6 @@ func (a *Authenticator) Authenticate(ctx context.Context, raw string) (session.P
 	return principalFor(k), nil
 }
 
-// Authorize resolves raw and additionally requires scope on resourceID within orgID/projectID.
-func (a *Authenticator) Authorize(ctx context.Context, raw, scope string, orgID, projectID, resourceID uuid.UUID) (session.Principal, error) {
-	k, err := a.resolve(ctx, raw)
-	if err != nil {
-		return session.Principal{}, err
-	}
-	p := principalFor(k)
-	if !p.ReachesProject(orgID, projectID) {
-		return session.Principal{}, &authn.UnauthorizedError{}
-	}
-	if !slices.Contains(p.Scopes, scope) || !p.ReachesResource(orgID, projectID, resourceID) {
-		return session.Principal{}, &authn.InsufficientScopeError{Scope: scope}
-	}
-	return p, nil
-}
-
-// AuthorizeProject resolves raw and requires an unrestricted project-wide grant of scope.
-func (a *Authenticator) AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
-	k, err := a.resolve(ctx, raw)
-	if err != nil {
-		return session.Principal{}, err
-	}
-	p := principalFor(k)
-	if !p.ReachesProject(orgID, projectID) {
-		return session.Principal{}, &authn.UnauthorizedError{}
-	}
-	if !slices.Contains(p.Scopes, scope) || !p.ReachesWholeProject(orgID, projectID) {
-		return session.Principal{}, &authn.InsufficientScopeError{Scope: scope}
-	}
-	return p, nil
-}
-
 // SECURITY: every rejection collapses to one opaque *authn.UnauthorizedError and a store failure is *authn.UnavailableError; the shape gate short-circuits on purpose because the prefix is public config, and equalizing it would buy a DoS amplifier.
 func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error) {
 	if a.scheme.Authn().Looks(raw) != authn.ShapeAPIKey {
@@ -418,24 +386,22 @@ func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error
 	if err != nil || k == nil || !k.Usable(time.Now().UTC()) {
 		return nil, &authn.UnauthorizedError{}
 	}
-	if err := a.requireLiveOwner(ctx, k); err != nil {
-		return nil, ownerRefusal(err)
+	if k.Kind == KindPersonal && k.CreatedBy == uuid.Nil {
+		return nil, &authn.UnauthorizedError{}
+	}
+	// TODO: drop when members:read moves to Can.
+	if k.Kind == KindPersonal && hasOrgLevelScope(k.Scopes) {
+		if a.members == nil {
+			return nil, &authn.UnauthorizedError{}
+		}
+		if err := requireOwner(tenant.WithOrg(ctx, k.OrgID), a.members, k.OrgID, k.CreatedBy, k.Scopes); err != nil {
+			return nil, ownerRefusal(err)
+		}
 	}
 	if a.usage != nil {
 		a.usage.Record(k.ID, tenant.Context{OrgID: k.OrgID, ProjectID: k.ProjectID}, time.Now().UTC())
 	}
 	return k, nil
-}
-
-// SECURITY: a personal token acts for its owner, so it stops the moment the owner leaves the org or loses the role an org-level scope needs.
-func (a *Authenticator) requireLiveOwner(ctx context.Context, k *APIKey) error {
-	if k.Kind != KindPersonal {
-		return nil
-	}
-	if a.members == nil || k.CreatedBy == uuid.Nil {
-		return &authn.UnauthorizedError{}
-	}
-	return requireOwner(tenant.WithOrg(ctx, k.OrgID), a.members, k.OrgID, k.CreatedBy, k.Scopes)
 }
 
 // NOTE: a typed refusal (no membership, not a manager) is a 401; an untyped error is a store failure.
@@ -451,6 +417,7 @@ func principalFor(k *APIKey) session.Principal {
 	return session.Principal{
 		UserID:          uuid.Nil,
 		KeyID:           k.ID,
+		KeyOwnerID:      k.CreatedBy,
 		Name:            k.Name,
 		Source:          session.SourceAPIKey,
 		Scopes:          slices.Clone(k.Scopes),

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
@@ -161,11 +163,8 @@ func (h *InviteHandler) GetAccept(w http.ResponseWriter, r *http.Request) {
 	web.ClearCookie(w, web.InviteCookieName, h.Cfg.HTTP.BasePath, h.SecureCookie(r))
 	// Rehydrate the session with the just-joined org so the dashboard renders the new tenant immediately — the pre-invite Principal has ActiveOrgID = uuid.Nil.
 	p.ActiveOrgID = o.ID
-	if h.Projects != nil {
-		tctx := tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID})
-		if projects, plErr := h.Projects.List(tctx, o.ID); plErr == nil && len(projects) > 0 {
-			p.ActiveProjectID = projects[0].ID
-		}
+	if id := h.firstProject(r.Context(), p, o.ID); id != uuid.Nil {
+		p.ActiveProjectID = id
 	}
 	if err := h.UpdateSession(r, sid, p); err != nil {
 		h.LogErr("web invite: refresh session", err)
@@ -176,6 +175,22 @@ func (h *InviteHandler) GetAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, dest), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+}
+
+func (h *InviteHandler) firstProject(ctx context.Context, p session.Principal, orgID uuid.UUID) uuid.UUID {
+	if h.Projects == nil {
+		return uuid.Nil
+	}
+	tctx, err := h.Authz.Bind(ctx, p, tenant.Context{OrgID: orgID, UserID: p.UserID})
+	if err != nil {
+		h.LogErr("web invite: bind", err)
+		return uuid.Nil
+	}
+	projects, err := h.Projects.List(tctx, orgID)
+	if err != nil || len(projects) == 0 {
+		return uuid.Nil
+	}
+	return projects[0].ID
 }
 
 func inviteRows(items []*invite.Invite) []templates.InviteRow {
