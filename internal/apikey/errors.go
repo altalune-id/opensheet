@@ -223,3 +223,20 @@ func IsExpiryTooLongError(err error) bool {
 	_, ok := errors.AsType[*ExpiryTooLongError](err)
 	return ok
 }
+
+// ScopeNotHeldError refuses a mint whose scope admits a permission the minter's role does not hold.
+type ScopeNotHeldError struct{ Scope string }
+
+func (e *ScopeNotHeldError) Error() string { return "apikey: scope not held " + e.Scope }
+
+// ToAppError maps ScopeNotHeldError to APK013 PermissionDenied.
+func (e *ScopeNotHeldError) ToAppError() *apperror.AppError {
+	return apperror.New(apperror.CodeAPIKeyScopeNotHeld, "Your role doesn't allow a key with the scope "+e.Scope+".", codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeAPIKeyScopeNotHeld, Meta: map[string]string{"field": "scopes", "scope": e.Scope}})
+}
+
+// IsScopeNotHeldError reports whether err is a *ScopeNotHeldError.
+func IsScopeNotHeldError(err error) bool {
+	_, ok := errors.AsType[*ScopeNotHeldError](err)
+	return ok
+}

@@ -14,11 +14,13 @@ import (
 )
 
 type fakeOrgs struct {
-	mu             sync.Mutex
-	byID           map[uuid.UUID]*user.OrgRef
-	memberships    map[[2]uuid.UUID]*user.MembershipRef
-	userToOrgs     map[uuid.UUID][]uuid.UUID
-	ListForUserErr error
+	mu                sync.Mutex
+	byID              map[uuid.UUID]*user.OrgRef
+	memberships       map[[2]uuid.UUID]*user.MembershipRef
+	userToOrgs        map[uuid.UUID][]uuid.UUID
+	ListForUserErr    error
+	SaveMembershipErr error
+	membershipSaves   int
 }
 
 func newFakeOrgs() *fakeOrgs {
@@ -77,12 +79,16 @@ func (f *fakeOrgs) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*us
 		cp := *m
 		return &cp, nil
 	}
-	return nil, &user.NotFoundError{}
+	return nil, &user.MembershipMissingError{}
 }
 
 func (f *fakeOrgs) SaveMembership(_ context.Context, m *user.MembershipRef) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.membershipSaves++
+	if f.SaveMembershipErr != nil {
+		return f.SaveMembershipErr
+	}
 	cp := *m
 	f.memberships[[2]uuid.UUID{m.OrgID, m.UserID}] = &cp
 	f.userToOrgs[m.UserID] = append(f.userToOrgs[m.UserID], m.OrgID)

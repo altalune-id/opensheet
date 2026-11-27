@@ -75,7 +75,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	seedActiveMember(t, orgs, p)
 	rz := resolverFor(orgSvc)
 	srv := controlplane.New(nil, kernel, controlplane.Deps{Orgs: orgSvc, Projects: projectSvc, Authz: rz})
-	srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
+	srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = apikey.NewService(keys, apikey.Scheme{}, fakes.PermissiveMembers(), fakes.NewOrgProjects(), log, reporter.Unexpected)
 	ref := srv.ReferenceHandler(controlplane.NewTodoService(rz, todoSvc, tds, projectSvc, orgSvc))
 	mux := http.NewServeMux()

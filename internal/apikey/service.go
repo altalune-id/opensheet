@@ -27,11 +27,6 @@ type Members interface {
 	RequireMember(ctx context.Context, orgID, userID uuid.UUID) error
 }
 
-// TODO: drop with custom roles, with the RequireManager use-time check of org-level personal tokens.
-type managers interface {
-	RequireManager(ctx context.Context, orgID, userID uuid.UUID) error
-}
-
 // Projects lists an org's project ids, so a grant can only name the org's own projects.
 type Projects interface {
 	ProjectIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
@@ -277,6 +272,9 @@ func (s *Service) mintGate(ctx context.Context, kind Kind, scopes []string, expi
 	}
 	for _, sc := range scopes {
 		if err := authz.CanPutScope(ctx, sc); err != nil {
+			if authz.IsDeniedError(err) {
+				return tenant.Context{}, &ScopeNotHeldError{Scope: sc}
+			}
 			return tenant.Context{}, err
 		}
 	}
@@ -373,15 +371,14 @@ func (s *Service) requireOrgProjects(ctx context.Context, orgID uuid.UUID, proje
 
 // Authenticator turns a raw API key credential into a session.Principal.
 type Authenticator struct {
-	store   Store
-	usage   *UsageWorker
-	scheme  Scheme
-	members managers
+	store  Store
+	usage  *UsageWorker
+	scheme Scheme
 }
 
-// NewAuthenticator binds an Authenticator to its store, usage recorder, key scheme and the manager gate a personal token's org-level scope is checked against on every use. usage may be nil.
-func NewAuthenticator(s Store, u *UsageWorker, scheme Scheme, members managers) *Authenticator {
-	return &Authenticator{store: s, usage: u, scheme: scheme, members: members}
+// NewAuthenticator binds an Authenticator to its store, usage recorder and key scheme. usage may be nil.
+func NewAuthenticator(s Store, u *UsageWorker, scheme Scheme) *Authenticator {
+	return &Authenticator{store: s, usage: u, scheme: scheme}
 }
 
 // Scheme returns the key scheme this Authenticator resolves, so a surface gate never restates it.
@@ -414,27 +411,10 @@ func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error
 	if k.Kind == KindPersonal && k.CreatedBy == uuid.Nil {
 		return nil, &authn.UnauthorizedError{}
 	}
-	// TODO: drop with custom roles, with the managers interface.
-	if k.Kind == KindPersonal && hasOrgLevelScope(k.Scopes) {
-		if a.members == nil {
-			return nil, &authn.UnauthorizedError{}
-		}
-		if err := a.members.RequireManager(tenant.WithOrg(ctx, k.OrgID), k.OrgID, k.CreatedBy); err != nil {
-			return nil, ownerRefusal(err)
-		}
-	}
 	if a.usage != nil {
 		a.usage.Record(k.ID, tenant.Context{OrgID: k.OrgID, ProjectID: k.ProjectID}, time.Now().UTC())
 	}
 	return k, nil
-}
-
-// NOTE: a typed refusal (no membership, not a manager) is a 401; an untyped error is a store failure.
-func ownerRefusal(err error) error {
-	if _, ok := apperror.AsAppError(err); ok || authn.IsUnauthorizedError(err) {
-		return &authn.UnauthorizedError{}
-	}
-	return &authn.UnavailableError{Cause: err}
 }
 
 // SECURITY: a key is not a person, so UserID stays nil and no secret travels with the principal.

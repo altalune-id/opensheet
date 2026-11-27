@@ -15,6 +15,7 @@ import (
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
+	customrole "altalune.id/opensheet/internal/role"
 	slugs "altalune.id/opensheet/slug"
 )
 
@@ -28,7 +29,21 @@ type Service struct {
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 	uow        tenant.UnitOfWork
+	perms      Permissions
 	onRemoved  []MemberRemovedFunc
+}
+
+// Permissions resolves what a role holds, for the escalation guard.
+type Permissions interface {
+	PermissionsOf(ctx context.Context, role string, roleID uuid.UUID) ([]authz.Permission, error)
+}
+
+// Option configures a Service.
+type Option func(*Service)
+
+// WithPermissions resolves role permissions through p, custom roles included; without it a custom role is refused.
+func WithPermissions(p Permissions) Option {
+	return func(s *Service) { s.perms = p }
 }
 
 // MemberRemovedFunc reacts to a member leaving an org, such as revoking what the member held there.
@@ -38,8 +53,12 @@ type MemberRemovedFunc func(ctx context.Context, orgID, userID uuid.UUID) error
 func (s *Service) OnMemberRemoved(fn MemberRemovedFunc) { s.onRemoved = append(s.onRemoved, fn) }
 
 // NewService wires the Service.
-func NewService(store Store, caps capabilities.Capabilities, log *slog.Logger, unexpected apperror.UnexpectedFunc, uow tenant.UnitOfWork) *Service {
-	return &Service{store: store, caps: caps, log: log, unexpected: unexpected, uow: uow}
+func NewService(store Store, caps capabilities.Capabilities, log *slog.Logger, unexpected apperror.UnexpectedFunc, uow tenant.UnitOfWork, opts ...Option) *Service {
+	s := &Service{store: store, caps: caps, log: log, unexpected: unexpected, uow: uow}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // BootstrapSingleton idempotently ensures the one system org exists with an owner membership for ownerID; an existing system org is reused whatever slug is passed, and a blank slug is generated.
@@ -328,11 +347,15 @@ func (s *Service) removable(ctx context.Context, orgID, userID uuid.UUID) error 
 	if err != nil {
 		return err
 	}
-	actorRole, _, err := s.actor(ctx, orgID, tc.UserID)
+	actorRole, held, err := s.actor(ctx, orgID, tc.UserID)
 	if err != nil {
 		return err
 	}
-	if refusal := RemovalRefusal(orgID, tc.UserID, userID, actorRole, m.Role, m.System); refusal != nil {
+	targetPerms, err := s.permissionsOf(ctx, m.Role, m.RoleID)
+	if err != nil {
+		return err
+	}
+	if refusal := RemovalRefusal(orgID, tc.UserID, userID, actorRole, m.Role, m.System, held, targetPerms); refusal != nil {
 		return refusal
 	}
 	if m.Role == RoleOwner {
@@ -341,7 +364,7 @@ func (s *Service) removable(ctx context.Context, orgID, userID uuid.UUID) error 
 	return nil
 }
 
-// SetRole gives userID a built-in role in orgID; roleID must be uuid.Nil. SECURITY: the caller must hold every permission of the old and the new role, only an owner makes or unmakes an owner, and the last owner stays.
+// SetRole gives userID a built-in role, or the custom role roleID, in orgID. SECURITY: the caller must hold every permission of the old and the new role, only a built-in owner makes or unmakes an owner, and the last owner stays.
 func (s *Service) SetRole(ctx context.Context, orgID, userID uuid.UUID, role Role, roleID uuid.UUID) error {
 	ctx, span := tracer.Start(ctx, "org.SetRole")
 	defer span.End()
@@ -350,23 +373,23 @@ func (s *Service) SetRole(ctx context.Context, orgID, userID uuid.UUID, role Rol
 	if err := authz.CanOrgWide(ctx, authz.MembersWrite); err != nil {
 		return err
 	}
-	if !role.IsValid() || roleID != uuid.Nil {
+	if !validGrant(role, roleID) {
 		return &InvalidRoleError{Role: string(role)}
 	}
-	m, err := s.settable(ctx, orgID, userID, role)
-	if err != nil || m.Role == role {
+	m, err := s.settable(ctx, orgID, userID, role, roleID)
+	if err != nil || (m.Role == role && m.RoleID == roleID) {
 		return err
 	}
 	return s.uow(ctx, func(ctx context.Context) error {
 		if err := s.store.LockOrg(ctx, orgID); err != nil {
 			return s.unexpected(ctx, "org.SetRole: lock", err, "org_id", orgID.String())
 		}
-		m, err := s.settable(ctx, orgID, userID, role)
-		if err != nil || m.Role == role {
+		m, err := s.settable(ctx, orgID, userID, role, roleID)
+		if err != nil || (m.Role == role && m.RoleID == roleID) {
 			return err
 		}
 		updated := *m
-		updated.Role = role
+		updated.Role, updated.RoleID = role, roleID
 		if err := s.store.SaveMembership(ctx, &updated); err != nil {
 			return s.unexpected(ctx, "org.SetRole: save", err, "org_id", orgID.String(), "user_id", userID.String())
 		}
@@ -375,7 +398,7 @@ func (s *Service) SetRole(ctx context.Context, orgID, userID uuid.UUID, role Rol
 }
 
 // SECURITY: must run again under the org lock, or a concurrent change slips past the cover and last-owner checks.
-func (s *Service) settable(ctx context.Context, orgID, userID uuid.UUID, next Role) (*Membership, error) {
+func (s *Service) settable(ctx context.Context, orgID, userID uuid.UUID, next Role, nextID uuid.UUID) (*Membership, error) {
 	m, err := s.store.MembershipOf(ctx, orgID, userID)
 	if err != nil {
 		if IsMembershipMissingError(err) || IsNotFoundError(err) {
@@ -394,7 +417,15 @@ func (s *Service) settable(ctx context.Context, orgID, userID uuid.UUID, next Ro
 	if err != nil {
 		return nil, err
 	}
-	if refusal := RoleChangeRefusal(held, actorRole, m.Role, next); refusal != nil {
+	currentPerms, err := s.permissionsOf(ctx, m.Role, m.RoleID)
+	if err != nil {
+		return nil, err
+	}
+	nextPerms, err := s.permissionsOf(ctx, next, nextID)
+	if err != nil {
+		return nil, err
+	}
+	if refusal := RoleChangeRefusal(held, actorRole, m.Role, next, currentPerms, nextPerms); refusal != nil {
 		return nil, refusal
 	}
 	if m.Role == RoleOwner && next != RoleOwner {
@@ -405,16 +436,31 @@ func (s *Service) settable(ctx context.Context, orgID, userID uuid.UUID, next Ro
 	return m, nil
 }
 
-// RoleChangeRefusal returns an *authz.EscalationError when an actor holding held as actorRole may not move a member from current to next, or nil.
-func RoleChangeRefusal(held []authz.Permission, actorRole, current, next Role) error {
-	if !authz.Covers(held, authz.Builtin(string(current))...) || !authz.Covers(held, authz.Builtin(string(next))...) ||
+// RemovalRefusal reports why an actor holding held as actorRole may not remove the target membership holding targetPerms, or nil when removal is allowed. SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
+func RemovalRefusal(orgID, actor, target uuid.UUID, actorRole, targetRole Role, system bool, held, targetPerms []authz.Permission) error {
+	switch {
+	case system:
+		return &SystemProtectedError{Op: "remove_member", OrgID: orgID.String(), UserID: target.String(), Resource: "membership"}
+	case actor == target:
+		return &SelfRemovalError{OrgID: orgID.String(), UserID: target.String()}
+	case targetRole == RoleOwner && actorRole != RoleOwner:
+		return &OwnerRemovalError{OrgID: orgID.String(), UserID: target.String()}
+	case !authz.Covers(held, targetPerms...):
+		return &authz.EscalationError{Role: string(targetRole), Op: authz.EscalationRemove}
+	}
+	return nil
+}
+
+// RoleChangeRefusal returns an *authz.EscalationError when an actor holding held as actorRole may not move a member from current, holding currentPerms, to next, holding nextPerms, or nil.
+func RoleChangeRefusal(held []authz.Permission, actorRole, current, next Role, currentPerms, nextPerms []authz.Permission) error {
+	if !authz.Covers(held, currentPerms...) || !authz.Covers(held, nextPerms...) ||
 		((current == RoleOwner || next == RoleOwner) && actorRole != RoleOwner) {
 		return &authz.EscalationError{Role: string(next)}
 	}
 	return nil
 }
 
-// SECURITY: reads the actor's membership now, so a role lost since the request was bound grants nothing.
+// SECURITY: reads the actor's membership now, so a role lost since the request was bound grants nothing; only a member bound and still seated as a built-in owner acts as owner.
 func (s *Service) actor(ctx context.Context, orgID, actorID uuid.UUID) (Role, []authz.Permission, error) {
 	m, err := s.store.MembershipOf(ctx, orgID, actorID)
 	if err != nil && !IsMembershipMissingError(err) && !IsNotFoundError(err) {
@@ -422,13 +468,37 @@ func (s *Service) actor(ctx context.Context, orgID, actorID uuid.UUID) (Role, []
 	}
 	var held []authz.Permission
 	if err == nil {
-		role := authz.Builtin(string(m.Role))
-		held = slices.DeleteFunc(authz.Held(ctx), func(p authz.Permission) bool { return !slices.Contains(role, p) })
+		perms, err := s.permissionsOf(ctx, m.Role, m.RoleID)
+		if err != nil && !IsInvalidRoleError(err) {
+			return "", nil, err
+		}
+		held = slices.DeleteFunc(authz.Held(ctx), func(p authz.Permission) bool { return !slices.Contains(perms, p) })
 	}
 	if !authz.Covers(held, authz.MembersWrite) {
 		return "", nil, &authz.DeniedError{Permission: authz.MembersWrite, Org: session.PrincipalFrom(ctx).HeldOrg, Side: authz.SideRole}
 	}
-	return m.Role, held, nil
+	actorRole := m.Role
+	if actorRole != HeldRole(ctx, orgID) {
+		actorRole = ""
+	}
+	return actorRole, held, nil
+}
+
+func (s *Service) permissionsOf(ctx context.Context, r Role, roleID uuid.UUID) ([]authz.Permission, error) {
+	if roleID == uuid.Nil {
+		return authz.Builtin(string(r)), nil
+	}
+	if s.perms == nil {
+		return nil, &InvalidRoleError{Role: string(r)}
+	}
+	perms, err := s.perms.PermissionsOf(ctx, string(r), roleID)
+	if customrole.IsNotFoundError(err) {
+		return nil, &InvalidRoleError{Role: string(r)}
+	}
+	if err != nil {
+		return nil, s.unexpected(ctx, "org: role permissions", err, "role_id", roleID.String())
+	}
+	return perms, nil
 }
 
 // HeldRole returns the built-in role the principal on ctx is bound to in orgID, or "" when it is bound elsewhere.
@@ -513,37 +583,6 @@ func (s *Service) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*M
 	return m, nil
 }
 
-// IsManager reports whether userID holds an owner or admin membership in orgID. SECURITY: ctx must already carry the tenant scope.
-func (s *Service) IsManager(ctx context.Context, orgID, userID uuid.UUID) (bool, error) {
-	ctx, span := tracer.Start(ctx, "org.IsManager")
-	defer span.End()
-	if userID == uuid.Nil {
-		return false, nil
-	}
-	m, err := s.MembershipOf(ctx, orgID, userID)
-	if IsMembershipMissingError(err) || IsNotFoundError(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return m.Role.CanManage(), nil
-}
-
-// RequireManager refuses with *NotManagerError unless userID is an owner or admin of orgID; a machine principal is always refused. SECURITY: ctx must already carry the tenant scope.
-func (s *Service) RequireManager(ctx context.Context, orgID, userID uuid.UUID) error {
-	ctx, span := tracer.Start(ctx, "org.RequireManager")
-	defer span.End()
-	ok, err := s.IsManager(ctx, orgID, userID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return &NotManagerError{OrgID: orgID.String(), UserID: userID.String()}
-	}
-	return nil
-}
-
 // RequireMember refuses with *MembershipMissingError unless userID holds any membership in orgID. SECURITY: ctx must already carry the tenant scope.
 func (s *Service) RequireMember(ctx context.Context, orgID, userID uuid.UUID) error {
 	ctx, span := tracer.Start(ctx, "org.RequireMember")
@@ -565,6 +604,10 @@ func (s *Service) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membersh
 	ctx, span := tracer.Start(ctx, "org.ListMembers")
 	defer span.End()
 
+	ctx = tenant.WithOrg(ctx, orgID)
+	if err := authz.Can(ctx, authz.MembersRead); err != nil {
+		return nil, err
+	}
 	ms, err := s.store.ListMembers(ctx, orgID)
 	if err != nil {
 		return nil, s.unexpected(ctx, "org.ListMembers", fmt.Errorf("org.ListMembers: %w", err), "org_id", orgID.String())
@@ -577,6 +620,10 @@ func (s *Service) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*M
 	ctx, span := tracer.Start(ctx, "org.ListMemberProfiles")
 	defer span.End()
 
+	ctx = tenant.WithOrg(ctx, orgID)
+	if err := authz.Can(ctx, authz.MembersRead); err != nil {
+		return nil, err
+	}
 	ps, err := s.store.ListMemberProfiles(ctx, orgID)
 	if err != nil {
 		return nil, s.unexpected(ctx, "org.ListMemberProfiles", fmt.Errorf("org.ListMemberProfiles: %w", err), "org_id", orgID.String())

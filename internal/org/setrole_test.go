@@ -134,7 +134,7 @@ func TestRoleChangeRefusal(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := org.RoleChangeRefusal(c.held, c.actor, c.cur, c.n)
+			err := org.RoleChangeRefusal(c.held, c.actor, c.cur, c.n, authz.Builtin(string(c.cur)), authz.Builtin(string(c.n)))
 			require.Equal(t, c.refused, authz.IsEscalationError(err), "got %v", err)
 		})
 	}

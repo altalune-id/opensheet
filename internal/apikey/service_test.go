@@ -54,7 +54,7 @@ func mustAuthenticate(t *testing.T) session.Principal {
 	store := fakes.NewAPIKey()
 	_, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
 
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 	p, err := auth.Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	return p
@@ -62,7 +62,7 @@ func mustAuthenticate(t *testing.T) session.Principal {
 
 func TestAuthenticateRejectsForeignShape(t *testing.T) {
 	store := fakes.NewAPIKey()
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 
 	_, err := auth.Authenticate(t.Context(), "aaa.bbb.ccc")
 	assert.True(t, authn.IsUnauthorizedError(err), "got %T: %v", err, err)
@@ -76,7 +76,7 @@ func TestAuthenticateRejectsRevokedKey(t *testing.T) {
 	k.RevokedAt = &now
 	store.Seed(k)
 
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 	_, err := auth.Authenticate(t.Context(), plaintext)
 	assert.True(t, authn.IsUnauthorizedError(err), "got %T: %v", err, err)
 	assert.False(t, apikey.IsNotFoundError(err), "a revoked key must not surface as a distinguishable NotFoundError")
@@ -85,7 +85,7 @@ func TestAuthenticateRejectsRevokedKey(t *testing.T) {
 func TestAuthenticateReportsAStoreOutageAsUnavailable(t *testing.T) {
 	store := fakes.NewAPIKey()
 	store.BySecretHashErr = errors.New("connection refused")
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 
 	p, err := auth.Authenticate(t.Context(), apikey.DefaultPrefix+"whatever")
 	assert.True(t, authn.IsUnavailableError(err), "a store outage must not read as a bad key, got %T: %v", err, err)
@@ -140,7 +140,7 @@ func TestAuthenticateReturnsAnIdenticalErrorForEveryRejectionCause(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			store := fakes.NewAPIKey()
 			raw := tt.setup(t, store)
-			auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+			auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 
 			p, err := auth.Authenticate(t.Context(), raw)
 			assert.Equal(t, &authn.UnauthorizedError{}, err, "every rejection must be the same opaque error")
@@ -155,7 +155,7 @@ func TestPrincipalCarriesTheKeysGrant(t *testing.T) {
 	projectID, resourceID := uuid.New(), uuid.New()
 	_, plaintext := mintSeeded(t, store, uuid.New(), projectID, []string{authn.ScopeSheetsRead}, []uuid.UUID{resourceID})
 
-	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{projectID}, p.ProjectIDs)
 	assert.Equal(t, []uuid.UUID{resourceID}, p.ResourceIDs)
@@ -177,7 +177,7 @@ func TestPrincipalCarriesTheKeyID(t *testing.T) {
 	store := fakes.NewAPIKey()
 	k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
 
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 	p, err := auth.Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, k.ID, p.KeyID, "principalFor must carry the minted key's id so downstream writers can attribute rows to it")
@@ -189,7 +189,7 @@ func TestPrincipalCarriesTheKeyOwner(t *testing.T) {
 	k.CreatedBy = uuid.New()
 	store.Seed(k)
 
-	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, k.CreatedBy, p.KeyOwnerID, "a key acts for its creator")
 	assert.Equal(t, uuid.Nil, p.UserID, "the creator is never the key's identity")

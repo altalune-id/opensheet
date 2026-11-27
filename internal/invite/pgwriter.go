@@ -26,12 +26,14 @@ func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
 			pgNullableTime(i.UsedAt),
 			tc.UserID,
 			i.CreatedAt.UTC(),
+			pgNullableUUID(i.RoleID),
 		).
 		ON_CONFLICT(s.table.ID).
 		// SECURITY: the conflict clause carries the tenant predicate; without it an attacker-supplied row id updates another org's row.
 		DO_UPDATE(postgres.SET(
 			s.table.Email.SET(postgres.String(i.Email)),
 			s.table.Role.SET(postgres.String(string(i.Role))),
+			s.table.RoleID.SET(pgRoleIDExpr(i.RoleID)),
 			s.table.TokenHash.SET(postgres.String(i.TokenHash)),
 			s.table.ExpiresAt.SET(postgres.TimestampzT(i.ExpiresAt.UTC())),
 			s.table.AcceptedAt.SET(pgNullableTimeExpr(i.UsedAt)),

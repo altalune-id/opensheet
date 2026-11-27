@@ -93,6 +93,7 @@ const (
 	CodeAPIKeyExpiryRequired     = "APK010"
 	CodeAPIKeyExpiryInPast       = "APK011"
 	CodeAPIKeyExpiryTooLong      = "APK012"
+	CodeAPIKeyScopeNotHeld       = "APK013"
 
 	CodeWebhookEndpointNotFound     = "WHK001"
 	CodeWebhookInvalidURL           = "WHK002"
@@ -171,7 +172,14 @@ const (
 	CodeGoogleQuotaExceeded    = "GSH003"
 	CodeGoogleUnavailable      = "GSH004"
 
-	CodePermissionDenied = "ROL001"
-	CodeRoleEscalation   = "ROL004"
-	CodeRoleLastOwner    = "ROL013"
+	CodePermissionDenied      = "ROL001"
+	CodeRoleNotFound          = "ROL002"
+	CodeRoleInUse             = "ROL003"
+	CodeRoleEscalation        = "ROL004"
+	CodeRoleInvalidPermission = "ROL005"
+	CodeRoleSystemOrg         = "ROL006"
+	CodeRoleInvalidName       = "ROL007"
+	CodeRoleAlreadyExists     = "ROL008"
+	CodeRoleStaleVersion      = "ROL009"
+	CodeRoleLastOwner         = "ROL013"
 )

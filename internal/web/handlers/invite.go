@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
+	rolepkg "altalune.id/opensheet/internal/role"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
 )
@@ -45,7 +47,9 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 			h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
 			return
 		}
-		view.Invites = inviteRows(items)
+		custom := h.customRoles(r)
+		view.Invites = inviteRows(items, custom)
+		view.CustomRoles = grantableCustomRoles(r, custom)
 	}
 	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", o.Slug, "invites"), view))
 }
@@ -67,16 +71,19 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.TrimSpace(r.PostForm.Get("email"))
-	roleStr := strings.TrimSpace(r.PostForm.Get("role"))
-	role := invite.Role(roleStr)
-	if !role.IsValid() {
-		h.ErrorPage(w, r, http.StatusBadRequest, "Bad role", "Role must be admin or member.")
+	role, roleID := parseInviteRole(strings.TrimSpace(r.PostForm.Get("role")))
+	if role == "" {
+		h.ErrorPage(w, r, http.StatusBadRequest, "Bad role", "Role must be admin, member or a custom role.")
 		return
 	}
-	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role}); err != nil {
+	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role, RoleID: roleID}); err != nil {
 		h.LogErr("web invite: send", err)
 		if authz.IsDeniedError(err) {
 			h.refuseRole(w, r, "invites.read_only", err)
+			return
+		}
+		if _, escalated := errors.AsType[*authz.EscalationError](err); escalated {
+			h.refuseRole(w, r, "invites.error_escalation", err)
 			return
 		}
 		if invite.IsInvitesDisabledError(err) {
@@ -200,13 +207,40 @@ func (h *InviteHandler) firstProject(ctx context.Context, p session.Principal, o
 	return projects[0].ID
 }
 
-func inviteRows(items []*invite.Invite) []templates.InviteRow {
+//i18n:use invites.error_escalation
+
+func parseInviteRole(v string) (invite.Role, uuid.UUID) {
+	if id, err := uuid.Parse(v); err == nil {
+		return invite.RoleCustom, id
+	}
+	if r := invite.Role(v); r.IsValid() {
+		return r, uuid.Nil
+	}
+	return "", uuid.Nil
+}
+
+func grantableCustomRoles(r *http.Request, items []*rolepkg.Role) []templates.RoleOption {
+	held := authz.Held(r.Context())
+	out := make([]templates.RoleOption, 0, len(items))
+	for _, it := range items {
+		if authz.Covers(held, it.Permissions...) {
+			out = append(out, templates.RoleOption{Value: it.ID.String(), Label: it.Name})
+		}
+	}
+	return out
+}
+
+func inviteRows(items []*invite.Invite, custom []*rolepkg.Role) []templates.InviteRow {
 	out := make([]templates.InviteRow, 0, len(items))
 	for _, i := range items {
+		role := string(i.Role)
+		if name := customRoleName(custom, i.RoleID); name != "" {
+			role = name
+		}
 		out = append(out, templates.InviteRow{
 			ID:        i.ID.String(),
 			Email:     i.Email,
-			Role:      string(i.Role),
+			Role:      role,
 			ExpiresAt: i.ExpiresAt.Format(time.RFC3339),
 		})
 	}

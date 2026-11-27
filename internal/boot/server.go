@@ -220,7 +220,7 @@ func BootServer(ctx context.Context, cfg *config.Config, opts ...Option) (*Serve
 		abort()
 		return nil, err
 	}
-	svcs.opensheetServices, err = buildOpensheetServices(cfg, kernel, caps)
+	svcs.opensheetServices, err = buildOpensheetServices(cfg, kernel, caps, svcs.Authz)
 	if err != nil {
 		abort()
 		return nil, err

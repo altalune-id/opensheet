@@ -14,6 +14,7 @@ type Invites struct {
 	ExpiresAt  sqlite.ColumnString
 	AcceptedAt sqlite.ColumnString
 	InvitedBy  sqlite.ColumnString
+	RoleID     sqlite.ColumnString
 	CreatedAt  sqlite.ColumnString
 
 	AllColumns sqlite.ColumnList
@@ -30,8 +31,9 @@ func NewInvites(tablePrefix string) *Invites {
 		expiresAt  = sqlite.StringColumn("expires_at")
 		acceptedAt = sqlite.StringColumn("accepted_at")
 		invitedBy  = sqlite.StringColumn("invited_by")
+		roleID     = sqlite.StringColumn("role_id")
 		createdAt  = sqlite.StringColumn("created_at")
-		all        = sqlite.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt}
+		all        = sqlite.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID}
 	)
 	return &Invites{
 		Table:      sqlite.NewTable("", tablePrefix+"invites", "invites", all...),
@@ -44,6 +46,7 @@ func NewInvites(tablePrefix string) *Invites {
 		AcceptedAt: acceptedAt,
 		InvitedBy:  invitedBy,
 		CreatedAt:  createdAt,
+		RoleID:     roleID,
 		AllColumns: all,
 	}
 }

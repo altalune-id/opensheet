@@ -1,0 +1,120 @@
+package templates
+
+import (
+	"altalune.id/opensheet/internal/web"
+	"altalune.id/opensheet/internal/web/icons"
+)
+
+// RoleOption is one choice in a role picker: a built-in role name, or a custom role's id.
+type RoleOption struct {
+	Value string
+	Label string
+}
+
+// BuiltinRoleRow is a read-only built-in role on the Roles page.
+type BuiltinRoleRow struct {
+	Name  string
+	Perms int
+}
+
+// RoleRow is one custom role on the Roles page.
+type RoleRow struct {
+	ID          string
+	Name        string
+	Description string
+	Perms       int
+	Held        bool
+}
+
+type RolesView struct {
+	OrgSlug   string
+	Builtins  []BuiltinRoleRow
+	Roles     []RoleRow
+	StaffOrg  bool
+	CanEdit   bool
+	Error     string
+	ErrorCode string
+}
+
+templ RolesPage(d web.LayoutData, v RolesView) {
+	<section>
+		<header class="flex items-baseline justify-between border-b border-border pb-4">
+			<div>
+				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("roles.title") }</h1>
+				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("roles.subtitle") }</p>
+			</div>
+			if v.CanEdit {
+				<a href={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/roles/new")) } class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+					@icons.Icon("plus", "h-4 w-4")
+					<span>{ d.Tr("roles.new") }</span>
+				</a>
+			}
+		</header>
+		if v.StaffOrg {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("roles.staff_org") }</p>
+		} else if !v.CanEdit {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("roles.read_only") }</p>
+		}
+		if v.Error != "" {
+			@ErrorBanner(d, v.Error, v.ErrorCode)
+		}
+		if !v.StaffOrg {
+			<h2 class="mt-6 text-sm font-semibold text-foreground">{ d.Tr("roles.custom_heading") }</h2>
+			<ul data-custom-roles class="mt-2 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				if len(v.Roles) == 0 {
+					<li class="px-4 py-6 text-center text-sm text-muted-foreground">{ d.Tr("roles.empty") }</li>
+				}
+				for _, r := range v.Roles {
+					<li class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+						<div class="min-w-0">
+							<p class="truncate text-sm font-medium text-foreground">{ r.Name }</p>
+							<p class="truncate text-xs text-muted-foreground">
+								if r.Description != "" {
+									{ r.Description } ·
+								}
+								{ d.TrN("roles.permissions_count", r.Perms) }
+							</p>
+							if v.CanEdit && r.Held {
+								<p id={ "role-held-" + r.ID } class="text-xs text-muted-foreground">{ d.Tr("roles.in_use") }</p>
+							}
+						</div>
+						if v.CanEdit {
+							<div class="flex shrink-0 items-center gap-1">
+								<a href={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/roles/" + r.ID)) } class="rounded-md border border-border bg-card px-2.5 py-1 text-sm font-medium text-foreground shadow-sm hover:bg-muted">{ d.Tr("roles.edit") }</a>
+								if r.Held {
+									<button type="button" disabled aria-label={ d.Tr("roles.delete_named", "Name", r.Name) } aria-describedby={ "role-held-" + r.ID } class="cursor-not-allowed rounded p-1.5 text-muted-foreground/50">
+										@icons.Icon("trash-2", "h-4 w-4")
+									</button>
+								} else {
+									<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/roles/" + r.ID + "/delete")) } class="inline">
+										<button type="submit" aria-label={ d.Tr("roles.delete_named", "Name", r.Name) } class="rounded p-1.5 text-muted-foreground/70 hover:bg-muted hover:text-foreground">
+											@icons.Icon("trash-2", "h-4 w-4")
+										</button>
+									</form>
+								}
+							</div>
+						}
+					</li>
+				}
+			</ul>
+		}
+		<h2 class="mt-8 text-sm font-semibold text-foreground">{ d.Tr("roles.builtin_heading") }</h2>
+		<ul class="mt-2 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+			for _, b := range v.Builtins {
+				<li class="flex items-center justify-between gap-3 px-4 py-3">
+					<div class="min-w-0">
+						<p class="flex items-center gap-2 text-sm font-medium text-foreground">
+							{ memberRoleLabel(d, b.Name) }
+							<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("roles.builtin_badge") }</span>
+						</p>
+						<p class="text-xs text-muted-foreground">{ d.TrN("roles.permissions_count", b.Perms) }</p>
+					</div>
+				</li>
+			}
+		</ul>
+	</section>
+}
+
+templ RolesLayout(d web.LayoutData, v RolesView) {
+	@Layout(web.WithContent(d, RolesPage(d, v)))
+}

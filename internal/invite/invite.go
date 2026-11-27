@@ -18,6 +18,8 @@ const (
 	RoleOwner  Role = "owner"
 	RoleAdmin  Role = "admin"
 	RoleMember Role = "member"
+	// RoleCustom marks an invite whose permissions come from the custom role its RoleID names.
+	RoleCustom Role = "custom"
 )
 
 // IsValid reports whether r is one of the enumerated roles.
@@ -29,12 +31,21 @@ func (r Role) IsValid() bool {
 	return false
 }
 
+// SECURITY: a custom role always names its role id and a built-in never does, so the sender's cover check reads the permissions actually granted.
+func validGrant(r Role, roleID uuid.UUID) bool {
+	if r == RoleCustom {
+		return roleID != uuid.Nil
+	}
+	return r.IsValid() && roleID == uuid.Nil
+}
+
 // Invite is the aggregate root. Invariants live here.
 type Invite struct {
 	ID        uuid.UUID
 	OrgID     uuid.UUID
 	Email     string
 	Role      Role
+	RoleID    uuid.UUID
 	TokenHash string
 	ExpiresAt time.Time
 	UsedAt    *time.Time
@@ -43,17 +54,18 @@ type Invite struct {
 
 // NewParams is the input to New.
 type NewParams struct {
-	OrgID uuid.UUID
-	Email string
-	Role  Role
-	TTL   time.Duration
-	Token string
-	Now   time.Time
+	OrgID  uuid.UUID
+	Email  string
+	Role   Role
+	RoleID uuid.UUID
+	TTL    time.Duration
+	Token  string
+	Now    time.Time
 }
 
 // New enforces creation invariants: email format, role validity, TTL > 0.
 func New(p NewParams) (*Invite, error) {
-	if !p.Role.IsValid() {
+	if !validGrant(p.Role, p.RoleID) {
 		return nil, &InvalidRoleError{Role: string(p.Role)}
 	}
 	email, err := normalizeEmail(p.Email)
@@ -71,6 +83,7 @@ func New(p NewParams) (*Invite, error) {
 		OrgID:     p.OrgID,
 		Email:     email,
 		Role:      p.Role,
+		RoleID:    p.RoleID,
 		TokenHash: HashToken(p.Token),
 		ExpiresAt: now.Add(p.TTL),
 		CreatedAt: now,

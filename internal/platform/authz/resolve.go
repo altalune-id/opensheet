@@ -14,6 +14,7 @@ import (
 
 type roleSource interface {
 	RoleOf(ctx context.Context, orgID, userID uuid.UUID) (role string, roleID uuid.UUID, orgName string, grant session.Grant, err error)
+	CustomPermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 }
 
 // Resolver computes a principal's held set once, where a request's tenant scope is bound.
@@ -42,6 +43,14 @@ func (r *Resolver) Bind(ctx context.Context, p session.Principal, tc tenant.Cont
 		p.ActiveOrgID = tc.OrgID
 	}
 	return session.PrincipalInto(tctx, p), nil
+}
+
+// PermissionsOf returns what a built-in role, or the custom role roleID, holds in the org on ctx.
+func (r *Resolver) PermissionsOf(ctx context.Context, role string, roleID uuid.UUID) ([]Permission, error) {
+	if roleID == uuid.Nil {
+		return Builtin(role), nil
+	}
+	return r.src.CustomPermissions(ctx, roleID)
 }
 
 type grant struct {
@@ -80,14 +89,18 @@ func (r *Resolver) roleOf(ctx context.Context, orgID, userID uuid.UUID) (grant, 
 	if userID == uuid.Nil {
 		return grant{}, &authn.UnauthorizedError{}
 	}
-	role, _, name, _, err := r.src.RoleOf(ctx, orgID, userID)
+	role, roleID, name, _, err := r.src.RoleOf(ctx, orgID, userID)
 	if err != nil {
 		return grant{}, &authn.UnavailableError{Cause: fmt.Errorf("authz: role of %s: %w", userID, err)}
 	}
 	if role == "" {
 		return grant{}, &authn.UnauthorizedError{}
 	}
-	return grant{perms: Builtin(role), role: role, orgName: name}, nil
+	perms, err := r.PermissionsOf(ctx, role, roleID)
+	if err != nil {
+		return grant{}, &authn.UnavailableError{Cause: fmt.Errorf("authz: permissions of %s: %w", role, err)}
+	}
+	return grant{perms: perms, role: role, orgName: name}, nil
 }
 
 // SECURITY: a token or key holds a permission only when one of its scopes admits it, and never a console permission.

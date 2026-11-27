@@ -3,10 +3,12 @@ package boot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"altalune.id/opensheet/internal/apikey"
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/auth"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
@@ -19,6 +21,7 @@ import (
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
+	"altalune.id/opensheet/internal/role"
 	"altalune.id/opensheet/internal/todo"
 	"altalune.id/opensheet/internal/user"
 	"altalune.id/opensheet/internal/webhook"
@@ -35,6 +38,7 @@ type Services struct {
 	InviteStore  invite.Store
 	OnboardStore onboard.Store
 	WebhookStore webhook.Store
+	RoleStore    role.Store
 
 	Auth     *auth.Service
 	Users    *user.Service
@@ -44,6 +48,7 @@ type Services struct {
 	Invites  *invite.Service
 	Onboards *onboard.Service
 	Webhooks *webhook.Service
+	Roles    *role.Service
 
 	Onboard *user.OnboardWorkflow
 
@@ -68,8 +73,12 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	todoStore := todo.NewStore(cfg.DB, pool, pgConn)
 	inviteStore := invite.NewStore(cfg.DB, pool, pgConn)
 	onboardStore := onboard.NewStore(cfg.DB, pool)
+	roleStore := role.NewStore(cfg.DB, pool, pgConn)
+	uow := tenant.NewUnitOfWork(cfg.DB, pool, pgConn)
+	resolver := newAuthzResolver(orgStore, roleStore)
 
-	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected, tenant.NewUnitOfWork(cfg.DB, pool, pgConn))
+	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected, uow, org.WithPermissions(resolver))
+	roles := newRoleService(cfg, roleStore, orgStore, log, reporter.Unexpected, uow)
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
 	todos := todo.NewService(todoStore, log, reporter.Unexpected, k.Queue)
 	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)
@@ -85,14 +94,8 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		log,
 		reporter.Unexpected,
 	)
-	acceptWorkflow := invite.NewAcceptWorkflow(
-		inviteStore,
-		userStoreForInvite{store: userStore},
-		orgStoreForInvite{store: orgStore},
-		log,
-		reporter.Unexpected,
-	)
-	invites := invite.NewService(inviteStore, sendWorkflow, acceptWorkflow, invitesEnabled, log, reporter.Unexpected)
+	acceptWorkflow := newAcceptWorkflow(inviteStore, userStore, orgStore, uow, log, reporter.Unexpected)
+	invites := invite.NewService(inviteStore, sendWorkflow, acceptWorkflow, invitesEnabled, log, reporter.Unexpected, invite.WithPermissions(resolver))
 
 	users := user.NewService(
 		userStore,
@@ -102,15 +105,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		user.WithInviteFinder(invites),
 	)
 
-	onboardWorkflow := user.NewOnboardWorkflow(
-		userStore,
-		orgStoreForOnboard{store: orgStore},
-		projectStoreForOnboard{store: projectStore},
-		inviteStoreForOnboard{store: inviteStore},
-		onboardPolicyFrom(cfg),
-		log,
-		reporter.Unexpected,
-	)
+	onboardWorkflow := newOnboardWorkflow(cfg, userStore, orgStore, projectStore, inviteStore, uow, log, reporter.Unexpected)
 
 	genesisHash, err := hashGenesisPassword(cfg.Genesis.Password)
 	if err != nil {
@@ -164,7 +159,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	keyStore := apikey.NewStore(cfg.DB, pool, pgConn)
 	keyUsage := apikey.NewUsageWorker(keyStore, apiKeyUsageFlushInterval, log)
 	keyScheme := apikey.NewScheme(cfg.API.KeyPrefix)
-	keyAuthn := apikey.NewAuthenticator(keyStore, keyUsage, keyScheme, orgs)
+	keyAuthn := apikey.NewAuthenticator(keyStore, keyUsage, keyScheme)
 	keys := apikey.NewService(keyStore, keyScheme, orgs, projectServiceForAPIKeys{svc: projects}, log, reporter.Unexpected)
 	orgs.OnMemberRemoved(keys.RevokePersonalOf)
 	// SECURITY: key first, so its shape gate rejects a non-key credential without a DB call.
@@ -183,6 +178,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		InviteStore:  inviteStore,
 		OnboardStore: onboardStore,
 		WebhookStore: webhookStore,
+		RoleStore:    roleStore,
 		Auth:         auths,
 		Users:        users,
 		Orgs:         orgs,
@@ -191,12 +187,28 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		Invites:      invites,
 		Onboards:     onboards,
 		Webhooks:     webhooks,
+		Roles:        roles,
 		Onboard:      onboardWorkflow,
 		Authn:        chain,
 		KeyAuthn:     keyAuthn,
 		APIKeys:      keys,
 		APIKeyUsage:  keyUsage,
+
+		opensheetServices: opensheetServices{Authz: resolver},
 	}, nil
+}
+
+func newRoleService(cfg *config.Config, roles role.Store, orgs org.Store, log *slog.Logger, unexpected apperror.UnexpectedFunc, uow tenant.UnitOfWork) *role.Service {
+	return role.NewService(roles, orgStaffForRoles{store: orgs, cloud: cfg.Mode == config.ModeCloud}, log, unexpected, uow)
+}
+
+func newAcceptWorkflow(invites invite.Store, users user.Store, orgs org.Store, uow tenant.UnitOfWork, log *slog.Logger, unexpected apperror.UnexpectedFunc) *invite.AcceptWorkflow {
+	return invite.NewAcceptWorkflow(invites, userStoreForInvite{store: users}, orgStoreForInvite{store: orgs}, log, unexpected, invite.WithUnitOfWork(uow))
+}
+
+func newOnboardWorkflow(cfg *config.Config, users user.Store, orgs org.Store, projects project.Store, invites invite.Store, uow tenant.UnitOfWork, log *slog.Logger, unexpected apperror.UnexpectedFunc) *user.OnboardWorkflow {
+	return user.NewOnboardWorkflow(users, orgStoreForOnboard{store: orgs}, projectStoreForOnboard{store: projects},
+		inviteStoreForOnboard{store: invites}, onboardPolicyFrom(cfg), log, unexpected, user.WithOnboardUnitOfWork(uow))
 }
 
 func onboardPolicyFrom(cfg *config.Config) user.Policy {

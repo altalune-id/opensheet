@@ -479,7 +479,7 @@ func newHarness(t *testing.T) *harness {
 	store := fakes.NewAPIKey()
 	h.keys["reader"] = seedKey(t, store, authn.ScopeSheetsRead)
 	chain := authn.Chain{
-		apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()),
+		apikey.NewAuthenticator(store, nil, apikey.Scheme{}),
 		tokens.NewAuthenticator(verifier, authScheme()),
 	}
 

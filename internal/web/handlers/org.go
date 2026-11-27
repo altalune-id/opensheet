@@ -12,6 +12,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
+	rolepkg "altalune.id/opensheet/internal/role"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
 	slugs "altalune.id/opensheet/slug"
@@ -125,6 +126,10 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	}
 	p, o, r := sc.principal, sc.org, sc.req
 	profiles, err := h.Orgs.ListMemberProfiles(r.Context(), o.ID)
+	if authz.IsDeniedError(err) {
+		Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, o.Slug, "members"), templates.MembersView{OrgSlug: o.Slug, OrgName: o.Name, CannotView: true}))
+		return
+	}
 	if err != nil {
 		h.LogErr("web org: members", err)
 		h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.", err)
@@ -132,12 +137,17 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	}
 	held := authz.Held(r.Context())
 	role := viewerRole(profiles, p.UserID)
+	canManage := slices.Contains(held, authz.MembersWrite)
+	var custom []*rolepkg.Role
+	if canManage {
+		custom = h.customRoles(r)
+	}
 	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, o.Slug, "members"), templates.MembersView{
 		OrgSlug:        o.Slug,
 		OrgName:        o.Name,
-		Members:        memberProfileRows(profiles, o.ID, p.UserID, held),
-		CanManage:      slices.Contains(held, authz.MembersWrite),
-		GrantableRoles: grantableRoles(held, role),
+		Members:        memberProfileRows(profiles, o.ID, p.UserID, held, h.memberPermissions(r, profiles), custom),
+		CanManage:      canManage,
+		GrantableRoles: grantableRoles(held, role, custom),
 		ViewerIsOwner:  role == org.RoleOwner,
 		RoleUpdated:    r.URL.Query().Has("role_updated"),
 	}))
@@ -217,8 +227,8 @@ func (h *OrgHandler) PostSetRole(w http.ResponseWriter, r *http.Request) {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
-	role := org.Role(strings.TrimSpace(r.PostForm.Get("role")))
-	err = h.Orgs.SetRole(r.Context(), o.ID, userID, role, uuid.Nil)
+	role, roleID := parseRoleValue(strings.TrimSpace(r.PostForm.Get("role")))
+	err = h.Orgs.SetRole(r.Context(), o.ID, userID, role, roleID)
 	switch {
 	case err == nil:
 		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/members?role_updated=1"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
@@ -297,17 +307,37 @@ func viewerRole(items []*org.MemberProfile, viewer uuid.UUID) org.Role {
 	return ""
 }
 
-func grantableRoles(held []authz.Permission, viewer org.Role) []string {
-	var out []string
+func grantableRoles(held []authz.Permission, viewer org.Role, custom []*rolepkg.Role) []templates.RoleOption {
+	var out []templates.RoleOption
 	for _, r := range []org.Role{org.RoleOwner, org.RoleAdmin, org.RoleMember} {
-		if org.RoleChangeRefusal(held, viewer, r, r) == nil {
-			out = append(out, string(r))
+		perms := authz.Builtin(string(r))
+		if org.RoleChangeRefusal(held, viewer, r, r, perms, perms) == nil {
+			out = append(out, templates.RoleOption{Value: string(r)})
+		}
+	}
+	for _, c := range custom {
+		if org.RoleChangeRefusal(held, viewer, org.RoleCustom, org.RoleCustom, c.Permissions, c.Permissions) == nil {
+			out = append(out, templates.RoleOption{Value: c.ID.String(), Label: c.Name})
 		}
 	}
 	return out
 }
 
-func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID, held []authz.Permission) []templates.MemberRow {
+// SECURITY: a member whose set could not be read is left out, so the page offers no edit or remove for them.
+func (h *OrgHandler) memberPermissions(r *http.Request, items []*org.MemberProfile) map[uuid.UUID][]authz.Permission {
+	out := make(map[uuid.UUID][]authz.Permission, len(items))
+	for _, m := range items {
+		perms, err := h.Authz.PermissionsOf(r.Context(), string(m.Role), m.RoleID)
+		if err != nil {
+			h.LogErr("web org: member permissions", err)
+			continue
+		}
+		out[m.UserID] = perms
+	}
+	return out
+}
+
+func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID, held []authz.Permission, perms map[uuid.UUID][]authz.Permission, custom []*rolepkg.Role) []templates.MemberRow {
 	viewerRole := viewerRole(items, viewer)
 	owners := 0
 	for _, m := range items {
@@ -318,19 +348,60 @@ func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID, held
 	out := make([]templates.MemberRow, 0, len(items))
 	for _, m := range items {
 		lastOwner := m.Role == org.RoleOwner && owners == 1
+		mp, known := perms[m.UserID]
 		out = append(out, templates.MemberRow{
 			UserID:       m.UserID.String(),
 			Email:        m.Email,
 			Name:         m.Name,
 			Role:         string(m.Role),
+			RoleValue:    roleValue(m.Role, m.RoleID),
+			RoleName:     customRoleName(custom, m.RoleID),
 			System:       m.System,
 			IsSelf:       m.UserID == viewer,
-			Removable:    org.RemovalRefusal(orgID, viewer, m.UserID, viewerRole, m.Role, m.System) == nil,
-			RoleEditable: !m.System && !lastOwner && org.RoleChangeRefusal(held, viewerRole, m.Role, m.Role) == nil,
+			Removable:    known && org.RemovalRefusal(orgID, viewer, m.UserID, viewerRole, m.Role, m.System, held, mp) == nil,
+			RoleEditable: known && !m.System && !lastOwner && org.RoleChangeRefusal(held, viewerRole, m.Role, m.Role, mp, mp) == nil,
 			LastOwner:    lastOwner,
 		})
 	}
 	return out
+}
+
+func (d Deps) customRoles(r *http.Request) []*rolepkg.Role {
+	if d.Roles == nil {
+		return nil
+	}
+	items, err := d.Roles.List(r.Context())
+	if err != nil {
+		d.LogErr("web role: picker", err)
+		return nil
+	}
+	return items
+}
+
+func customRoleName(items []*rolepkg.Role, id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	for _, it := range items {
+		if it.ID == id {
+			return it.Name
+		}
+	}
+	return ""
+}
+
+func roleValue(r org.Role, id uuid.UUID) string {
+	if id != uuid.Nil {
+		return id.String()
+	}
+	return string(r)
+}
+
+func parseRoleValue(v string) (org.Role, uuid.UUID) {
+	if id, err := uuid.Parse(v); err == nil {
+		return org.RoleCustom, id
+	}
+	return org.Role(v), uuid.Nil
 }
 
 // Register wires all org routes onto the mux.

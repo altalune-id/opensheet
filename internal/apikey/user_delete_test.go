@@ -12,7 +12,6 @@ import (
 	"altalune.id/opensheet/internal/platform/authn"
 	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
-	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 type userKeys struct {
@@ -54,7 +53,7 @@ func assertRevokedOnDelete(t *testing.T, store apikey.Store, tc tenant.Context, 
 		require.NoError(t, err)
 		assert.Nil(t, got.RevokedAt, "another user's %s is untouched", name)
 	}
-	_, err = apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), gone.projectPlain)
+	_, err = apikey.NewAuthenticator(store, nil, apikey.Scheme{}).Authenticate(t.Context(), gone.projectPlain)
 	assert.True(t, authn.IsUnauthorizedError(err), "the revoked key is refused, got %v", err)
 }
 

@@ -16,6 +16,7 @@ import (
 
 	apikeyv1connect "altalune.id/opensheet/gen/go/apikey/v1/apikeyv1connect"
 	credentialv1connect "altalune.id/opensheet/gen/go/credential/v1/credentialv1connect"
+	orgv1connect "altalune.id/opensheet/gen/go/org/v1/orgv1connect"
 	projectv1connect "altalune.id/opensheet/gen/go/project/v1/projectv1connect"
 	sheetv1connect "altalune.id/opensheet/gen/go/sheet/v1/sheetv1connect"
 	spreadsheetv1connect "altalune.id/opensheet/gen/go/spreadsheet/v1/spreadsheetv1connect"
@@ -28,6 +29,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
@@ -73,6 +75,7 @@ type osHarness struct {
 	sheets *fakes.Sheet
 	keys   *fakes.APIKey
 	snaps  *fakes.SheetSnapshots
+	roles  *fakes.Role
 }
 
 func humanPrincipal(orgID uuid.UUID) session.Principal {
@@ -133,6 +136,7 @@ func buildOSHarnessOn(t *testing.T, p session.Principal, aerr error, realKeys bo
 	shts := fakes.NewSheet()
 	keys := fakes.NewAPIKey()
 	snaps := fakes.NewSheetSnapshots()
+	roles := fakes.NewRole()
 
 	sl := testSealer(t)
 	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected, fakes.UnitOfWork)
@@ -158,19 +162,19 @@ func buildOSHarnessOn(t *testing.T, p session.Principal, aerr error, realKeys bo
 		Spreadsheets:      sprdSvc,
 		Sheets:            sheetSvc,
 		Provision:         provision,
-		Authz:             resolverFor(orgSvc),
+		Authz:             authz.NewResolver(fakes.OrgRoles{Orgs: orgSvc, Roles: roles}),
 	})
 	if fo, ok := orgs.(*fakes.Org); ok {
 		seedActiveMember(t, fo, p)
 	}
 	srv.Authn = authn.Chain{stubAuthenticator{principal: p, err: aerr}}
 	if realKeys {
-		srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), stubAuthenticator{principal: p, err: aerr}}
+		srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}), stubAuthenticator{principal: p, err: aerr}}
 	}
 	srv.APIKeys = keySvc
 	ts := httptest.NewServer(srv.Handler(""))
 	t.Cleanup(ts.Close)
-	return &osHarness{t: t, server: ts, sprds: sprds, sheets: shts, keys: keys, snaps: snaps}
+	return &osHarness{t: t, server: ts, sprds: sprds, sheets: shts, keys: keys, snaps: snaps, roles: roles}
 }
 
 func (h *osHarness) seedProject(orgID uuid.UUID) *project.Project {
@@ -193,6 +197,10 @@ func (h *osHarness) mintKey(orgID, projectID uuid.UUID, scopes []string, resourc
 	}
 	h.keys.Seed(k)
 	return plaintext
+}
+
+func (h *osHarness) memberClient() orgv1connect.MemberServiceClient {
+	return orgv1connect.NewMemberServiceClient(http.DefaultClient, h.server.URL+"/api")
 }
 
 func (h *osHarness) projectClient() projectv1connect.ProjectServiceClient {

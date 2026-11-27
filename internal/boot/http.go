@@ -112,6 +112,7 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 	deps.Projects = svcs.Projects
 	deps.I18n = d.Bundle
 	deps.Authz = svcs.Authz
+	deps.Roles = svcs.Roles
 
 	authHandler := webhandlers.NewAuthHandler(deps, svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, kernel.AltAuth, d.Required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, svcs.Users)

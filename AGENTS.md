@@ -151,7 +151,7 @@ scoped API keys.
 - **Config** — opensheet's keys and its stricter Postgres rules:
   [`docs/config/opensheet.md`](docs/config/opensheet.md).
 - **Migrations** — template migrations are never edited, renamed, renumbered or deleted.
-  opensheet's own are Postgres `006`–`011`, `019` and `020`, SQLite `004`–`009`, `016` and `017`; a new
+  opensheet's own are Postgres `006`–`011` and `019`–`021`, SQLite `004`–`009` and `016`–`018`; a new
   template migration lands at the next free number. The template's edits to Postgres `001` and
   `005` and SQLite `001` are excluded on every sync, because `006_opensheet` already carries them.
   A fix to a template object goes in a migration opensheet owns. See

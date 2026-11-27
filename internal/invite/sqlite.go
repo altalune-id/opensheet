@@ -11,6 +11,7 @@ import (
 	"github.com/go-jet/jet/v2/sqlite"
 	"github.com/google/uuid"
 
+	pdb "altalune.id/opensheet/internal/platform/db"
 	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
@@ -33,6 +34,7 @@ type sqliteInviteRow struct {
 	ExpiresAt  string  `alias:"invites.expires_at"`
 	AcceptedAt *string `alias:"invites.accepted_at"`
 	CreatedAt  string  `alias:"invites.created_at"`
+	RoleID     *string `alias:"invites.role_id"`
 }
 
 func (r *sqliteInviteRow) toInvite() (*Invite, error) {
@@ -68,6 +70,11 @@ func (r *sqliteInviteRow) toInvite() (*Invite, error) {
 		}
 		inv.UsedAt = &t
 	}
+	if r.RoleID != nil && *r.RoleID != "" {
+		if inv.RoleID, err = uuid.Parse(*r.RoleID); err != nil {
+			return nil, fmt.Errorf("invite.sqlite: parse role_id: %w", err)
+		}
+	}
 	return inv, nil
 }
 
@@ -87,17 +94,19 @@ func (s *sqliteStore) Save(ctx context.Context, i *Invite) error {
 			sqliteNullableTimeArg(i.UsedAt),
 			tc.UserID.String(),
 			sqliteent.SQLiteTime(i.CreatedAt),
+			sqliteNullableUUID(i.RoleID),
 		).
 		ON_CONFLICT(s.table.ID).
 		// SECURITY: SQLite has no RLS, so this tenant predicate is the only thing stopping an attacker-supplied row id from updating another org's row.
 		DO_UPDATE(sqlite.SET(
 			s.table.Email.SET(sqlite.String(i.Email)),
 			s.table.Role.SET(sqlite.String(string(i.Role))),
+			s.table.RoleID.SET(sqliteRoleIDExpr(i.RoleID)),
 			s.table.TokenHash.SET(sqlite.String(i.TokenHash)),
 			s.table.ExpiresAt.SET(sqlite.String(sqliteent.SQLiteTime(i.ExpiresAt))),
 			s.table.AcceptedAt.SET(sqliteNullableTimeExpr(i.UsedAt)),
 		).WHERE(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
-	res, err := stmt.ExecContext(ctx, s.db)
+	res, err := stmt.ExecContext(ctx, s.conn(ctx))
 	if err != nil {
 		return fmt.Errorf("invite.sqlite.Save: %w", err)
 	}
@@ -145,7 +154,7 @@ func (s *sqliteStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*Invi
 			AND(s.table.AcceptedAt.IS_NULL())).
 		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.ListPending: %w", err)
 	}
 	out := make([]*Invite, 0, len(rows))
@@ -167,7 +176,7 @@ func (s *sqliteStore) FindPendingForEmail(ctx context.Context, email string) ([]
 			AND(s.table.AcceptedAt.IS_NULL())).
 		ORDER_BY(s.table.CreatedAt.ASC(), s.table.ID.ASC())
 	var rows []sqliteInviteRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &rows); err != nil {
 		return nil, fmt.Errorf("invite.sqlite.FindPendingForEmail: %w", err)
 	}
 	out := make([]*Invite, 0, len(rows))
@@ -189,7 +198,7 @@ func (s *sqliteStore) Delete(ctx context.Context, id uuid.UUID) error {
 	stmt := s.table.DELETE().
 		WHERE(s.table.ID.EQ(sqlite.String(id.String())).
 			AND(s.table.OrgID.EQ(sqlite.String(tc.OrgID.String()))))
-	res, err := stmt.ExecContext(ctx, s.db)
+	res, err := stmt.ExecContext(ctx, s.conn(ctx))
 	if err != nil {
 		return fmt.Errorf("invite.sqlite.Delete: %w", err)
 	}
@@ -209,7 +218,7 @@ func (s *sqliteStore) queryOne(ctx context.Context, cond sqlite.BoolExpression, 
 		WHERE(cond).
 		LIMIT(1)
 	var row sqliteInviteRow
-	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound
 		}
@@ -225,9 +234,30 @@ func sqliteNullableTimeArg(t *time.Time) any {
 	return sqliteent.SQLiteTime(*t)
 }
 
+func sqliteNullableUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id.String()
+}
+
+func sqliteRoleIDExpr(id uuid.UUID) sqlite.StringExpression {
+	if id == uuid.Nil {
+		return sqliteent.NullText()
+	}
+	return sqlite.String(id.String())
+}
+
 func sqliteNullableTimeExpr(t *time.Time) sqlite.StringExpression {
 	if t == nil {
 		return sqliteent.NullText()
 	}
 	return sqlite.String(sqliteent.SQLiteTime(*t))
+}
+
+func (s *sqliteStore) conn(ctx context.Context) qrm.DB {
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return tx
+	}
+	return s.db
 }

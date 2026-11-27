@@ -32,6 +32,6 @@ func TestAPIKeyPrefix_HasOneReaderInBoot(t *testing.T) {
 	services, err := os.ReadFile("services.go")
 	require.NoError(t, err)
 	require.Contains(t, string(services), "keyScheme := apikey.NewScheme(cfg.API.KeyPrefix)")
-	require.Contains(t, string(services), "apikey.NewAuthenticator(keyStore, keyUsage, keyScheme, orgs)")
+	require.Contains(t, string(services), "apikey.NewAuthenticator(keyStore, keyUsage, keyScheme)")
 	require.Contains(t, string(services), "apikey.NewService(keyStore, keyScheme,")
 }

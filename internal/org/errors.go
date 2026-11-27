@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
@@ -238,19 +237,6 @@ func (e *SystemProtectedError) ToAppError() *apperror.AppError {
 		codes.FailedPrecondition,
 		&apperrorv1.ErrorDetail{Code: apperror.CodeOrgSystemProtected},
 	)
-}
-
-// RemovalRefusal reports why actor may not remove the target membership, or nil when removal is allowed. SECURITY: the service gate and the members view both consult this, so a hidden button and a refused post cannot drift apart.
-func RemovalRefusal(orgID, actor, target uuid.UUID, actorRole, targetRole Role, system bool) error {
-	switch {
-	case system:
-		return &SystemProtectedError{Op: "remove_member", OrgID: orgID.String(), UserID: target.String(), Resource: "membership"}
-	case actor == target:
-		return &SelfRemovalError{OrgID: orgID.String(), UserID: target.String()}
-	case targetRole == RoleOwner && actorRole != RoleOwner:
-		return &OwnerRemovalError{OrgID: orgID.String(), UserID: target.String()}
-	}
-	return nil
 }
 
 // SelfRemovalError signals that a caller tried to remove their own membership.

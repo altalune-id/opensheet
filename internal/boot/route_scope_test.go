@@ -21,6 +21,7 @@ import (
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
@@ -58,6 +59,9 @@ func probeRoutes() []probeRoute {
 		{http.MethodGet, base, nil},
 		{http.MethodGet, base + "/members", nil},
 		{http.MethodGet, base + "/invites", nil},
+		{http.MethodGet, base + "/roles", nil},
+		{http.MethodGet, base + "/roles/new", nil},
+		{http.MethodGet, base + "/roles/" + id, nil},
 		{http.MethodGet, base + "/apikeys", nil},
 		{http.MethodGet, base + "/projects", nil},
 		{http.MethodGet, base + "/projects/new", nil},
@@ -87,6 +91,9 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, base + "/rename", url.Values{"name": {"Renamed"}}},
 		{http.MethodPost, base + "/invites", url.Values{"email": {"probe@example.com"}, "role": {"member"}}},
 		{http.MethodPost, base + "/invites/" + id + "/revoke", url.Values{}},
+		{http.MethodPost, base + "/roles", url.Values{"name": {"Probe Role"}, "perm": {"sheets:read"}}},
+		{http.MethodPost, base + "/roles/" + id, url.Values{"name": {"Probe Role"}, "perm": {"sheets:read"}, "version": {"1"}}},
+		{http.MethodPost, base + "/roles/" + id + "/delete", url.Values{}},
 		{http.MethodPost, base + "/apikeys", url.Values{"name": {"Probe Key"}, "grant": {"all"}}},
 		{http.MethodPost, base + "/apikeys/" + id + "/projects", url.Values{}},
 		{http.MethodPost, base + "/apikeys/" + id + "/all-projects", url.Values{}},
@@ -592,7 +599,7 @@ func TestMembersPage_RemoveButtonMatchesTheServiceGate(t *testing.T) {
 		require.NoError(t, mErr)
 		viewerM, vErr := srv.Orgs.MembershipOf(scoped, o.ID, viewer.ID)
 		require.NoError(t, vErr)
-		allowed := org.RemovalRefusal(o.ID, viewer.ID, u, viewerM.Role, m.Role, m.System) == nil
+		allowed := org.RemovalRefusal(o.ID, viewer.ID, u, viewerM.Role, m.Role, m.System, authz.Builtin(string(viewerM.Role)), authz.Builtin(string(m.Role))) == nil
 		require.Equal(t, allowed, strings.Contains(body, removeForm(u)),
 			"button visibility for %s disagrees with org.RemovalRefusal", u)
 	}

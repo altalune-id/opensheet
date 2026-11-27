@@ -11,8 +11,8 @@ domain interfaces — SQLite is dev/demo, Postgres is production.
 
 ```
 schema/
-├── migrations/postgres/    # 001_init … 020_org_api_keys, VERSION
-├── migrations/sqlite/      # 001_init … 017_org_api_keys, VERSION
+├── migrations/postgres/    # 001_init … 021_roles, VERSION
+├── migrations/sqlite/      # 001_init … 018_roles, VERSION
 ├── migrator.go             # goose runner, template rendering, embed FS
 ├── migrator_templatefs.go  # per-boot template-rendered file system
 ├── rls_guard.go            # boot-time BYPASSRLS assertion
@@ -39,6 +39,9 @@ erDiagram
     orgs ||--o{ memberships : "has"
     orgs ||--o{ projects : "owns"
     orgs ||--o{ invites : "pending"
+    orgs ||--o{ roles : "defines"
+    roles |o--o{ memberships : "custom role"
+    roles |o--o{ invites : "custom role"
     projects ||--o{ todos : "contains"
     projects ||--o{ blog_posts : "contains"
     blog_posts ||--o{ blog_post_tags : "tagged"
@@ -52,7 +55,20 @@ erDiagram
     memberships {
         uuid org_id FK
         uuid user_id FK
-        text role "owner|admin|member"
+        text role "owner|admin|member|custom"
+        uuid role_id FK "set exactly when role is custom"
+    }
+    invites {
+        uuid org_id FK
+        text role "owner|admin|member|custom"
+        uuid role_id FK "set exactly when role is custom"
+    }
+    roles {
+        uuid id PK
+        uuid org_id FK
+        text name "unique per org, ignoring case"
+        text_array permissions "catalogue permissions"
+        bigint version
     }
     projects {
         uuid id PK
@@ -134,7 +150,7 @@ pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 
 Postgres `001`–`005` and `012`–`018`, and SQLite `001`–`003` and `010`–`015`, are the template's,
 content byte-identical to it. They are **never edited, renamed, renumbered or deleted**.
-opensheet's own are Postgres `006`–`011`, `019` and `020`, and SQLite `004`–`009`, `016` and `017`. A new template migration lands
+opensheet's own are Postgres `006`–`011` and `019`–`021`, and SQLite `004`–`009` and `016`–`018`. A new template migration lands
 at opensheet's next free number; a new opensheet migration takes the next free number too.
 
 The template's later edits to Postgres `001_init` and `005_definer_functions` and SQLite
@@ -233,6 +249,12 @@ erDiagram
   revokes the org and project keys they created, in every org, before `created_by` goes `NULL`.
   The rows stay, so rows a key authored keep their reference. A personal token is left alone: a
   `NULL` owner already refuses it.
+- `021_roles` (SQLite `018`) adds `roles`, an org's custom roles, and lets a membership or invite
+  hold `role = 'custom'` with a `role_id`; a CHECK sets `role_id` exactly when the role is custom,
+  and a composite `(org_id, role_id)` key keeps it inside the org. A held role cannot be deleted.
+  SQLite rebuilds `memberships` and `invites`, which also gain `UNIQUE (org_id, id)`. Postgres
+  replaces `resolve_invite_by_token_hash` and `list_pending_invites_for_email` to return `role_id`.
+  The down deletes custom-role members and invites, which the restored CHECK refuses.
 - `sheets.generation` guards the projection: a refresh captures it before fetching and discards
   its write if it moved, and a `PATCH` holds it as a per-sheet write lock.
 

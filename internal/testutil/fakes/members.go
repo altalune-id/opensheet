@@ -61,14 +61,6 @@ func (m *Members) role(orgID, userID uuid.UUID) (org.Role, bool) {
 	return r, ok
 }
 
-// RequireManager refuses with *org.NotManagerError unless userID is a seated manager of orgID.
-func (m *Members) RequireManager(_ context.Context, orgID, userID uuid.UUID) error {
-	if r, ok := m.role(orgID, userID); !ok || !r.CanManage() {
-		return &org.NotManagerError{OrgID: orgID.String(), UserID: userID.String()}
-	}
-	return nil
-}
-
 // RequireMember refuses with *org.MembershipMissingError unless userID is seated in orgID.
 func (m *Members) RequireMember(_ context.Context, orgID, userID uuid.UUID) error {
 	if _, ok := m.role(orgID, userID); !ok {

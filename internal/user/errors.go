@@ -23,6 +23,19 @@ func IsSingletonOrgMissingError(err error) bool {
 	return ok
 }
 
+// MembershipMissingError signals the user holds no membership in the org.
+type MembershipMissingError struct{}
+
+func (e *MembershipMissingError) Error() string {
+	return "user: membership missing"
+}
+
+// IsMembershipMissingError reports whether err's tree contains a *MembershipMissingError.
+func IsMembershipMissingError(err error) bool {
+	_, ok := errors.AsType[*MembershipMissingError](err)
+	return ok
+}
+
 // NotFoundError signals no user matched the lookup.
 type NotFoundError struct {
 	ID      string

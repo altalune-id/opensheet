@@ -44,15 +44,34 @@ func (s orgStoreForInvite) ByID(ctx context.Context, id uuid.UUID) (*invite.OrgR
 }
 
 func (s orgStoreForInvite) SaveMembership(ctx context.Context, m *invite.MembershipRef) error {
-	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role)})
+	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID})
 }
 
 func (s orgStoreForInvite) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*invite.MembershipRef, error) {
 	m, err := s.store.MembershipOf(ctx, orgID, userID)
+	if org.IsMembershipMissingError(err) {
+		return nil, &invite.MembershipMissingError{}
+	}
 	if err != nil {
 		return nil, err
 	}
-	return &invite.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: invite.Role(m.Role)}, nil
+	return &invite.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: invite.Role(m.Role), RoleID: m.RoleID}, nil
+}
+
+type orgStaffForRoles struct {
+	store org.Store
+	cloud bool
+}
+
+func (s orgStaffForRoles) IsStaff(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	if !s.cloud {
+		return false, nil
+	}
+	o, err := s.store.ByID(ctx, orgID)
+	if err != nil {
+		return false, err
+	}
+	return o.System, nil
 }
 
 type userStoreForAuth struct{ store user.Store }
@@ -120,14 +139,17 @@ func (s orgStoreForOnboard) ListForUser(ctx context.Context, userID uuid.UUID) (
 
 func (s orgStoreForOnboard) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*user.MembershipRef, error) {
 	m, err := s.store.MembershipOf(ctx, orgID, userID)
+	if org.IsMembershipMissingError(err) {
+		return nil, &user.MembershipMissingError{}
+	}
 	if err != nil {
 		return nil, err
 	}
-	return &user.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: string(m.Role)}, nil
+	return &user.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: string(m.Role), RoleID: m.RoleID}, nil
 }
 
 func (s orgStoreForOnboard) SaveMembership(ctx context.Context, m *user.MembershipRef) error {
-	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role)})
+	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID})
 }
 
 type projectStoreForOnboard struct{ store project.Store }
@@ -191,6 +213,7 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 			OrgID:      inv.OrgID,
 			Email:      inv.Email,
 			Role:       string(inv.Role),
+			RoleID:     inv.RoleID,
 			ExpiresAt:  inv.ExpiresAt,
 			AcceptedAt: inv.UsedAt,
 		})

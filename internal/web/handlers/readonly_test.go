@@ -225,7 +225,7 @@ func TestMembersPage_RoleSelectFollowsTheCallersRole(t *testing.T) {
 	assert.NotContains(t, body, `value="owner"`, "an admin cannot grant owner")
 
 	body = x.do(t, x.member, http.MethodGet, "/orgs/acme/members", nil).Body.String()
-	assert.NotContains(t, body, "/role")
+	assert.NotContains(t, body, `/role"`)
 	assert.NotContains(t, body, "<select")
 }
 

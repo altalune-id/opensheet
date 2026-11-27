@@ -102,10 +102,25 @@ Both `401`s carry `WWW-Authenticate: Bearer error="invalid_token"` naming the AP
 
 ## ROL — Roles and permissions
 
-`ROL002`-`ROL012` are reserved for custom roles and project grants.
+`ROL010`-`ROL012` are reserved for project grants.
 
-| Code     | Constant                        | Meaning           |
-| -------- | ------------------------------- | ----------------- |
-| `ROL001` | `apperror.CodePermissionDenied` | Permission Denied |
-| `ROL004` | `apperror.CodeRoleEscalation`   | Role Escalation   |
-| `ROL013` | `apperror.CodeRoleLastOwner`    | Role Last Owner   |
+| Code     | Constant                             | Meaning                 |
+| -------- | ------------------------------------ | ----------------------- |
+| `ROL001` | `apperror.CodePermissionDenied`      | Permission Denied       |
+| `ROL002` | `apperror.CodeRoleNotFound`          | Role Not Found          |
+| `ROL003` | `apperror.CodeRoleInUse`             | Role In Use             |
+| `ROL004` | `apperror.CodeRoleEscalation`        | Role Escalation         |
+| `ROL005` | `apperror.CodeRoleInvalidPermission` | Role Invalid Permission |
+| `ROL006` | `apperror.CodeRoleSystemOrg`         | Role System Org         |
+| `ROL007` | `apperror.CodeRoleInvalidName`       | Role Invalid Name       |
+| `ROL008` | `apperror.CodeRoleAlreadyExists`     | Role Already Exists     |
+| `ROL009` | `apperror.CodeRoleStaleVersion`      | Role Stale Version      |
+| `ROL013` | `apperror.CodeRoleLastOwner`         | Role Last Owner         |
+
+## APK — API keys
+
+The template's `APK` codes are in [`README.md`](README.md#apk--api-keys). opensheet adds:
+
+| Code     | Constant                          | Meaning                |
+| -------- | --------------------------------- | ---------------------- |
+| `APK013` | `apperror.CodeAPIKeyScopeNotHeld` | API Key Scope Not Held |
