@@ -130,7 +130,13 @@ func (h *SignupHandler) PostSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tctx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	tctx, err := h.Authz.Bind(ctx, p, tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	if err != nil {
+		h.LogErr("signup: bind", err)
+		view.Error = "Could not create the first project."
+		h.render(w, r, view)
+		return
+	}
 	proj, err := h.Projects.Create(tctx, o.ID, view.ProjectSlug, view.ProjectName)
 	if err != nil {
 		if project.IsAlreadyExistsError(err) {

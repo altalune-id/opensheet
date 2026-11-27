@@ -9,7 +9,9 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
 func TestPrincipal(t *testing.T) {
@@ -54,8 +56,9 @@ func TestPrincipal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			roles := fakes.NewRoles().Set(tt.in.ActiveOrgID, tt.in.UserID, "member")
 			ctx := session.PrincipalInto(context.Background(), tt.in)
-			got, err := principal(ctx)
+			_, got, err := principal(ctx, authz.NewResolver(roles))
 
 			if tt.wantErr {
 				if err == nil {

@@ -40,6 +40,7 @@ func buildAPIHandler(cfg *config.Config, k *platform.Kernel, s *Services, resour
 		Spreadsheets:      s.Spreadsheets,
 		Sheets:            s.Sheets,
 		Provision:         s.Provision,
+		Authz:             s.Authz,
 	})
 	srv.Authn = s.Authn
 	srv.Resource = resource
@@ -110,6 +111,7 @@ func buildWebHandler(d webHandlerDeps) (handler http.Handler, routes []string, e
 	deps.Orgs = svcs.Orgs
 	deps.Projects = svcs.Projects
 	deps.I18n = d.Bundle
+	deps.Authz = svcs.Authz
 
 	authHandler := webhandlers.NewAuthHandler(deps, svcs.Auth, svcs.Users, svcs.Orgs, svcs.Projects, kernel.AltAuth, d.Required)
 	onboardingHandler := webhandlers.NewOnboardingHandler(deps, svcs.Users)

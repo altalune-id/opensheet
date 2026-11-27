@@ -234,7 +234,7 @@ func (k *APIKey) Matches(plaintext string) bool {
 
 // Usable reports whether the key is neither revoked nor expired at now.
 func (k *APIKey) Usable(now time.Time) bool {
-	if k.RevokedAt != nil && !k.RevokedAt.After(now.UTC()) {
+	if k.RevokedAt != nil {
 		return false
 	}
 	if k.ExpiresAt != nil && !k.ExpiresAt.After(now.UTC()) {

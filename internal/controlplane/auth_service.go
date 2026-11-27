@@ -11,22 +11,26 @@ import (
 	authv1 "altalune.id/opensheet/gen/go/auth/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/org"
-	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/authz"
 )
 
 // AuthService implements auth.v1.AuthService by reflecting the caller's Principal back to the client.
 type AuthService struct {
-	orgs *org.Service
+	authz *authz.Resolver
+	orgs  *org.Service
 }
 
 // NewAuthService wires the handler with the org service used to resolve the active-org slug.
-func NewAuthService(orgs *org.Service) *AuthService {
-	return &AuthService{orgs: orgs}
+func NewAuthService(rz *authz.Resolver, orgs *org.Service) *AuthService {
+	return &AuthService{authz: rz, orgs: orgs}
 }
 
 // Whoami returns identity + active-org info for the caller's Principal.
 func (s *AuthService) Whoami(ctx context.Context, _ *connect.Request[authv1.WhoamiRequest]) (*connect.Response[authv1.WhoamiResponse], error) {
-	p := session.PrincipalFrom(ctx)
+	ctx, p, err := principal(ctx, s.authz)
+	if err != nil {
+		return nil, err
+	}
 	if p.Email == "" && p.UserID == uuid.Nil {
 		return nil, apperror.New(
 			apperror.CodeUnauthenticated,

@@ -158,7 +158,11 @@ func buildOSHarnessOn(t *testing.T, p session.Principal, aerr error, realKeys bo
 		Spreadsheets:      sprdSvc,
 		Sheets:            sheetSvc,
 		Provision:         provision,
+		Authz:             resolverFor(orgSvc),
 	})
+	if fo, ok := orgs.(*fakes.Org); ok {
+		seedActiveMember(t, fo, p)
+	}
 	srv.Authn = authn.Chain{stubAuthenticator{principal: p, err: aerr}}
 	if realKeys {
 		srv.Authn = authn.Chain{apikey.NewAuthenticator(keys, nil, apikey.Scheme{}, fakes.NewMembers()), stubAuthenticator{principal: p, err: aerr}}

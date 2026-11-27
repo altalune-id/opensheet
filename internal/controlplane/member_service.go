@@ -8,22 +8,24 @@ import (
 
 	orgv1 "altalune.id/opensheet/gen/go/org/v1"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // MemberService implements org.v1.MemberService.
 type MemberService struct {
-	orgs *org.Service
+	authz *authz.Resolver
+	orgs  *org.Service
 }
 
 // NewMemberService binds the handler to its collaborators.
-func NewMemberService(orgs *org.Service) *MemberService {
-	return &MemberService{orgs: orgs}
+func NewMemberService(rz *authz.Resolver, orgs *org.Service) *MemberService {
+	return &MemberService{authz: rz, orgs: orgs}
 }
 
 // ListMembers returns the members of the principal's own org. SECURITY: the org is read from the principal alone, so no caller can re-target this read.
 func (s *MemberService) ListMembers(ctx context.Context, _ *connect.Request[orgv1.ListMembersRequest]) (*connect.Response[orgv1.ListMembersResponse], error) {
-	p, err := principal(ctx)
+	ctx, p, err := principal(ctx, s.authz)
 	if err != nil {
 		return nil, err
 	}

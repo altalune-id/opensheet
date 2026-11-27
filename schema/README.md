@@ -94,19 +94,20 @@ Also tenant-scoped: `blog_categories`, `blog_tags`, `outbox_entries`, `bootstrap
 
 ## SECURITY DEFINER functions (Postgres)
 
-Each one lifts RLS for a lookup that runs before any tenant scope exists.
+Each one lifts RLS for a lookup that runs before any tenant scope exists, or for a trigger that writes across tenants.
 All are owned by the migration role, with `EXECUTE` revoked from `PUBLIC`,
 pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 
-| Function                                | Resolves                                |
-| --------------------------------------- | --------------------------------------- |
-| `resolve_api_key_by_secret_hash(bytea)` | a key and its project grant, by hash    |
-| `resolve_org_by_slug(text)`             | an org from a path slug                 |
-| `resolve_invite_by_token_hash(text)`    | an invite from its link                 |
-| `list_pending_invites_for_email(text)`  | invites waiting for a signing-up user   |
-| `list_orgs_for_user(uuid)`              | a user's orgs, to resolve their tenant  |
-| `list_org_ids()`                        | every org id, for cross-tenant jobs     |
-| `resolve_system_org()`                  | the singleton org on a selfhosted login |
+| Function                                | Resolves                                               |
+| --------------------------------------- | ------------------------------------------------------ |
+| `resolve_api_key_by_secret_hash(bytea)` | a key and its project grant, by hash                   |
+| `resolve_org_by_slug(text)`             | an org from a path slug                                |
+| `resolve_invite_by_token_hash(text)`    | an invite from its link                                |
+| `list_pending_invites_for_email(text)`  | invites waiting for a signing-up user                  |
+| `list_orgs_for_user(uuid)`              | a user's orgs, to resolve their tenant                 |
+| `list_org_ids()`                        | every org id, for cross-tenant jobs                    |
+| `resolve_system_org()`                  | the singleton org on a selfhosted login                |
+| `revoke_keys_of_deleted_user()`         | trigger: revokes a deleted user's org and project keys |
 
 ## Adding a migration
 
@@ -133,7 +134,7 @@ pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 
 Postgres `001`–`005` and `012`–`018`, and SQLite `001`–`003` and `010`–`015`, are the template's,
 content byte-identical to it. They are **never edited, renamed, renumbered or deleted**.
-opensheet's own are Postgres `006`–`011` and `019`, and SQLite `004`–`009` and `016`. A new template migration lands
+opensheet's own are Postgres `006`–`011`, `019` and `020`, and SQLite `004`–`009`, `016` and `017`. A new template migration lands
 at opensheet's next free number; a new opensheet migration takes the next free number too.
 
 The template's later edits to Postgres `001_init` and `005_definer_functions` and SQLite
@@ -228,6 +229,10 @@ erDiagram
 - `spreadsheets.provision_key` (`019`, SQLite `016`) is the idempotency key of the `Provision`
   call that created the document, `NULL` for one registered by hand. A partial unique index on
   `(project_id, provision_key)` makes a retried call find its first file instead of creating another.
+- `020_revoke_orphan_keys` (SQLite `017`) adds the `users_revoke_keys` trigger: deleting a user
+  revokes the org and project keys they created, in every org, before `created_by` goes `NULL`.
+  The rows stay, so rows a key authored keep their reference. A personal token is left alone: a
+  `NULL` owner already refuses it.
 - `sheets.generation` guards the projection: a refresh captures it before fetching and discards
   its write if it moved, and a `PATCH` holds it as a per-sheet write lock.
 

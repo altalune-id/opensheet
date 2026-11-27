@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
@@ -64,13 +65,34 @@ func (d Deps) MemberOrgScopes(r *http.Request, p session.Principal, sid string) 
 	}
 	out := make([]OrgScope, 0, len(orgs))
 	for _, o := range orgs {
-		out = append(out, OrgScope{principal: p, sid: sid, org: o, req: orgScopedRequest(r, p, o)})
+		req, err := d.bind(r, p, tenant.Context{OrgID: o.ID, UserID: p.UserID})
+		if authn.IsUnauthorizedError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, OrgScope{principal: p, sid: sid, org: o, req: req})
 	}
 	return out, nil
 }
 
-func orgScopedRequest(r *http.Request, p session.Principal, o *org.Org) *http.Request {
-	return r.WithContext(tenant.Into(r.Context(), tenant.Context{OrgID: o.ID, UserID: p.UserID}))
+func (d Deps) bind(r *http.Request, p session.Principal, tc tenant.Context) (*http.Request, error) {
+	ctx, err := d.Authz.Bind(r.Context(), p, tc)
+	if err != nil {
+		return nil, err
+	}
+	return r.WithContext(ctx), nil
+}
+
+// SECURITY: a non-member gets the same 404 as a bad slug; only an outage is a 503.
+func (d Deps) bindFailed(w http.ResponseWriter, r *http.Request, err error) {
+	if !authn.IsUnavailableError(err) {
+		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
+		return
+	}
+	d.LogErr("web: bind", err)
+	d.ErrorPage(w, r, http.StatusServiceUnavailable, "Unavailable", "Could not check your access. Try again.", err)
 }
 
 // RequireProject resolves the org and project the path names, gating org membership before the project is looked up. SECURITY: membership is org-level by design, so this admits ANY project in an org the caller belongs to — see ../../../docs/multitenancy/request-scope.md.

@@ -248,7 +248,7 @@ func TestOIDC_ForgedLastUserCookieIsIgnored(t *testing.T) {
 func TestOIDC_StartRefusesWithoutAStateSecret(t *testing.T) {
 	t.Parallel()
 	o := newOIDCHarness(t)
-	deps := handlers.Deps{Cfg: o.f.Cfg, Caps: o.f.Deps.Caps, Sessions: o.f.Sessions, Logger: o.f.Deps.Logger, Orgs: o.f.Orgs, Projects: o.f.Projects}
+	deps := handlers.Deps{Cfg: o.f.Cfg, Caps: o.f.Deps.Caps, Sessions: o.f.Sessions, Logger: o.f.Deps.Logger, Orgs: o.f.Orgs, Projects: o.f.Projects, Authz: o.f.Deps.Authz}
 	h := handlers.NewAuthHandler(deps, nil, o.f.Users, o.f.Orgs, o.f.Projects, oidcrp.New(oidcrp.Config{Issuer: o.idp.Issuer(), HTTPClient: o.idp.Client()}), nil)
 	mux := http.NewServeMux()
 	h.Register(mux)

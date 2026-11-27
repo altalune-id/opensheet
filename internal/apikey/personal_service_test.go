@@ -118,24 +118,24 @@ func TestOnlyTheOwnerChangesAPersonalToken(t *testing.T) {
 	require.NoError(t, f.svc.Revoke(owner, k.ID))
 }
 
-// SECURITY: a personal token acts for its owner, so it stops the moment the owner leaves the org, and it fails closed when nothing can check.
-func TestAPersonalTokenDiesWithItsOwnersMembership(t *testing.T) {
+// SECURITY: a personal token without an org-level scope leaves the role check to the resolver at bind time; authentication asks no membership store.
+func TestAuthenticate_PersonalTokenSheetScopesOnlyUnaffected(t *testing.T) {
 	f := newPersonalFixture(t)
-	_, plaintext := f.mint(t, f.alice, apikey.ProjectGrant{All: true})
-
-	auth := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, f.members)
-	p, err := auth.Authenticate(t.Context(), plaintext)
+	_, plaintext, err := f.svc.MintPersonal(f.ctx(t, f.admin), "admin", []string{authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, in(time.Hour))
 	require.NoError(t, err)
-	assert.True(t, p.ReachesProject(f.orgID, f.b))
-	assert.Equal(t, uuid.Nil, p.UserID, "a token is never mistaken for a signed-in person")
+	f.members.SeatMember(f.orgID, f.admin)
+	_, err = apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, f.members).Authenticate(t.Context(), plaintext)
+	require.NoError(t, err, "a demoted owner's sheet-only token is not refused at authentication")
 
+	_, plaintext = f.mint(t, f.alice, apikey.ProjectGrant{All: true})
 	f.members.Remove(f.orgID, f.alice)
-	_, err = auth.Authenticate(t.Context(), plaintext)
-	assert.True(t, authn.IsUnauthorizedError(err), "a departed owner's token must be refused, got %v", err)
-
-	f.members.SeatMember(f.orgID, f.alice)
-	_, err = apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, nil).Authenticate(t.Context(), plaintext)
-	assert.True(t, authn.IsUnauthorizedError(err), "without a membership check a personal token must be refused, got %v", err)
+	for name, m := range map[string]apikey.Members{"departed owner": f.members, "membership outage": unreachableMembers{}, "no membership check": nil} {
+		p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, m).Authenticate(t.Context(), plaintext)
+		require.NoError(t, err, name)
+		assert.Equal(t, f.alice, p.KeyOwnerID, name)
+		assert.True(t, p.ReachesProject(f.orgID, f.b), name)
+		assert.Equal(t, uuid.Nil, p.UserID, "a token is never mistaken for a signed-in person")
+	}
 }
 
 // SECURITY: leaving an org revokes the member's personal tokens there for good; re-joining never revives one.
@@ -174,14 +174,6 @@ func (unreachableMembers) RequireMember(context.Context, uuid.UUID, uuid.UUID) e
 	return errors.New("connection refused")
 }
 
-func TestAPersonalTokenDuringAMembershipOutageIsUnavailable(t *testing.T) {
-	f := newPersonalFixture(t)
-	_, plaintext := f.mint(t, f.alice, apikey.ProjectGrant{All: true})
-
-	_, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, unreachableMembers{}).Authenticate(t.Context(), plaintext)
-	assert.True(t, authn.IsUnavailableError(err), "a membership lookup failure must not read as a refused token, got %T: %v", err, err)
-}
-
 func TestAPersonalTokenWhoseOwnerWasDeletedIsRefused(t *testing.T) {
 	f := newPersonalFixture(t)
 	k, plaintext := f.mint(t, f.alice, apikey.ProjectGrant{All: true})
@@ -192,7 +184,7 @@ func TestAPersonalTokenWhoseOwnerWasDeletedIsRefused(t *testing.T) {
 	assert.True(t, authn.IsUnauthorizedError(err), "a token with no owner must be refused, got %v", err)
 }
 
-// SECURITY: an org-level scope acts on the org itself, so only an owner or admin may hold it on a personal token — at mint and on every use.
+// SECURITY: an org-level scope acts on the org itself, so only an owner or admin may mint it on a personal token.
 func TestAnOrgLevelScopeNeedsAManagerOwner(t *testing.T) {
 	f := newPersonalFixture(t)
 	org := []string{authn.ScopeMembersRead}
@@ -201,15 +193,8 @@ func TestAnOrgLevelScopeNeedsAManagerOwner(t *testing.T) {
 	_, _, err := f.svc.MintPersonal(f.ctx(t, f.alice), "x", org, all, in(time.Hour))
 	assert.True(t, orgpkg.IsNotManagerError(err), "a plain member must not mint an org-level scope, got %v", err)
 
-	_, plaintext, err := f.svc.MintPersonal(f.ctx(t, f.admin), "admin", org, all, in(time.Hour))
+	_, _, err = f.svc.MintPersonal(f.ctx(t, f.admin), "admin", org, all, in(time.Hour))
 	require.NoError(t, err)
-	auth := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, f.members)
-	_, err = auth.Authenticate(t.Context(), plaintext)
-	require.NoError(t, err)
-
-	f.members.SeatMember(f.orgID, f.admin)
-	_, err = auth.Authenticate(t.Context(), plaintext)
-	assert.True(t, authn.IsUnauthorizedError(err), "a demoted owner's org-level token must stop working, got %v", err)
 }
 
 func TestAProjectKeyRefusesAnOrgLevelScope(t *testing.T) {
@@ -219,4 +204,24 @@ func TestAProjectKeyRefusesAnOrgLevelScope(t *testing.T) {
 	assert.True(t, apikey.IsScopeLevelError(err), "got %v", err)
 	_, _, err = f.svc.MintOrg(f.ctx(t, f.admin), "org", []string{authn.ScopeMembersRead}, apikey.ProjectGrant{All: true}, in(time.Hour))
 	require.NoError(t, err, "an org key may hold an org-level scope")
+}
+
+// SECURITY: until members:read moves to Can, a personal token holding an org-level scope stops entirely once its owner is no longer an owner or admin.
+func TestAuthenticate_DemotedOwnerPersonalTokenRefused(t *testing.T) {
+	f := newPersonalFixture(t)
+	_, plaintext, err := f.svc.MintPersonal(f.ctx(t, f.admin), "admin", []string{authn.ScopeMembersRead, authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, in(time.Hour))
+	require.NoError(t, err)
+	auth := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, f.members)
+	_, err = auth.Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+
+	f.members.SeatMember(f.orgID, f.admin)
+	_, err = auth.Authenticate(t.Context(), plaintext)
+	assert.True(t, authn.IsUnauthorizedError(err), "a demoted owner's org-level token must stop working, got %v", err)
+
+	_, err = apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, unreachableMembers{}).Authenticate(t.Context(), plaintext)
+	assert.True(t, authn.IsUnavailableError(err), "a membership outage must not read as a refused token, got %T: %v", err, err)
+
+	_, err = apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, nil).Authenticate(t.Context(), plaintext)
+	assert.True(t, authn.IsUnauthorizedError(err), "without a membership check an org-level token must be refused, got %v", err)
 }

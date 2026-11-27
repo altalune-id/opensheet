@@ -99,3 +99,13 @@ Both `401`s carry `WWW-Authenticate: Bearer error="invalid_token"` naming the AP
 | `GSH002` | `apperror.CodeGooglePermissionDenied` | Google Permission Denied       |
 | `GSH003` | `apperror.CodeGoogleQuotaExceeded`    | Google Quota Exceeded          |
 | `GSH004` | `apperror.CodeGoogleUnavailable`      | Google Temporarily Unavailable |
+
+## ROL — Roles and permissions
+
+`ROL002`-`ROL012` are reserved for custom roles and project grants.
+
+| Code     | Constant                        | Meaning           |
+| -------- | ------------------------------- | ----------------- |
+| `ROL001` | `apperror.CodePermissionDenied` | Permission Denied |
+| `ROL004` | `apperror.CodeRoleEscalation`   | Role Escalation   |
+| `ROL013` | `apperror.CodeRoleLastOwner`    | Role Last Owner   |

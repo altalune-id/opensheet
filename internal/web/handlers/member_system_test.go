@@ -17,6 +17,7 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
@@ -82,6 +83,7 @@ func TestPostRemoveMember_SystemProtected_Returns409(t *testing.T) {
 		Caps:     capabilities.Capabilities{OrgCreation: true},
 		Sessions: sessions,
 		Logger:   log.New(io.Discard, "", 0),
+		Authz:    authz.NewResolver(fakes.OrgRoles{Orgs: orgSvc}),
 	}, secret)
 	if err != nil {
 		t.Fatal(err)

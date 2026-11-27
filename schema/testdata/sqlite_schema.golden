@@ -422,3 +422,15 @@ CREATE TABLE opensheet_webhook_endpoints (
   CHECK (secret_secondary IS NULL OR length(secret_secondary) > 0)
 )
 
+trigger opensheet_users_revoke_keys
+CREATE TRIGGER opensheet_users_revoke_keys
+BEFORE DELETE ON opensheet_users
+FOR EACH ROW
+BEGIN
+  UPDATE opensheet_api_keys
+     SET revoked_at = strftime('%Y-%m-%dT%H:%M:%S', 'now') || '.000000000Z'
+   WHERE created_by = OLD.id
+     AND kind IN ('org', 'project')
+     AND revoked_at IS NULL;
+END
+

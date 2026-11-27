@@ -9,12 +9,14 @@ import (
 
 	credentialv1 "altalune.id/opensheet/gen/go/credential/v1"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 )
 
 // CredentialService implements credential.v1.CredentialService.
 type CredentialService struct {
+	authz           *authz.Resolver
 	credentials     *credential.Service
 	connectWorkflow *credential.ConnectWorkflow
 	projects        *project.Service
@@ -23,17 +25,18 @@ type CredentialService struct {
 
 // NewCredentialService binds the handler to its collaborators.
 func NewCredentialService(
+	rz *authz.Resolver,
 	credentials *credential.Service,
 	connectWorkflow *credential.ConnectWorkflow,
 	projects *project.Service,
 	orgs orgLister,
 ) *CredentialService {
-	return &CredentialService{credentials: credentials, connectWorkflow: connectWorkflow, projects: projects, orgs: orgs}
+	return &CredentialService{authz: rz, credentials: credentials, connectWorkflow: connectWorkflow, projects: projects, orgs: orgs}
 }
 
 // List returns the credentials of the request's project.
 func (s *CredentialService) List(ctx context.Context, req *connect.Request[credentialv1.ListRequest]) (*connect.Response[credentialv1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +53,7 @@ func (s *CredentialService) List(ctx context.Context, req *connect.Request[crede
 
 // UploadServiceAccount seals an uploaded Google service-account key into a new credential.
 func (s *CredentialService) UploadServiceAccount(ctx context.Context, req *connect.Request[credentialv1.UploadServiceAccountRequest]) (*connect.Response[credentialv1.UploadServiceAccountResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +66,7 @@ func (s *CredentialService) UploadServiceAccount(ctx context.Context, req *conne
 
 // StartGoogleConnect returns the Google consent URL; the callback is a web route, so no redirect happens here.
 func (s *CredentialService) StartGoogleConnect(ctx context.Context, req *connect.Request[credentialv1.StartGoogleConnectRequest]) (*connect.Response[credentialv1.StartGoogleConnectResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +87,7 @@ func (s *CredentialService) StartGoogleConnect(ctx context.Context, req *connect
 
 // Delete removes the referenced credential.
 func (s *CredentialService) Delete(ctx context.Context, req *connect.Request[credentialv1.DeleteRequest]) (*connect.Response[credentialv1.DeleteResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}

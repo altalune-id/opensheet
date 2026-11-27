@@ -14,6 +14,7 @@ import (
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/credential"
 	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
@@ -122,7 +123,7 @@ func (h *GoogleConnectHandler) GetCallback(w http.ResponseWriter, r *http.Reques
 			"Start the Google connection again from the credentials page.")
 		return
 	}
-	if !h.stillMember(w, r, target) {
+	if !h.stillMember(w, r, p, target) {
 		return
 	}
 	if err := checkDriveFileGranted(q.Get("scope")); err != nil {
@@ -151,10 +152,10 @@ func withConnected(dest string, credID uuid.UUID) string {
 }
 
 // SECURITY: a connect may only land in a project of an org the signed-in user still belongs to, the same gate RequireProject applies when the connect starts.
-func (h *GoogleConnectHandler) stillMember(w http.ResponseWriter, r *http.Request, target credential.ConnectTarget) bool {
-	ctx := tenant.Into(r.Context(), tenant.Context{OrgID: target.OrgID, UserID: target.UserID})
-	if _, err := h.Orgs.MembershipOf(ctx, target.OrgID, target.UserID); err != nil {
-		h.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
+func (h *GoogleConnectHandler) stillMember(w http.ResponseWriter, r *http.Request, p session.Principal, target credential.ConnectTarget) bool {
+	ctx, err := h.Authz.Bind(r.Context(), p, tenant.Context{OrgID: target.OrgID, UserID: target.UserID})
+	if err != nil {
+		h.bindFailed(w, r, err)
 		return false
 	}
 	proj, err := h.Projects.ByID(ctx, target.ProjectID)

@@ -17,6 +17,7 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
@@ -38,6 +39,7 @@ type Deps struct {
 	Orgs     *org.Service
 	Projects *project.Service
 	I18n     *i18n.Bundle
+	Authz    *authz.Resolver
 
 	// SECURITY: secret is the resolved (decoded) http.stateSecret; unexported so only [NewDeps] can install one, and never re-derived from Cfg.
 	secret []byte
@@ -131,14 +133,16 @@ func (d Deps) layout(r *http.Request, title string, nav web.ActiveNav, pinnedOrg
 	}
 
 	orgID := uuidFromString(base.ActiveOrg.ID)
-	if m, mErr := d.Orgs.MembershipOf(ctx, orgID, p.UserID); mErr == nil && m != nil {
-		base.ActiveOrg.Role = capitaliseRole(string(m.Role))
+	// SECURITY: the project switcher lists the pinned org's projects, so a stale session cannot leak another org's names.
+	tctx, bErr := d.Authz.Bind(ctx, p, tenant.Context{OrgID: orgID, UserID: p.UserID, ProjectID: pinnedProject})
+	if bErr != nil {
+		d.LogErr("layout: bind", bErr)
+		return base
 	}
+	base.ActiveOrg.Role = capitaliseRole(session.PrincipalFrom(tctx).HeldRole)
 	if d.Projects == nil {
 		return base
 	}
-	// SECURITY: the project switcher lists the pinned org's projects, so a stale session cannot leak another org's names.
-	tctx := tenant.Into(ctx, tenant.Context{OrgID: orgID, UserID: p.UserID, ProjectID: pinnedProject})
 	projects, pErr := d.Projects.List(tctx, orgID)
 	if pErr != nil {
 		d.LogErr("layout: list projects", pErr)
@@ -195,6 +199,9 @@ func (d Deps) LayoutForProject(r *http.Request, title, orgSlug string, proj *pro
 // ProjectScopeFor resolves the project named by slug inside orgID and returns a request scoped to both. SECURITY: r must already carry the org scope from OrgScopeFor, whose membership check gates this lookup.
 func (d Deps) ProjectScopeFor(w http.ResponseWriter, r *http.Request, orgID uuid.UUID, slug string) (*project.Project, *http.Request, bool) {
 	proj, err := d.Projects.BySlug(r.Context(), orgID, slug)
+	if err == nil && !session.PrincipalFrom(r.Context()).ReachesProject(orgID, proj.ID) {
+		err = &project.NotFoundError{ID: proj.ID.String()}
+	}
 	if err != nil {
 		d.ErrorPage(w, r, http.StatusNotFound, "Project not found", "No project with that slug in this organization.", err)
 		return nil, nil, false
@@ -327,9 +334,9 @@ func (d Deps) OrgScopeFor(w http.ResponseWriter, r *http.Request, p session.Prin
 		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
 		return nil, nil, false
 	}
-	scoped := orgScopedRequest(r, p, o)
-	if _, err := d.Orgs.MembershipOf(scoped.Context(), o.ID, p.UserID); err != nil {
-		d.ErrorPage(w, r, http.StatusNotFound, "Organization not found", "", err)
+	scoped, err := d.bind(r, p, tenant.Context{OrgID: o.ID, UserID: p.UserID})
+	if err != nil {
+		d.bindFailed(w, r, err)
 		return nil, nil, false
 	}
 	return o, scoped, true

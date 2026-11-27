@@ -170,4 +170,8 @@ const (
 	CodeGooglePermissionDenied = "GSH002"
 	CodeGoogleQuotaExceeded    = "GSH003"
 	CodeGoogleUnavailable      = "GSH004"
+
+	CodePermissionDenied = "ROL001"
+	CodeRoleEscalation   = "ROL004"
+	CodeRoleLastOwner    = "ROL013"
 )

@@ -8,7 +8,6 @@ import (
 
 	"altalune.id/opensheet/internal/cli/render"
 	"altalune.id/opensheet/internal/invite"
-	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // TODO(future-proto): switch to bootClient.Conn once api/invite/v1 lands.
@@ -42,8 +41,10 @@ func newInviteListCmd(bootServer ServerBootFn) *cobra.Command {
 			}
 			defer func() { _ = s.Close() }()
 
-			tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
-			ctx := tenant.Into(cmd.Context(), tc)
+			ctx, err := bindLocal(cmd.Context(), s, p)
+			if err != nil {
+				return err
+			}
 			items, err := s.Invites.ListPending(ctx)
 			if err != nil {
 				return err
@@ -91,8 +92,10 @@ func newInviteSendCmd(bootServer ServerBootFn) *cobra.Command {
 			}
 			defer func() { _ = s.Close() }()
 
-			tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
-			ctx := tenant.Into(cmd.Context(), tc)
+			ctx, err := bindLocal(cmd.Context(), s, p)
+			if err != nil {
+				return err
+			}
 			inv, err := s.Invites.Send(ctx, invite.SendRequest{Email: email, Role: invite.Role(role)})
 			if err != nil {
 				return err
@@ -128,8 +131,10 @@ func newInviteRevokeCmd(bootServer ServerBootFn) *cobra.Command {
 			}
 			defer func() { _ = s.Close() }()
 
-			tc := tenant.Context{OrgID: p.OrgID, ProjectID: p.ProjectID, UserID: p.UserID}
-			ctx := tenant.Into(cmd.Context(), tc)
+			ctx, err := bindLocal(cmd.Context(), s, p)
+			if err != nil {
+				return err
+			}
 			if err := s.Invites.Revoke(ctx, id); err != nil {
 				return err
 			}

@@ -22,7 +22,9 @@ type Principal struct {
 	UserID uuid.UUID
 	// KeyID is the API key id when this principal is a key rather than a person.
 	// SECURITY: a key principal keeps UserID == uuid.Nil, so it is never mistaken for a signed-in human.
-	KeyID      uuid.UUID
+	KeyID uuid.UUID
+	// KeyOwnerID is the person a key acts for: its creator, or a personal token's owner. SECURITY: used only for role checks, never as an identity.
+	KeyOwnerID uuid.UUID `json:"-"`
 	Email      string
 	Name       string
 	Source     Source
@@ -39,11 +41,26 @@ type Principal struct {
 	// AllProjects grants a key principal every project of its org, including ones created later.
 	AllProjects bool `json:"-"`
 	// ResourceIDs narrows a key principal to these resources; empty means every resource in its projects.
-	ResourceIDs     []uuid.UUID `json:"-"`
+	ResourceIDs []uuid.UUID `json:"-"`
+	// Held is the permission set resolved when the request's tenant scope was bound. SECURITY: never persisted; every request resolves it again.
+	Held []string `json:"-"`
+	// HeldOrg is the display name of the org Held was resolved in, for refusal messages.
+	HeldOrg string `json:"-"`
+	// HeldOrgID is the org Held was resolved in. SECURITY: Held answers for this org only.
+	HeldOrgID uuid.UUID `json:"-"`
+	// HeldRole is the role Held came from.
+	HeldRole        string `json:"-"`
 	IsAdmin         bool
 	Locale          string
 	TermsAcceptedAt time.Time
 	IssuedAt        time.Time
+}
+
+// Grant names the projects of OrgID a member reaches: every one when All, else ProjectIDs.
+type Grant struct {
+	OrgID      uuid.UUID
+	All        bool
+	ProjectIDs []uuid.UUID
 }
 
 type principalKey struct{}

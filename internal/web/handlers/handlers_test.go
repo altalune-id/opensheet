@@ -27,6 +27,7 @@ import (
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
 	"altalune.id/opensheet/internal/platform/session"
@@ -66,6 +67,7 @@ type handlerFixture struct {
 	OnboStore *fakes.Onboard
 	Invites   *invite.Service
 	InvStore  *fakes.Invite
+	Roles     *orgRoles
 }
 
 const testStateSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
@@ -97,6 +99,8 @@ func newFixture(t *testing.T) *handlerFixture {
 	invStore := fakes.NewInvite()
 	invites := invite.NewService(invStore, nil, nil, true, discardLogger(), passthroughUnexpected())
 
+	roles := &orgRoles{orgs: orgs}
+
 	secret, err := config.ParseStateSecret(cfg.HTTP.StateSecret)
 	require.NoError(t, err, "the fixture secret must satisfy the same rule boot enforces")
 	deps, err := handlers.NewDeps(handlers.Deps{
@@ -106,6 +110,7 @@ func newFixture(t *testing.T) *handlerFixture {
 		Logger:   discardStdLogger(),
 		Orgs:     orgs,
 		Projects: projects,
+		Authz:    authz.NewResolver(roles),
 	}, secret)
 	require.NoError(t, err)
 	return &handlerFixture{
@@ -116,6 +121,7 @@ func newFixture(t *testing.T) *handlerFixture {
 		Todos: todos, TodoStore: todoStore,
 		Onboards: onboards, OnboStore: onbStore,
 		Invites: invites, InvStore: invStore,
+		Roles: roles,
 	}
 }
 

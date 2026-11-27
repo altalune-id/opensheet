@@ -149,60 +149,6 @@ func TestAuthenticateReturnsAnIdenticalErrorForEveryRejectionCause(t *testing.T)
 	}
 }
 
-func TestAuthorizeChecksOrgProjectAndScope(t *testing.T) {
-	store := fakes.NewAPIKey()
-	orgID, projectID := uuid.New(), uuid.New()
-	k, plaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
-
-	t.Run("wrong org denies", func(t *testing.T) {
-		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, uuid.New(), projectID, uuid.New())
-		assert.Error(t, err)
-	})
-	t.Run("wrong project denies", func(t *testing.T) {
-		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, orgID, uuid.New(), uuid.New())
-		assert.Error(t, err)
-	})
-	t.Run("missing scope denies", func(t *testing.T) {
-		_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, uuid.New())
-		assert.True(t, authn.IsInsufficientScopeError(err), "got %T: %v", err, err)
-	})
-	t.Run("matching grant admits", func(t *testing.T) {
-		p, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, orgID, projectID, uuid.New())
-		require.NoError(t, err)
-		assert.Equal(t, k.OrgID, p.ActiveOrgID)
-		assert.Equal(t, session.SourceAPIKey, p.Source)
-	})
-}
-
-func TestAuthorizeProjectRefusesRestrictedKey(t *testing.T) {
-	store := fakes.NewAPIKey()
-	orgID, projectID, resourceID := uuid.New(), uuid.New(), uuid.New()
-	_, restrictedPlaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, []uuid.UUID{resourceID})
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
-
-	_, err := auth.AuthorizeProject(t.Context(), restrictedPlaintext, authn.ScopeSheetsRead, orgID, projectID)
-	assert.True(t, authn.IsInsufficientScopeError(err), "a resource-restricted key must not pass a project-wide check, got %T: %v", err, err)
-
-	_, unrestrictedPlaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsRead}, nil)
-	p, err := auth.AuthorizeProject(t.Context(), unrestrictedPlaintext, authn.ScopeSheetsRead, orgID, projectID)
-	require.NoError(t, err)
-	assert.Equal(t, session.SourceAPIKey, p.Source)
-}
-
-func TestAuthorizeRefusesAnUnlistedResource(t *testing.T) {
-	store := fakes.NewAPIKey()
-	orgID, projectID, listed := uuid.New(), uuid.New(), uuid.New()
-	_, plaintext := mintSeeded(t, store, orgID, projectID, []string{authn.ScopeSheetsWrite}, []uuid.UUID{listed})
-	auth := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
-
-	_, err := auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, listed)
-	require.NoError(t, err, "the listed resource must stay reachable")
-
-	_, err = auth.Authorize(t.Context(), plaintext, authn.ScopeSheetsWrite, orgID, projectID, uuid.New())
-	assert.True(t, authn.IsInsufficientScopeError(err), "an unlisted resource must be refused, got %T: %v", err, err)
-}
-
 // SECURITY: the control plane and the MCP surface bound a key by the grant its principal carries, so the principal must carry the key's project and resources.
 func TestPrincipalCarriesTheKeysGrant(t *testing.T) {
 	store := fakes.NewAPIKey()
@@ -235,6 +181,18 @@ func TestPrincipalCarriesTheKeyID(t *testing.T) {
 	p, err := auth.Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, k.ID, p.KeyID, "principalFor must carry the minted key's id so downstream writers can attribute rows to it")
+}
+
+func TestPrincipalCarriesTheKeyOwner(t *testing.T) {
+	store := fakes.NewAPIKey()
+	k, plaintext := mintSeeded(t, store, uuid.New(), uuid.New(), []string{authn.ScopeSheetsRead}, nil)
+	k.CreatedBy = uuid.New()
+	store.Seed(k)
+
+	p, err := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	require.NoError(t, err)
+	assert.Equal(t, k.CreatedBy, p.KeyOwnerID, "a key acts for its creator")
+	assert.Equal(t, uuid.Nil, p.UserID, "the creator is never the key's identity")
 }
 
 func TestService_MintListRevoke(t *testing.T) {

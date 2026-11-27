@@ -62,4 +62,9 @@ func TestUsable(t *testing.T) {
 	if revoked.Usable(now) {
 		t.Fatal("revoked key usable")
 	}
+
+	revoked.RevokedAt = &future
+	if revoked.Usable(now) {
+		t.Fatal("a key stamped revoked by a clock ahead of this one is usable")
+	}
 }

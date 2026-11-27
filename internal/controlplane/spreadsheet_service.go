@@ -10,6 +10,7 @@ import (
 	sheetv1 "altalune.id/opensheet/gen/go/sheet/v1"
 	spreadsheetv1 "altalune.id/opensheet/gen/go/spreadsheet/v1"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
@@ -18,6 +19,7 @@ import (
 
 // SpreadsheetService implements spreadsheet.v1.SpreadsheetService.
 type SpreadsheetService struct {
+	authz        *authz.Resolver
 	spreadsheets *spreadsheet.Service
 	projects     *project.Service
 	orgs         orgLister
@@ -27,18 +29,19 @@ type SpreadsheetService struct {
 
 // NewSpreadsheetService binds the handler to its collaborators.
 func NewSpreadsheetService(
+	rz *authz.Resolver,
 	spreadsheets *spreadsheet.Service,
 	projects *project.Service,
 	orgs orgLister,
 	sheets *sheet.Service,
 	provision *spreadsheet.ProvisionWorkflow,
 ) *SpreadsheetService {
-	return &SpreadsheetService{spreadsheets: spreadsheets, projects: projects, orgs: orgs, sheets: sheets, provision: provision}
+	return &SpreadsheetService{authz: rz, spreadsheets: spreadsheets, projects: projects, orgs: orgs, sheets: sheets, provision: provision}
 }
 
 // List returns the spreadsheets registered in the request's project.
 func (s *SpreadsheetService) List(ctx context.Context, req *connect.Request[spreadsheetv1.ListRequest]) (*connect.Response[spreadsheetv1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,7 @@ func (s *SpreadsheetService) List(ctx context.Context, req *connect.Request[spre
 
 // Create registers a Google document in the request's project, bound to one credential.
 func (s *SpreadsheetService) Create(ctx context.Context, req *connect.Request[spreadsheetv1.CreateRequest]) (*connect.Response[spreadsheetv1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +151,7 @@ func (s *SpreadsheetService) Provision(ctx context.Context, req *connect.Request
 	if err := authn.CheckScope(session.PrincipalFrom(ctx), authn.ScopeSpreadsheetsWrite); err != nil {
 		return nil, err
 	}
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +184,7 @@ func (s *SpreadsheetService) Provision(ctx context.Context, req *connect.Request
 }
 
 func (s *SpreadsheetService) scoped(ctx context.Context, projectIDRaw, idRaw string) (context.Context, uuid.UUID, error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, projectIDRaw)
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, projectIDRaw)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}

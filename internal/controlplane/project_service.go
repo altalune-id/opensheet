@@ -9,6 +9,8 @@ import (
 
 	projectv1 "altalune.id/opensheet/gen/go/project/v1"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
@@ -16,6 +18,7 @@ import (
 
 // ProjectService implements project.v1.ProjectService.
 type ProjectService struct {
+	authz    *authz.Resolver
 	projects *project.Service
 	orgs     orgDirectory
 }
@@ -26,13 +29,13 @@ type orgDirectory interface {
 }
 
 // NewProjectService binds the handler to its collaborators.
-func NewProjectService(projects *project.Service, orgs orgDirectory) *ProjectService {
-	return &ProjectService{projects: projects, orgs: orgs}
+func NewProjectService(rz *authz.Resolver, projects *project.Service, orgs orgDirectory) *ProjectService {
+	return &ProjectService{authz: rz, projects: projects, orgs: orgs}
 }
 
 // ListProjects returns the projects the principal reaches: in its active org, or in every org of a person who has none. SECURITY: the orgs come from the principal and its memberships alone, so no caller can re-target this read.
 func (s *ProjectService) ListProjects(ctx context.Context, _ *connect.Request[projectv1.ListProjectsRequest]) (*connect.Response[projectv1.ListProjectsResponse], error) {
-	p, err := principal(ctx)
+	ctx, p, err := principal(ctx, s.authz)
 	if err != nil {
 		return nil, err
 	}
@@ -42,9 +45,14 @@ func (s *ProjectService) ListProjects(ctx context.Context, _ *connect.Request[pr
 	}
 	resp := &projectv1.ListProjectsResponse{Projects: []*projectv1.Project{}}
 	for _, o := range orgs {
-		pinned := p
-		pinned.ActiveOrgID = o.ID
-		items, err := s.projects.List(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: p.UserID}), o.ID)
+		octx, pinned, err := bindOrg(ctx, s.authz, p, tenant.Context{OrgID: o.ID, UserID: p.UserID})
+		if authn.IsUnauthorizedError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		items, err := s.projects.List(octx, o.ID)
 		if err != nil {
 			return nil, err
 		}

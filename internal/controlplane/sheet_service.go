@@ -9,25 +9,27 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sheetv1 "altalune.id/opensheet/gen/go/sheet/v1"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 )
 
 // SheetService implements sheet.v1.SheetService.
 type SheetService struct {
+	authz    *authz.Resolver
 	sheets   *sheet.Service
 	projects *project.Service
 	orgs     orgLister
 }
 
 // NewSheetService binds the handler to its collaborators.
-func NewSheetService(sheets *sheet.Service, projects *project.Service, orgs orgLister) *SheetService {
-	return &SheetService{sheets: sheets, projects: projects, orgs: orgs}
+func NewSheetService(rz *authz.Resolver, sheets *sheet.Service, projects *project.Service, orgs orgLister) *SheetService {
+	return &SheetService{authz: rz, sheets: sheets, projects: projects, orgs: orgs}
 }
 
 // List returns the sheets published in the request's project.
 func (s *SheetService) List(ctx context.Context, req *connect.Request[sheetv1.ListRequest]) (*connect.Response[sheetv1.ListResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +46,7 @@ func (s *SheetService) List(ctx context.Context, req *connect.Request[sheetv1.Li
 
 // Create publishes a tab of the referenced spreadsheet under a per-project slug.
 func (s *SheetService) Create(ctx context.Context, req *connect.Request[sheetv1.CreateRequest]) (*connect.Response[sheetv1.CreateResponse], error) {
-	tctx, _, err := scopeToProject(ctx, s.projects, s.orgs, req.Msg.GetProjectId())
+	tctx, _, err := scopeToProject(ctx, s.authz, s.projects, s.orgs, req.Msg.GetProjectId())
 	if err != nil {
 		return nil, err
 	}
@@ -131,12 +133,12 @@ func (s *SheetService) scoped(ctx context.Context, projectIDRaw, idRaw string) (
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
-	ctx, _, proj, err := resolveProject(ctx, s.projects, s.orgs, projectIDRaw)
+	ctx, _, proj, err := resolveProject(ctx, s.authz, s.projects, s.orgs, projectIDRaw)
 	if err != nil {
 		return nil, uuid.Nil, err
 	}
 	// SECURITY: a sheet outside a pinned key's reach reads as absent, so the answer never confirms the id exists.
-	tctx, err := scopeToResource(ctx, proj.OrgID, proj.ID, id, func() error {
+	tctx, err := scopeToResource(ctx, s.authz, proj.OrgID, proj.ID, id, func() error {
 		return &sheet.NotFoundError{ID: id.String()}
 	})
 	if err != nil {

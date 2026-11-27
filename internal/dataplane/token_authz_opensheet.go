@@ -3,12 +3,11 @@ package dataplane
 import (
 	"context"
 	"net/http"
-	"slices"
 
 	"github.com/google/uuid"
 
-	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
@@ -18,8 +17,8 @@ type identity interface {
 	Authenticate(ctx context.Context, raw string) (session.Principal, error)
 }
 
-type members interface {
-	RequireMember(ctx context.Context, orgID, userID uuid.UUID) error
+type binder interface {
+	Bind(ctx context.Context, p session.Principal, tc tenant.Context) (context.Context, error)
 }
 
 type verifiedKey struct{}
@@ -30,15 +29,15 @@ type verifiedToken struct {
 }
 
 type credentialAuthorizer struct {
-	keys    Authorizer
-	tokens  identity
-	members members
-	scheme  authn.Scheme
+	keys   identity
+	tokens identity
+	bind   binder
+	scheme authn.Scheme
 }
 
-// NewCredentialAuthorizer returns an Authorizer that sends API keys to keys and access tokens to people; a nil people refuses every token.
-func NewCredentialAuthorizer(keys Authorizer, people identity, m members, keyScheme authn.Scheme) Authorizer {
-	return &credentialAuthorizer{keys: keys, tokens: people, members: m, scheme: keyScheme}
+// NewCredentialAuthorizer returns an Authorizer that sends API keys to keys and access tokens to people, then binds either to the path's tenant; a nil people refuses every token.
+func NewCredentialAuthorizer(keys, people identity, b binder, keyScheme authn.Scheme) Authorizer {
+	return &credentialAuthorizer{keys: keys, tokens: people, bind: b, scheme: keyScheme}
 }
 
 func (a *credentialAuthorizer) Authenticate(ctx context.Context, raw string) (session.Principal, error) {
@@ -48,34 +47,41 @@ func (a *credentialAuthorizer) Authenticate(ctx context.Context, raw string) (se
 	return a.person(ctx, raw)
 }
 
-func (a *credentialAuthorizer) Authorize(ctx context.Context, raw, scope string, orgID, projectID, resourceID uuid.UUID) (session.Principal, error) {
-	if a.scheme.Looks(raw) == authn.ShapeAPIKey {
-		return a.keys.Authorize(ctx, raw, scope, orgID, projectID, resourceID)
-	}
-	return a.authorizeToken(ctx, raw, scope, orgID, projectID)
+func (a *credentialAuthorizer) Authorize(ctx context.Context, raw, scope string, orgID, projectID, resourceID uuid.UUID) (context.Context, session.Principal, error) {
+	return a.authorize(ctx, raw, scope, tenant.Context{OrgID: orgID, ProjectID: projectID}, func(p session.Principal) bool {
+		return p.ReachesResource(orgID, projectID, resourceID)
+	})
 }
 
-func (a *credentialAuthorizer) AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
-	if a.scheme.Looks(raw) == authn.ShapeAPIKey {
-		return a.keys.AuthorizeProject(ctx, raw, scope, orgID, projectID)
-	}
-	return a.authorizeToken(ctx, raw, scope, orgID, projectID)
+func (a *credentialAuthorizer) AuthorizeProject(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (context.Context, session.Principal, error) {
+	return a.authorize(ctx, raw, scope, tenant.Context{OrgID: orgID, ProjectID: projectID}, func(p session.Principal) bool {
+		return p.ReachesWholeProject(orgID, projectID)
+	})
 }
 
-// SECURITY: membership of the path's org admits the person and the token's scopes cap it; a token reaches every sheet of the project, since resourceID narrows only keys.
-func (a *credentialAuthorizer) authorizeToken(ctx context.Context, raw, scope string, orgID, projectID uuid.UUID) (session.Principal, error) {
-	p, err := a.person(ctx, raw)
+// SECURITY: the bound principal decides: its role in the path's org intersected with its scopes, and a key's own project and resource grant; resourceID narrows only keys.
+func (a *credentialAuthorizer) authorize(ctx context.Context, raw, scope string, tc tenant.Context, reaches func(session.Principal) bool) (context.Context, session.Principal, error) {
+	p, err := a.Authenticate(ctx, raw)
 	if err != nil {
-		return session.Principal{}, err
+		return nil, session.Principal{}, err
 	}
-	if err := a.members.RequireMember(tenant.WithOrg(ctx, orgID), orgID, p.UserID); err != nil {
-		return session.Principal{}, membershipRefusal(err)
+	tc.UserID = p.UserID
+	bctx, err := a.bind.Bind(ctx, p, tc)
+	if err != nil {
+		return nil, session.Principal{}, err
 	}
-	if !slices.Contains(p.Scopes, scope) {
-		return session.Principal{}, &authn.InsufficientScopeError{Scope: scope, Source: p.Source}
+	p = session.PrincipalFrom(bctx)
+	if !p.ReachesProject(tc.OrgID, tc.ProjectID) {
+		return nil, session.Principal{}, &authn.UnauthorizedError{}
 	}
-	p.ActiveOrgID, p.ActiveProjectID = orgID, projectID
-	return p, nil
+	perm, ok := authz.PermissionFor(scope)
+	if !ok || !reaches(p) {
+		return nil, session.Principal{}, &authn.InsufficientScopeError{Scope: scope, Source: p.Source}
+	}
+	if err := authz.Can(bctx, perm); err != nil {
+		return nil, session.Principal{}, err
+	}
+	return bctx, p, nil
 }
 
 // SECURITY: a JWT only; a personal token never reaches introspection from here, so forged ones cannot spend the issuer's budget.
@@ -113,11 +119,4 @@ func (h *sheetHandler) verifyBearer(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func membershipRefusal(err error) error {
-	if ae, ok := apperror.AsAppError(err); ok && ae.Code() == apperror.CodeOrgMembershipMissing {
-		return &authn.UnauthorizedError{}
-	}
-	return &authn.UnavailableError{Cause: err}
 }

@@ -140,7 +140,8 @@ func (h *sheetHandler) rows(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.allowRead(r, sc); aErr != nil {
+	r, aErr := h.allowRead(r, sc)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -222,7 +223,8 @@ func (h *sheetHandler) rowByID(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.allowRead(r, sc); aErr != nil {
+	r, aErr := h.allowRead(r, sc)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -244,7 +246,8 @@ func (h *sheetHandler) capabilities(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.allowRead(r, sc); aErr != nil {
+	r, aErr := h.allowRead(r, sc)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -263,7 +266,8 @@ func (h *sheetHandler) purge(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if aErr := h.authorize(r, sc, authn.ScopeCachePurge); aErr != nil {
+	r, aErr := h.authorize(r, sc, authn.ScopeCachePurge)
+	if aErr != nil {
 		h.fail(w, r, aErr)
 		return
 	}
@@ -295,23 +299,24 @@ func (h *sheetHandler) resolveProject(r *http.Request) (*http.Request, sheetProj
 	return r.WithContext(ctx), sc, nil
 }
 
-func (h *sheetHandler) allowRead(r *http.Request, sc sheetScope) error {
+func (h *sheetHandler) allowRead(r *http.Request, sc sheetScope) (*http.Request, error) {
 	if sc.sheet.Visibility != sheet.VisibilityPublic {
 		return h.authorize(r, sc, authn.ScopeSheetsRead)
 	}
 	// SECURITY: the capability gates the read, not only the create, so a sheet published while it was on stops serving once it is off.
 	if h.caps.PublicSheets {
-		return nil
+		return r, nil
 	}
-	return &SheetNotFoundError{cause: publicDisabled()}
+	return r, &SheetNotFoundError{cause: publicDisabled()}
 }
 
 // SECURITY: every refusal becomes the shared SheetNotFoundError, so a key for another project, a key missing the scope, a key not granted this sheet and a slug that does not exist are one indistinguishable answer.
-func (h *sheetHandler) authorize(r *http.Request, sc sheetScope, scopeName string) error {
-	if _, err := h.authz.Authorize(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID, sc.sheet.ID); err != nil {
-		return refusal(err)
+func (h *sheetHandler) authorize(r *http.Request, sc sheetScope, scopeName string) (*http.Request, error) {
+	ctx, _, err := h.authz.Authorize(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID, sc.sheet.ID)
+	if err != nil {
+		return r, refusal(err)
 	}
-	return nil
+	return r.WithContext(ctx), nil
 }
 
 // SECURITY: X-API-Key carries keys alone; a JWT sent there is refused as if no credential came.
@@ -337,11 +342,12 @@ func refusal(err error) error {
 }
 
 // SECURITY: a route naming no sheet authorizes project-wide, and the authorizer refuses a resource-restricted key there — a key granted specific sheets cannot use the tabs routes at all.
-func (h *sheetHandler) authorizeProject(r *http.Request, sc sheetProjectScope, scopeName string) error {
-	if _, err := h.authz.AuthorizeProject(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID); err != nil {
-		return refusal(err)
+func (h *sheetHandler) authorizeProject(r *http.Request, sc sheetProjectScope, scopeName string) (*http.Request, error) {
+	ctx, _, err := h.authz.AuthorizeProject(r.Context(), credentialOf(r), scopeName, sc.orgID, sc.projectID)
+	if err != nil {
+		return r, refusal(err)
 	}
-	return nil
+	return r.WithContext(ctx), nil
 }
 
 func (h *sheetHandler) writeRows(w http.ResponseWriter, r *http.Request, sh *sheet.Sheet, rows sheet.Rows) {
