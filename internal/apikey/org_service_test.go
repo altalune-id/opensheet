@@ -50,7 +50,7 @@ func TestMintOrgKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, f.admin.UserID, k.CreatedBy)
 
-	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.True(t, p.ReachesProject(f.orgID, f.a), "the granted project must be reachable")
 	assert.False(t, p.ReachesProject(f.orgID, f.b), "an ungranted project must not be")
@@ -90,7 +90,7 @@ func TestPromoteOrgKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.AllProjects)
 
-	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.True(t, p.ReachesProject(f.orgID, uuid.New()), "an all-projects key reaches a project created later")
 }

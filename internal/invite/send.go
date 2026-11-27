@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 
 	"altalune.id/opensheet/internal/apperror"
@@ -23,9 +24,10 @@ type TokenGenFunc = func() (raw, hash string, err error)
 
 // SendRequest is the input to SendWorkflow.Execute.
 type SendRequest struct {
-	Email string
-	Role  Role
-	TTL   time.Duration
+	Email  string
+	Role   Role
+	RoleID uuid.UUID
+	TTL    time.Duration
 }
 
 // SendWorkflow issues an invite: mints a token, persists the aggregate, and emails the raw token in an accept URL.
@@ -82,7 +84,7 @@ func (w *SendWorkflow) Execute(ctx context.Context, req SendRequest) (*Invite, e
 		attribute.String("org_id", tc.OrgID.String()),
 	)
 
-	if !req.Role.IsValid() {
+	if !validGrant(req.Role, req.RoleID) {
 		return nil, &InvalidRoleError{Role: string(req.Role)}
 	}
 	if _, err := normalizeEmail(req.Email); err != nil {
@@ -99,12 +101,13 @@ func (w *SendWorkflow) Execute(ctx context.Context, req SendRequest) (*Invite, e
 		return nil, w.unexpected(ctx, "invite.Send: tokenGen", fmt.Errorf("invite.Send: tokenGen: %w", err))
 	}
 	inv, err := New(NewParams{
-		OrgID: tc.OrgID,
-		Email: req.Email,
-		Role:  req.Role,
-		TTL:   ttl,
-		Token: raw,
-		Now:   w.clock(),
+		OrgID:  tc.OrgID,
+		Email:  req.Email,
+		Role:   req.Role,
+		RoleID: req.RoleID,
+		TTL:    ttl,
+		Token:  raw,
+		Now:    w.clock(),
 	})
 	if err != nil {
 		span.RecordError(err)

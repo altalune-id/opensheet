@@ -14,6 +14,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/role"
 )
 
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
@@ -25,13 +26,27 @@ type Service struct {
 	send       *SendWorkflow
 	accept     *AcceptWorkflow
 	enabled    bool
+	perms      Permissions
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 }
 
+// Permissions resolves what a role holds, for the sender's escalation guard.
+type Permissions interface {
+	PermissionsOf(ctx context.Context, role string, roleID uuid.UUID) ([]authz.Permission, error)
+}
+
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// WithPermissions resolves role permissions through p, custom roles included; without it a custom role is refused.
+func WithPermissions(p Permissions) ServiceOption {
+	return func(s *Service) { s.perms = p }
+}
+
 // NewService binds the service to its dependencies; enabled=false blocks Send with InvitesDisabledError.
-func NewService(store Store, send *SendWorkflow, accept *AcceptWorkflow, enabled bool, log *slog.Logger, unexpected apperror.UnexpectedFunc) *Service {
-	return &Service{
+func NewService(store Store, send *SendWorkflow, accept *AcceptWorkflow, enabled bool, log *slog.Logger, unexpected apperror.UnexpectedFunc, opts ...ServiceOption) *Service {
+	s := &Service{
 		store:      store,
 		send:       send,
 		accept:     accept,
@@ -39,6 +54,10 @@ func NewService(store Store, send *SendWorkflow, accept *AcceptWorkflow, enabled
 		log:        log.With("module", "invite"),
 		unexpected: unexpected,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Enabled reports whether invite issuance is allowed for this deployment.
@@ -55,13 +74,37 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (*Invite, error) {
 	if err != nil {
 		return nil, err
 	}
-	if refusal := org.RoleChangeRefusal(authz.Held(ctx), org.HeldRole(ctx, tc.OrgID), "", org.Role(req.Role)); refusal != nil {
+	if !validGrant(req.Role, req.RoleID) {
+		return nil, &InvalidRoleError{Role: string(req.Role)}
+	}
+	perms, err := s.permissionsOf(ctx, req.Role, req.RoleID)
+	if err != nil {
+		return nil, err
+	}
+	if refusal := org.RoleChangeRefusal(authz.Held(ctx), org.HeldRole(ctx, tc.OrgID), "", org.Role(req.Role), nil, perms); refusal != nil {
 		return nil, refusal
 	}
 	if !s.enabled {
 		return nil, &InvitesDisabledError{Reason: "invites require OIDC in selfhosted mode; set OPENSHEET_OIDC_ISSUER to enable"}
 	}
 	return s.send.Execute(ctx, req)
+}
+
+func (s *Service) permissionsOf(ctx context.Context, r Role, roleID uuid.UUID) ([]authz.Permission, error) {
+	if roleID == uuid.Nil {
+		return authz.Builtin(string(r)), nil
+	}
+	if s.perms == nil {
+		return nil, &InvalidRoleError{Role: string(r)}
+	}
+	perms, err := s.perms.PermissionsOf(ctx, string(r), roleID)
+	if role.IsNotFoundError(err) {
+		return nil, &InvalidRoleError{Role: string(r)}
+	}
+	if err != nil {
+		return nil, s.unexpected(ctx, "invite.Send: role permissions", err, "role_id", roleID.String())
+	}
+	return perms, nil
 }
 
 // HasPendingForEmail reports whether email has any pending (non-consumed) invite.

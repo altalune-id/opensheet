@@ -61,7 +61,7 @@ func TestMintAndResolveAgreeUnderEveryPrefix(t *testing.T) {
 			sc := apikey.NewScheme(configured)
 			store := fakes.NewAPIKey()
 			svc := apikey.NewService(store, sc, fakes.PermissiveMembers(), fakes.NewOrgProjects(), slog.New(slog.NewTextHandler(io.Discard, nil)), failingUnexpected(t))
-			auth := apikey.NewAuthenticator(store, nil, sc, fakes.NewMembers())
+			auth := apikey.NewAuthenticator(store, nil, sc)
 
 			tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
 			k, plaintext, err := svc.Mint(fakes.BindRole(t.Context(), tc, "owner"), "round trip", []string{authn.ScopeSheetsRead}, nil, in(time.Hour))
@@ -88,6 +88,6 @@ func TestResolveRejectsAKeyMintedUnderAnotherPrefix(t *testing.T) {
 	require.NoError(t, err)
 	store.Seed(k)
 
-	_, err = apikey.NewAuthenticator(store, nil, apikey.NewScheme("ak_"), fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	_, err = apikey.NewAuthenticator(store, nil, apikey.NewScheme("ak_")).Authenticate(t.Context(), plaintext)
 	require.True(t, authn.IsUnauthorizedError(err), "got %v", err)
 }

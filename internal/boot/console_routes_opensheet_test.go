@@ -47,3 +47,28 @@ func TestConsole_EveryProjectNavTargetIsMounted(t *testing.T) {
 		})
 	}
 }
+
+func TestConsole_RolesPagesMounted(t *testing.T) {
+	srv, _ := newScopeProbeServer(t, config.ModeCloud)
+	owner, err := srv.Users.Create(context.Background(), user.CreateRequest{
+		Email: "roles-owner@example.com", Name: "Roles Owner", Source: user.SourceOIDC,
+	})
+	require.NoError(t, err)
+	o, err := srv.Orgs.Create(context.Background(), org.CreateRequest{Slug: "roles-org", Name: "Roles Org", OwnerID: owner.ID})
+	require.NoError(t, err)
+	cookie := probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: o.ID})
+
+	for _, pattern := range []string{
+		"GET /orgs/{org}/roles", "GET /orgs/{org}/roles/new", "POST /orgs/{org}/roles",
+		"GET /orgs/{org}/roles/{id}", "POST /orgs/{org}/roles/{id}", "POST /orgs/{org}/roles/{id}/delete",
+	} {
+		assert.True(t, slices.Contains(srv.Routes, pattern), "%q is not mounted", pattern)
+	}
+	for _, page := range []string{"/orgs/roles-org/roles", "/orgs/roles-org/roles/new"} {
+		req := httptest.NewRequest(http.MethodGet, page, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		srv.Web.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "GET %s\nbody=%s", page, rec.Body.String())
+	}
+}

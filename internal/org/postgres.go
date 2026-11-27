@@ -71,11 +71,12 @@ func (r *pgOrgRow) toOrg() *Org {
 }
 
 type pgMembershipRow struct {
-	OrgID     uuid.UUID `alias:"memberships.org_id"`
-	UserID    uuid.UUID `alias:"memberships.user_id"`
-	Role      string    `alias:"memberships.role"`
-	CreatedAt time.Time `alias:"memberships.created_at"`
-	System    bool      `alias:"memberships.system"`
+	OrgID     uuid.UUID  `alias:"memberships.org_id"`
+	UserID    uuid.UUID  `alias:"memberships.user_id"`
+	Role      string     `alias:"memberships.role"`
+	RoleID    *uuid.UUID `alias:"memberships.role_id"`
+	CreatedAt time.Time  `alias:"memberships.created_at"`
+	System    bool       `alias:"memberships.system"`
 }
 
 func (r *pgMembershipRow) toMembership() *Membership {
@@ -83,18 +84,20 @@ func (r *pgMembershipRow) toMembership() *Membership {
 		OrgID:     r.OrgID,
 		UserID:    r.UserID,
 		Role:      Role(r.Role),
+		RoleID:    derefUUID(r.RoleID),
 		CreatedAt: r.CreatedAt.UTC(),
 		System:    r.System,
 	}
 }
 
 type pgMemberProfileRow struct {
-	UserID    uuid.UUID `alias:"memberships.user_id"`
-	Role      string    `alias:"memberships.role"`
-	CreatedAt time.Time `alias:"memberships.created_at"`
-	System    bool      `alias:"memberships.system"`
-	Email     string    `alias:"users.email"`
-	Name      string    `alias:"users.name"`
+	UserID    uuid.UUID  `alias:"memberships.user_id"`
+	Role      string     `alias:"memberships.role"`
+	RoleID    *uuid.UUID `alias:"memberships.role_id"`
+	CreatedAt time.Time  `alias:"memberships.created_at"`
+	System    bool       `alias:"memberships.system"`
+	Email     string     `alias:"users.email"`
+	Name      string     `alias:"users.name"`
 }
 
 func (r *pgMemberProfileRow) toProfile() *MemberProfile {
@@ -103,6 +106,7 @@ func (r *pgMemberProfileRow) toProfile() *MemberProfile {
 		Email:     r.Email,
 		Name:      r.Name,
 		Role:      Role(r.Role),
+		RoleID:    derefUUID(r.RoleID),
 		CreatedAt: r.CreatedAt.UTC(),
 		System:    r.System,
 	}
@@ -148,4 +152,11 @@ func isPostgresUniqueViolation(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23505"
+}
+
+func derefUUID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
 }

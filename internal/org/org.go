@@ -25,6 +25,8 @@ const (
 	RoleOwner  Role = "owner"
 	RoleAdmin  Role = "admin"
 	RoleMember Role = "member"
+	// RoleCustom marks a membership whose permissions come from the custom role its RoleID names.
+	RoleCustom Role = "custom"
 )
 
 // IsValid reports whether r is one of the enumerated roles.
@@ -34,6 +36,14 @@ func (r Role) IsValid() bool {
 		return true
 	}
 	return false
+}
+
+// SECURITY: a custom role always names its role id and a built-in never does, so a cover check reads the permissions actually granted.
+func validGrant(r Role, roleID uuid.UUID) bool {
+	if r == RoleCustom {
+		return roleID != uuid.Nil
+	}
+	return r.IsValid() && roleID == uuid.Nil
 }
 
 // CanManage reports whether r may administer the org: its members, invites and API keys.
@@ -91,6 +101,7 @@ type Membership struct {
 	OrgID     uuid.UUID
 	UserID    uuid.UUID
 	Role      Role
+	RoleID    uuid.UUID
 	CreatedAt time.Time
 	// System marks a bootstrap-owned membership that cannot be removed.
 	System bool
@@ -102,6 +113,7 @@ type MemberProfile struct {
 	Email     string
 	Name      string
 	Role      Role
+	RoleID    uuid.UUID
 	CreatedAt time.Time
 	System    bool
 }

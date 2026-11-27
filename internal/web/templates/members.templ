@@ -9,8 +9,10 @@ type MemberRow struct {
 	UserID string
 	Email  string
 	Name   string
-	Role   string
-	System bool
+	Role      string
+	RoleValue string
+	RoleName  string
+	System    bool
 	// IsSelf marks the row belonging to the signed-in user, who cannot remove their own membership.
 	IsSelf bool
 	// Removable comes from org.RemovalRefusal, so the button only shows where the post would succeed.
@@ -24,7 +26,8 @@ type MembersView struct {
 	OrgName        string
 	Members        []MemberRow
 	CanManage      bool
-	GrantableRoles []string
+	CannotView     bool
+	GrantableRoles []RoleOption
 	ViewerIsOwner  bool
 	RoleUpdated    bool
 	Error          string
@@ -45,7 +48,10 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 				</a>
 			}
 		</header>
-		if !v.CanManage {
+		if v.CannotView {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("members.view_denied") }</p>
+		}
+		if !v.CanManage && !v.CannotView {
 			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("members.read_only") }</p>
 		}
 		if v.RoleUpdated {
@@ -57,60 +63,62 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 		if v.Error != "" {
 			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
-		<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-			if len(v.Members) == 0 {
-				<li class="px-4 py-6 text-center text-sm text-muted-foreground">{ d.Tr("members.empty") }</li>
-			}
-			for _, m := range v.Members {
-				<li class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-					<div class="min-w-0">
-						<p class="flex items-center gap-2 truncate text-sm font-medium text-foreground">
-							<span class="truncate">
-								if m.Name != "" {
-									{ m.Name }
-								} else {
-									{ m.Email }
-								}
-							</span>
-							if m.IsSelf {
-								<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("members.you") }</span>
-							}
-						</p>
-						<p class="truncate text-xs text-muted-foreground">
-							{ m.Email } · { m.Role }
-							if m.System {
-								<span class="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
-							}
-						</p>
-					</div>
-					if v.CanManage && (m.RoleEditable || m.LastOwner || m.Removable) {
-						<div class="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
-							if m.LastOwner {
-								<select disabled aria-label={ d.Tr("members.role_for", "Name", memberLabel(m)) } aria-describedby={ "last-owner-" + m.UserID } class="cursor-not-allowed rounded-md border border-border bg-card px-2 py-1 text-sm text-muted-foreground opacity-60 shadow-sm">
-									<option>{ d.Tr("members.role_owner") }</option>
-								</select>
-								<p id={ "last-owner-" + m.UserID } class="basis-full text-start text-xs text-muted-foreground sm:text-end">
-									if v.ViewerIsOwner {
-										{ d.Tr("authz.last_owner", "Org", v.OrgName) }
+		if !v.CannotView {
+			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+				if len(v.Members) == 0 {
+					<li class="px-4 py-6 text-center text-sm text-muted-foreground">{ d.Tr("members.empty") }</li>
+				}
+				for _, m := range v.Members {
+					<li class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+						<div class="min-w-0">
+							<p class="flex items-center gap-2 truncate text-sm font-medium text-foreground">
+								<span class="truncate">
+									if m.Name != "" {
+										{ m.Name }
 									} else {
-										{ d.Tr("members.last_owner_owner_only") }
+										{ m.Email }
 									}
-								</p>
-							} else if m.RoleEditable {
-								@memberRoleForm(d, v, m)
-							}
-							if m.Removable {
-								<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/remove")) } class="inline">
-									<button type="submit" aria-label={ "Remove " + m.Email } class="rounded p-1.5 text-muted-foreground/70 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400">
-										@icons.Icon("trash-2", "h-4 w-4")
-									</button>
-								</form>
-							}
+								</span>
+								if m.IsSelf {
+									<span class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{ d.Tr("members.you") }</span>
+								}
+							</p>
+							<p class="truncate text-xs text-muted-foreground">
+								{ m.Email } · { memberRowRole(d, m) }
+								if m.System {
+									<span class="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
+								}
+							</p>
 						</div>
-					}
-				</li>
-			}
-		</ul>
+						if v.CanManage && (m.RoleEditable || m.LastOwner || m.Removable) {
+							<div class="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+								if m.LastOwner {
+									<select disabled aria-label={ d.Tr("members.role_for", "Name", memberLabel(m)) } aria-describedby={ "last-owner-" + m.UserID } class="cursor-not-allowed rounded-md border border-border bg-card px-2 py-1 text-sm text-muted-foreground opacity-60 shadow-sm">
+										<option>{ d.Tr("members.role_owner") }</option>
+									</select>
+									<p id={ "last-owner-" + m.UserID } class="basis-full text-start text-xs text-muted-foreground sm:text-end">
+										if v.ViewerIsOwner {
+											{ d.Tr("authz.last_owner", "Org", v.OrgName) }
+										} else {
+											{ d.Tr("members.last_owner_owner_only") }
+										}
+									</p>
+								} else if m.RoleEditable {
+									@memberRoleForm(d, v, m)
+								}
+								if m.Removable {
+									<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/remove")) } class="inline">
+										<button type="submit" aria-label={ "Remove " + m.Email } class="rounded p-1.5 text-muted-foreground/70 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400">
+											@icons.Icon("trash-2", "h-4 w-4")
+										</button>
+									</form>
+								}
+							</div>
+						}
+					</li>
+				}
+			</ul>
+		}
 	</section>
 }
 
@@ -132,11 +140,28 @@ func memberRoleLabel(d web.LayoutData, role string) string {
 	}
 }
 
+func roleOptionLabel(d web.LayoutData, o RoleOption) string {
+	if o.Label != "" {
+		return o.Label
+	}
+	return memberRoleLabel(d, o.Value)
+}
+
+func memberRowRole(d web.LayoutData, m MemberRow) string {
+	switch {
+	case m.RoleName != "":
+		return m.RoleName
+	case m.Role == "custom":
+		return d.Tr("members.role_custom")
+	}
+	return m.Role
+}
+
 templ memberRoleForm(d web.LayoutData, v MembersView, m MemberRow) {
 	<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/role")) } class="flex items-center gap-2">
 		<select name="role" required aria-label={ d.Tr("members.role_for", "Name", memberLabel(m)) } class="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1">
-			for _, role := range v.GrantableRoles {
-				<option value={ role } selected?={ m.Role == role }>{ memberRoleLabel(d, role) }</option>
+			for _, o := range v.GrantableRoles {
+				<option value={ o.Value } selected?={ m.RoleValue == o.Value }>{ roleOptionLabel(d, o) }</option>
 			}
 		</select>
 		<button type="submit" class="rounded-md border border-border bg-card px-2.5 py-1 text-sm font-medium text-foreground shadow-sm hover:bg-muted">{ d.Tr("members.save_role") }</button>

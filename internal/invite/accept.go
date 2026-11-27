@@ -45,6 +45,7 @@ type MembershipRef struct {
 	OrgID  uuid.UUID
 	UserID uuid.UUID
 	Role   Role
+	RoleID uuid.UUID
 }
 
 // AcceptRequest is the input to AcceptWorkflow.Execute.
@@ -67,6 +68,7 @@ type AcceptWorkflow struct {
 	users      userStore
 	orgs       orgStore
 	clock      func() time.Time
+	uow        tenant.UnitOfWork
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 }
@@ -79,6 +81,11 @@ func WithAcceptClock(clock func() time.Time) AcceptOption {
 	return func(w *AcceptWorkflow) { w.clock = clock }
 }
 
+// WithUnitOfWork commits the membership and the consumed invite together.
+func WithUnitOfWork(uow tenant.UnitOfWork) AcceptOption {
+	return func(w *AcceptWorkflow) { w.uow = uow }
+}
+
 // NewAcceptWorkflow wires the workflow.
 func NewAcceptWorkflow(invites Store, users userStore, orgs orgStore, log *slog.Logger, unexpected apperror.UnexpectedFunc, opts ...AcceptOption) *AcceptWorkflow {
 	w := &AcceptWorkflow{
@@ -86,6 +93,7 @@ func NewAcceptWorkflow(invites Store, users userStore, orgs orgStore, log *slog.
 		users:      users,
 		orgs:       orgs,
 		clock:      func() time.Time { return time.Now().UTC() },
+		uow:        func(ctx context.Context, fn func(ctx context.Context) error) error { return fn(ctx) },
 		log:        log,
 		unexpected: unexpected,
 	}
@@ -139,16 +147,32 @@ func (w *AcceptWorkflow) Execute(ctx context.Context, req AcceptRequest) (*Accep
 
 	// tenant-scope the writes to the invite's org — the acceptor isn't yet a member of any tenant so ctx has no tenant.Context on it.
 	tctx := tenant.Into(ctx, tenant.Context{OrgID: inv.OrgID, UserID: usr.ID})
-	m := &MembershipRef{OrgID: inv.OrgID, UserID: usr.ID, Role: inv.Role}
-	if err := w.orgs.SaveMembership(tctx, m); err != nil {
-		span.RecordError(err)
-		return nil, w.unexpected(ctx, "invite.Accept: save membership", fmt.Errorf("invite.Accept: save membership: %w", err),
-			"org_id", inv.OrgID, "user_id", usr.ID)
-	}
-	if err := w.invites.Save(tctx, inv); err != nil {
-		span.RecordError(err)
-		return nil, w.unexpected(ctx, "invite.Accept: save invite", fmt.Errorf("invite.Accept: save invite: %w", err),
-			"invite_id", inv.ID)
+	m := &MembershipRef{OrgID: inv.OrgID, UserID: usr.ID, Role: inv.Role, RoleID: inv.RoleID}
+	err = w.uow(tctx, func(tctx context.Context) error {
+		existing, err := w.orgs.MembershipOf(tctx, inv.OrgID, usr.ID)
+		switch {
+		case err == nil:
+			m = existing
+		case IsMembershipMissingError(err):
+			if err := w.orgs.SaveMembership(tctx, m); err != nil {
+				span.RecordError(err)
+				return w.unexpected(ctx, "invite.Accept: save membership", fmt.Errorf("invite.Accept: save membership: %w", err),
+					"org_id", inv.OrgID, "user_id", usr.ID)
+			}
+		default:
+			span.RecordError(err)
+			return w.unexpected(ctx, "invite.Accept: membership lookup", fmt.Errorf("invite.Accept: membership lookup: %w", err),
+				"org_id", inv.OrgID, "user_id", usr.ID)
+		}
+		if err := w.invites.Save(tctx, inv); err != nil {
+			span.RecordError(err)
+			return w.unexpected(ctx, "invite.Accept: save invite", fmt.Errorf("invite.Accept: save invite: %w", err),
+				"invite_id", inv.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return &AcceptResult{Invite: inv, User: usr, Membership: m}, nil
 }

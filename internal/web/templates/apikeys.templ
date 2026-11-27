@@ -15,6 +15,7 @@ const (
 	APIKeyErrorEmptyGrant    = "empty_grant"
 	APIKeyErrorGrant         = "grant"
 	APIKeyErrorResource      = "resource"
+	APIKeyErrorScopeNotHeld  = "scope_not_held"
 )
 
 type APIKeyScopeOption struct {
@@ -109,6 +110,8 @@ templ apikeyBanner(d web.LayoutData, kind, code string) {
 		@ErrorBanner(d, d.Tr("apikey.error_grant"), code)
 	} else if kind == APIKeyErrorResource {
 		@ErrorBanner(d, d.Tr("apikey.error_resource"), code)
+	} else if kind == APIKeyErrorScopeNotHeld {
+		@ErrorBanner(d, d.Tr("apikey.error_scope_not_held"), code)
 	} else if kind == APIKeyErrorFailed {
 		@ErrorBanner(d, d.Tr("apikey.error_failed"), code)
 	}

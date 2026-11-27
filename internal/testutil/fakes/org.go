@@ -191,6 +191,7 @@ func (r *Org) ListMemberProfiles(_ context.Context, orgID uuid.UUID) ([]*org.Mem
 			Email:     email,
 			Name:      name,
 			Role:      x.Role,
+			RoleID:    x.RoleID,
 			CreatedAt: x.CreatedAt,
 			System:    x.System,
 		})

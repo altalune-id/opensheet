@@ -40,6 +40,7 @@ type Deps struct {
 	Projects *project.Service
 	I18n     *i18n.Bundle
 	Authz    *authz.Resolver
+	Roles    RoleLister
 
 	// SECURITY: secret is the resolved (decoded) http.stateSecret; unexported so only [NewDeps] can install one, and never re-derived from Cfg.
 	secret []byte

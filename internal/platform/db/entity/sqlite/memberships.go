@@ -10,6 +10,7 @@ type Memberships struct {
 	OrgID     sqlite.ColumnString
 	UserID    sqlite.ColumnString
 	Role      sqlite.ColumnString
+	RoleID    sqlite.ColumnString
 	CreatedAt sqlite.ColumnString
 	System    sqlite.ColumnInteger
 
@@ -23,9 +24,10 @@ func NewMemberships(tablePrefix string) *Memberships {
 		orgID     = sqlite.StringColumn("org_id")
 		userID    = sqlite.StringColumn("user_id")
 		role      = sqlite.StringColumn("role")
+		roleID    = sqlite.StringColumn("role_id")
 		createdAt = sqlite.StringColumn("created_at")
 		system    = sqlite.IntegerColumn("system")
-		all       = sqlite.ColumnList{id, orgID, userID, role, createdAt, system}
+		all       = sqlite.ColumnList{id, orgID, userID, role, createdAt, system, roleID}
 	)
 	return &Memberships{
 		Table:      sqlite.NewTable("", tablePrefix+"memberships", "memberships", all...),
@@ -33,6 +35,7 @@ func NewMemberships(tablePrefix string) *Memberships {
 		OrgID:      orgID,
 		UserID:     userID,
 		Role:       role,
+		RoleID:     roleID,
 		CreatedAt:  createdAt,
 		System:     system,
 		AllColumns: all,

@@ -356,6 +356,8 @@ func apiKeyErrorKind(err error) string {
 		return templates.APIKeyErrorNotManager
 	case apikey.IsUnknownScopeError(err), apikey.IsRetiredScopeError(err), apikey.IsScopeLevelError(err):
 		return templates.APIKeyErrorScope
+	case apikey.IsScopeNotHeldError(err):
+		return templates.APIKeyErrorScopeNotHeld
 	case apikey.IsNotFoundError(err), org.IsMembershipMissingError(err):
 		return templates.APIKeyErrorNotFound
 	case apikey.IsExpiryRequiredError(err), apikey.IsExpiryInPastError(err), apikey.IsExpiryTooLongError(err):

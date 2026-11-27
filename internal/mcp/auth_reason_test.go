@@ -135,7 +135,7 @@ func TestAuthenticate_AnOutageAnswers503WithoutAChallenge(t *testing.T) {
 func TestAuthenticate_AnAPIKeyDuringAStoreOutageAnswers503(t *testing.T) {
 	store := fakes.NewAPIKey()
 	store.BySecretHashErr = errors.New("connection refused")
-	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())}
+	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{})}
 	guard := mcpinternal.Authenticate(chain, tokens.Resource{MetadataURL: "https://x/meta"}, nil)
 	h := guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("the guard admitted a key it could not check")

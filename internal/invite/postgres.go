@@ -31,7 +31,7 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 	cols := `i.id AS "invites.id", i.org_id AS "invites.org_id", i.email AS "invites.email", ` +
 		`i.role AS "invites.role", i.token_hash AS "invites.token_hash", ` +
 		`i.expires_at AS "invites.expires_at", i.accepted_at AS "invites.accepted_at", ` +
-		`i.created_at AS "invites.created_at"`
+		`i.created_at AS "invites.created_at", i.role_id AS "invites.role_id"`
 	fn := schema + "." + tablePrefix
 	return &postgresStore{
 		pool:  pool,
@@ -54,6 +54,7 @@ type pgInviteRow struct {
 	ExpiresAt  time.Time  `alias:"invites.expires_at"`
 	AcceptedAt *time.Time `alias:"invites.accepted_at"`
 	CreatedAt  time.Time  `alias:"invites.created_at"`
+	RoleID     *uuid.UUID `alias:"invites.role_id"`
 }
 
 func (r *pgInviteRow) toInvite() *Invite {
@@ -69,6 +70,9 @@ func (r *pgInviteRow) toInvite() *Invite {
 	if r.AcceptedAt != nil {
 		t := r.AcceptedAt.UTC()
 		inv.UsedAt = &t
+	}
+	if r.RoleID != nil {
+		inv.RoleID = *r.RoleID
 	}
 	return inv
 }
@@ -116,6 +120,20 @@ func (s *postgresStore) queryOne(ctx context.Context, execer qrm.DB, cond postgr
 		return nil, fmt.Errorf("invite.postgres.query: %w", err)
 	}
 	return row.toInvite(), nil
+}
+
+func pgNullableUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
+}
+
+func pgRoleIDExpr(id uuid.UUID) postgres.StringExpression {
+	if id == uuid.Nil {
+		return pgent.NullUUID()
+	}
+	return postgres.UUID(id)
 }
 
 func pgNullableTime(t *time.Time) any {

@@ -98,7 +98,7 @@ func (f *fakeOrgs) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*in
 		cp := *m
 		return &cp, nil
 	}
-	return nil, &notFoundErr{msg: "membership: not found"}
+	return nil, &invite.MembershipMissingError{}
 }
 
 type notFoundErr struct{ msg string }

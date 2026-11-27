@@ -12,7 +12,6 @@ import (
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/credential"
-	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform"
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
@@ -44,7 +43,7 @@ type opensheetServices struct {
 	Authz *authz.Resolver
 }
 
-func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities) (opensheetServices, error) {
+func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Capabilities, resolver *authz.Resolver) (opensheetServices, error) {
 	pool := k.Pool
 	pgConn := k.PgConn
 	log := k.Log
@@ -150,7 +149,7 @@ func buildOpensheetServices(cfg *config.Config, k *platform.Kernel, caps capabil
 		Fix:              fixWorkflow,
 		Connect:          connectWorkflow,
 		SnapshotListener: sheet.NewSnapshotListener(snaps),
-		Authz:            newAuthzResolver(org.NewStore(cfg.DB, pool, pgConn)),
+		Authz:            resolver,
 	}
 	if err := assertOpensheetWiring(s); err != nil {
 		return opensheetServices{}, err

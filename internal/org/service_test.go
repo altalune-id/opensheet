@@ -15,6 +15,7 @@ import (
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
@@ -197,7 +198,7 @@ func TestService_ListMemberProfiles(t *testing.T) {
 	o, err := svc.Create(ctx, org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: owner})
 	require.NoError(t, err)
 
-	got, err := svc.ListMemberProfiles(ctx, o.ID)
+	got, err := svc.ListMemberProfiles(boundAs(t, o.ID, owner, org.RoleOwner), o.ID)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "owner@example.com", got[0].Email)
@@ -375,7 +376,7 @@ func TestService_UnexpectedPaths(t *testing.T) {
 
 	t.Run("ListMembers: store fails", func(t *testing.T) {
 		svc := newServiceWithStore(t, &erroringStore{inner: inner, listMembsErr: sentinel})
-		_, err := svc.ListMembers(context.Background(), uuid.New())
+		_, err := svc.ListMembers(authz.AsSystem(context.Background()), uuid.New())
 		assertAppError(t, err)
 	})
 }

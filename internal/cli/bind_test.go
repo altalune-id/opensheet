@@ -33,6 +33,10 @@ func (r *recordedRoles) RoleOf(ctx context.Context, orgID, userID uuid.UUID) (ro
 	return role, roleID, orgName, grant, err
 }
 
+func (r *recordedRoles) CustomPermissions(ctx context.Context, roleID uuid.UUID) ([]authz.Permission, error) {
+	return fakes.OrgRoles{Orgs: r.orgs}.CustomPermissions(ctx, roleID)
+}
+
 func (r *recordedRoles) resolved() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

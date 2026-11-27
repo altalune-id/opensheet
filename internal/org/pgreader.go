@@ -61,7 +61,7 @@ func (s *postgresStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUI
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System).
+	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID)).
 			AND(s.members.UserID.EQ(postgres.UUID(userID)))).
@@ -102,7 +102,7 @@ func (s *postgresStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Me
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System).
+	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID))).
 		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
@@ -128,6 +128,7 @@ func (s *postgresStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID)
 	stmt := postgres.SELECT(
 		s.members.UserID,
 		s.members.Role,
+		s.members.RoleID,
 		s.members.CreatedAt,
 		s.members.System,
 		s.users.Email,

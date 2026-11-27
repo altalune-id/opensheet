@@ -46,7 +46,7 @@ func TestServer_HandlerOptions_EnforcesKeyScopes(t *testing.T) {
 	}
 	store.Seed(adminKey)
 
-	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 	chain := authn.Chain{keyAuthn, tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 
 	s := &Server{
@@ -113,7 +113,7 @@ func TestServer_HandlerOptions_RejectsUnscopedProcedure(t *testing.T) {
 	}
 	store.Seed(key)
 
-	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
+	chain := authn.Chain{apikey.NewAuthenticator(store, nil, apikey.Scheme{}), tokens.NewAuthenticator(alwaysOKVerifier{}, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	s := &Server{
 		Kernel: &platform.Kernel{Log: log, Reporter: reporter},
 		Authn:  chain,
@@ -155,7 +155,7 @@ func TestServer_HandlerOptions_AcceptsAnyConfiguredKeyPrefix(t *testing.T) {
 			}
 			store.Seed(key)
 
-			keyAuthn := apikey.NewAuthenticator(store, nil, scheme, fakes.NewMembers())
+			keyAuthn := apikey.NewAuthenticator(store, nil, scheme)
 			s := &Server{
 				Kernel: &platform.Kernel{Log: log, Reporter: apperror.NewReporter(log, false)},
 				Authn:  authn.Chain{keyAuthn},
@@ -251,7 +251,7 @@ func TestServer_HandlerOptions_AnOutageIsUnavailableNotUnauthenticated(t *testin
 	scheme := authn.Scheme{Prefix: apikey.DefaultPrefix}
 	downStore := fakes.NewAPIKey()
 	downStore.BySecretHashErr = errors.New("connection refused")
-	keyAuthn := apikey.NewAuthenticator(downStore, nil, apikey.Scheme{}, fakes.NewMembers())
+	keyAuthn := apikey.NewAuthenticator(downStore, nil, apikey.Scheme{})
 	tokenChain := func(err error) authn.Chain {
 		return authn.Chain{keyAuthn, tokens.NewAuthenticator(failingTokenVerifier{err: err}, scheme)}
 	}
@@ -314,7 +314,7 @@ func TestServer_HandlerOptions_ChallengesFollowRFC6750(t *testing.T) {
 	}
 	store.Seed(readKey)
 	scheme := authn.Scheme{Prefix: apikey.DefaultPrefix}
-	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers())
+	keyAuthn := apikey.NewAuthenticator(store, nil, apikey.Scheme{})
 	readToken := authn.Chain{keyAuthn, tokens.NewAuthenticator(scopedTokenVerifier{scopes: []string{authn.ScopeSheetsRead}}, scheme)}
 	refused := authn.Chain{keyAuthn, tokens.NewAuthenticator(failingTokenVerifier{err: &tokens.InvalidTokenError{Reason: "signature"}}, scheme)}
 

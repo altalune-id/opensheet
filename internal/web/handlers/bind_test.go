@@ -42,6 +42,10 @@ func (a *orgRoles) RoleOf(ctx context.Context, orgID, userID uuid.UUID) (role st
 	return fakes.OrgRoles{Orgs: a.orgs}.RoleOf(ctx, orgID, userID)
 }
 
+func (a *orgRoles) CustomPermissions(ctx context.Context, roleID uuid.UUID) ([]authz.Permission, error) {
+	return fakes.OrgRoles{Orgs: a.orgs}.CustomPermissions(ctx, roleID)
+}
+
 func (a *orgRoles) resolved(orgID, userID uuid.UUID) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -327,6 +331,9 @@ func (a inviteOrgs) SaveMembership(ctx context.Context, m *invite.MembershipRef)
 
 func (a inviteOrgs) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*invite.MembershipRef, error) {
 	m, err := a.orgs.MembershipOf(ctx, orgID, userID)
+	if org.IsMembershipMissingError(err) {
+		return nil, &invite.MembershipMissingError{}
+	}
 	if err != nil {
 		return nil, err
 	}

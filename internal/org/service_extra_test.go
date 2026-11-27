@@ -163,7 +163,7 @@ func TestListMembers_ReturnsRows(t *testing.T) {
 	_, err = svc.AddMember(context.Background(), o.ID, uuid.New(), org.RoleMember)
 	require.NoError(t, err)
 
-	ms, err := svc.ListMembers(context.Background(), o.ID)
+	ms, err := svc.ListMembers(boundAs(t, o.ID, owner, org.RoleOwner), o.ID)
 	require.NoError(t, err)
 	assert.Len(t, ms, 2)
 }

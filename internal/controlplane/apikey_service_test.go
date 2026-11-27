@@ -76,7 +76,7 @@ func newAPIKeyFixtureFor(t *testing.T, manager bool, src session.Source) *apikey
 	}
 
 	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc, Authz: authz.NewResolver(fakes.NewRoles().Set(orgID, principal.UserID, role))})
-	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
+	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = keySvc
 	resource, err := tokens.NewResource("https://app.example.com/api")
 	require.NoError(t, err)

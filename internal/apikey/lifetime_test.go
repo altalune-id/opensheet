@@ -50,6 +50,6 @@ func TestAKeyInTheFieldWithNoExpiryStillAuthenticates(t *testing.T) {
 	k, plaintext, err := apikey.Scheme{}.Mint(uuid.New(), uuid.New(), "legacy", []string{authn.ScopeSheetsRead}, nil, nil, time.Now().UTC())
 	require.NoError(t, err)
 	store.Seed(k)
-	_, err = apikey.NewAuthenticator(store, nil, apikey.Scheme{}, fakes.NewMembers()).Authenticate(t.Context(), plaintext)
+	_, err = apikey.NewAuthenticator(store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err, "a never-expiring key minted before the rule must keep working")
 }

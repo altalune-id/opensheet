@@ -27,6 +27,17 @@ func deniedWith(t *testing.T, err error, want authz.Permission, code string) {
 	assert.Equal(t, code, d.ToAppError().Code())
 }
 
+func scopeNotHeld(t *testing.T, err error, scope string) {
+	t.Helper()
+	e, ok := errors.AsType[*apikey.ScopeNotHeldError](err)
+	require.True(t, ok, "err = %v (%T), want *apikey.ScopeNotHeldError", err, err)
+	assert.True(t, apikey.IsScopeNotHeldError(err))
+	assert.Equal(t, scope, e.Scope)
+	ae, ok := apperror.AsAppError(err)
+	require.True(t, ok)
+	assert.Equal(t, apperror.CodeAPIKeyScopeNotHeld, ae.Code())
+}
+
 func withHeld(ctx context.Context, held ...authz.Permission) context.Context {
 	p := session.PrincipalFrom(ctx)
 	p.Held = nil
@@ -90,7 +101,7 @@ func TestKeyMint_ScopeBeyondHeldRefused(t *testing.T) {
 	ctx := withHeld(fakes.BindRole(t.Context(), projTC, "admin"), authz.APIKeysWrite, authz.SheetsRead)
 
 	_, _, err := f.svc.Mint(ctx, "x", []string{authn.ScopeSheetsWrite}, nil, in(time.Hour))
-	deniedWith(t, err, authz.SheetsWrite, apperror.CodePermissionDenied)
+	scopeNotHeld(t, err, authn.ScopeSheetsWrite)
 	_, _, err = f.svc.Mint(ctx, "x", []string{authn.ScopeSheetsRead}, nil, in(time.Hour))
 	require.NoError(t, err)
 }
@@ -108,7 +119,7 @@ func TestPersonalToken_ScopeBeyondHeldRefused(t *testing.T) {
 	ctx := withHeld(f.ctx(t, f.alice), authz.SheetsRead)
 
 	_, _, err := f.svc.MintPersonal(ctx, "x", []string{authn.ScopeSheetsWrite}, apikey.ProjectGrant{All: true}, in(time.Hour))
-	deniedWith(t, err, authz.SheetsWrite, apperror.CodePermissionDenied)
+	scopeNotHeld(t, err, authn.ScopeSheetsWrite)
 	assert.Empty(t, f.store.All())
 }
 
@@ -120,5 +131,5 @@ func TestPersonalToken_HeldSetOfAnotherOrgHoldsNothing(t *testing.T) {
 	ctx = session.PrincipalInto(ctx, p)
 
 	_, _, err := f.svc.MintPersonal(ctx, "x", []string{authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, in(time.Hour))
-	deniedWith(t, err, authz.SheetsRead, apperror.CodePermissionDenied)
+	scopeNotHeld(t, err, authn.ScopeSheetsRead)
 }

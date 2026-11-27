@@ -36,6 +36,14 @@ CREATE INDEX opensheet_invites_email_pending_idx
   ON opensheet_invites (email)
   WHERE accepted_at IS NULL
 
+index opensheet_invites_role_idx
+CREATE INDEX opensheet_invites_role_idx
+  ON opensheet_invites (org_id, role_id) WHERE role_id IS NOT NULL
+
+index opensheet_memberships_role_idx
+CREATE INDEX opensheet_memberships_role_idx
+  ON opensheet_memberships (org_id, role_id) WHERE role_id IS NOT NULL
+
 index opensheet_memberships_user_idx
 CREATE INDEX opensheet_memberships_user_idx
   ON opensheet_memberships (user_id)
@@ -61,6 +69,10 @@ CREATE UNIQUE INDEX opensheet_projects_one_system
 index opensheet_projects_org_id_id_key
 CREATE UNIQUE INDEX opensheet_projects_org_id_id_key
   ON opensheet_projects (org_id, id)
+
+index opensheet_roles_org_name_idx
+CREATE UNIQUE INDEX opensheet_roles_org_name_idx
+  ON opensheet_roles (org_id, lower(name))
 
 index opensheet_sessions_expires_idx
 CREATE INDEX opensheet_sessions_expires_idx
@@ -202,27 +214,35 @@ CREATE TABLE opensheet_credentials (
 )
 
 table opensheet_invites
-CREATE TABLE opensheet_invites (
+CREATE TABLE "opensheet_invites" (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
   email               TEXT NOT NULL,
-  role                TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+  role                TEXT NOT NULL CHECK (role IN ('owner','admin','member','custom')),
+  role_id             TEXT,
   token_hash          TEXT NOT NULL,
   expires_at          TEXT NOT NULL,
   accepted_at         TEXT,
   invited_by          TEXT NOT NULL REFERENCES opensheet_users(id),
-  created_at          TEXT NOT NULL
+  created_at          TEXT NOT NULL,
+  UNIQUE (org_id, id),
+  CONSTRAINT opensheet_invites_role_custom CHECK ((role = 'custom') = (role_id IS NOT NULL)),
+  CONSTRAINT opensheet_invites_role_fk FOREIGN KEY (org_id, role_id) REFERENCES opensheet_roles (org_id, id)
 )
 
 table opensheet_memberships
-CREATE TABLE opensheet_memberships (
+CREATE TABLE "opensheet_memberships" (
   id                  TEXT PRIMARY KEY,
   org_id              TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
   user_id             TEXT NOT NULL REFERENCES opensheet_users(id) ON DELETE CASCADE,
-  role                TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+  role                TEXT NOT NULL CHECK (role IN ('owner','admin','member','custom')),
+  role_id             TEXT,
   system              INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL,
-  UNIQUE (org_id, user_id)
+  UNIQUE (org_id, user_id),
+  UNIQUE (org_id, id),
+  CONSTRAINT opensheet_memberships_role_custom CHECK ((role = 'custom') = (role_id IS NOT NULL)),
+  CONSTRAINT opensheet_memberships_role_fk FOREIGN KEY (org_id, role_id) REFERENCES opensheet_roles (org_id, id)
 )
 
 table opensheet_orgs
@@ -264,6 +284,19 @@ CREATE TABLE opensheet_projects (
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL,
   UNIQUE (org_id, slug)
+)
+
+table opensheet_roles
+CREATE TABLE opensheet_roles (
+  id           TEXT PRIMARY KEY,
+  org_id       TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  permissions  TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  version      INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (org_id, id)
 )
 
 table opensheet_sessions

@@ -10,6 +10,19 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 )
 
+// MembershipMissingError signals the user holds no membership in the org.
+type MembershipMissingError struct{}
+
+func (e *MembershipMissingError) Error() string {
+	return "invite: membership missing"
+}
+
+// IsMembershipMissingError reports whether err's tree contains a *MembershipMissingError.
+func IsMembershipMissingError(err error) bool {
+	_, ok := errors.AsType[*MembershipMissingError](err)
+	return ok
+}
+
 // NotFoundError reports that no invite matched the lookup.
 type NotFoundError struct {
 	ID string

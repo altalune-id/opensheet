@@ -14,6 +14,7 @@ type Invites struct {
 	ExpiresAt  postgres.ColumnTimestampz
 	AcceptedAt postgres.ColumnTimestampz
 	InvitedBy  postgres.ColumnString
+	RoleID     postgres.ColumnString
 	CreatedAt  postgres.ColumnTimestampz
 
 	AllColumns postgres.ColumnList
@@ -33,8 +34,9 @@ func NewInvites(schema, tablePrefix string) *Invites {
 		expiresAt  = postgres.TimestampzColumn("expires_at")
 		acceptedAt = postgres.TimestampzColumn("accepted_at")
 		invitedBy  = postgres.StringColumn("invited_by")
+		roleID     = postgres.StringColumn("role_id")
 		createdAt  = postgres.TimestampzColumn("created_at")
-		all        = postgres.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt}
+		all        = postgres.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID}
 	)
 	return &Invites{
 		Table:      postgres.NewTable(schema, tablePrefix+"invites", "invites", all...),
@@ -47,6 +49,7 @@ func NewInvites(schema, tablePrefix string) *Invites {
 		AcceptedAt: acceptedAt,
 		InvitedBy:  invitedBy,
 		CreatedAt:  createdAt,
+		RoleID:     roleID,
 		AllColumns: all,
 	}
 }

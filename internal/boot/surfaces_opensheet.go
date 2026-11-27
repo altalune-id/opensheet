@@ -49,6 +49,7 @@ func opensheetConsoleHandlers(deps webhandlers.Deps, s *Services) []web.Register
 		webhandlers.NewSpreadsheetHandler(deps, s.Projects, s.Spreadsheets, s.Credentials),
 		webhandlers.NewSheetHandler(deps, s.Projects, s.Sheets, s.Spreadsheets, s.Credentials, s.Read, s.Fix),
 		webhandlers.NewGoogleConnectHandler(deps, s.Projects, s.Credentials, s.Connect),
+		webhandlers.NewRoleHandler(deps, s.Roles),
 	}
 	if !mountTodo {
 		hs = append(hs, webhandlers.NewOpensheetOverviewHandler(deps, s.Projects, s.Credentials, s.Spreadsheets, s.Sheets))

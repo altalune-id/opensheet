@@ -10,6 +10,7 @@ type Memberships struct {
 	OrgID     postgres.ColumnString
 	UserID    postgres.ColumnString
 	Role      postgres.ColumnString
+	RoleID    postgres.ColumnString
 	CreatedAt postgres.ColumnTimestampz
 	System    postgres.ColumnBool
 
@@ -26,9 +27,10 @@ func NewMemberships(schema, tablePrefix string) *Memberships {
 		orgID     = postgres.StringColumn("org_id")
 		userID    = postgres.StringColumn("user_id")
 		role      = postgres.StringColumn("role")
+		roleID    = postgres.StringColumn("role_id")
 		createdAt = postgres.TimestampzColumn("created_at")
 		system    = postgres.BoolColumn("system")
-		all       = postgres.ColumnList{id, orgID, userID, role, createdAt, system}
+		all       = postgres.ColumnList{id, orgID, userID, role, createdAt, system, roleID}
 	)
 	return &Memberships{
 		Table:      postgres.NewTable(schema, tablePrefix+"memberships", "memberships", all...),
@@ -36,6 +38,7 @@ func NewMemberships(schema, tablePrefix string) *Memberships {
 		OrgID:      orgID,
 		UserID:     userID,
 		Role:       role,
+		RoleID:     roleID,
 		CreatedAt:  createdAt,
 		System:     system,
 		AllColumns: all,

@@ -22,6 +22,7 @@ import (
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/role"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
@@ -346,6 +347,13 @@ func TestErrorCodes_ROLRegistered(t *testing.T) {
 		&authz.EscalationError{Role: "owner"},
 		&authz.EscalationError{Role: "owner", Op: authz.EscalationRemove},
 		&authz.LastOwnerError{Org: "Acme"},
+		&role.NotFoundError{ID: "r1"},
+		&role.InUseError{ID: "r1"},
+		&role.InvalidPermissionError{Permission: "nope"},
+		&role.SystemOrgError{},
+		&role.InvalidNameError{},
+		&role.AlreadyExistsError{Name: "Clerk"},
+		&role.StaleVersionError{Want: 1, Got: 2},
 	} {
 		ae := e.ToAppError()
 		built[ae.Code()] = ae
@@ -353,7 +361,7 @@ func TestErrorCodes_ROLRegistered(t *testing.T) {
 	for code := range registered {
 		assert.Regexp(t, "(?m)^\\|\\s*`"+code+"`\\s*\\|", string(doc), "%s has no row in docs/errors/opensheet.md", code)
 		ae, ok := built[code]
-		if !assert.True(t, ok, "no authz error constructs %s", code) {
+		if !assert.True(t, ok, "no error constructs %s", code) {
 			continue
 		}
 		assert.NotEmpty(t, ae.Message(), code)

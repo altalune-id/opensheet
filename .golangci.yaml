@@ -177,6 +177,14 @@ linters:
               desc: "platform must not import interfaces"
             - pkg: "altalune.id/opensheet/internal/boot"
               desc: "platform must not import boot"
+        platform-boundary-role:
+          list-mode: lax
+          files:
+            - "**/internal/platform/**"
+            - "!**/internal/platform/authz/authz_test.go"
+          deny:
+            - pkg: "altalune.id/opensheet/internal/role"
+              desc: "platform must not import domain packages"
         platform-boundary-root:
           list-mode: lax
           files:

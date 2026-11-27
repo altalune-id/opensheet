@@ -79,9 +79,12 @@ func TestDataPlane_KeyScopeWithoutRolePermissionRefused(t *testing.T) {
 	if code, got := g.call(t, http.MethodPost, rowsPath+"/rows", body, testKey); code != http.StatusCreated {
 		t.Fatalf("admin's key write: %d %s, want 201", code, got)
 	}
-	g.roles.Set(g.orgs.ref.ID, g.creator, "viewer")
+	g.roles.SetCustom(g.orgs.ref.ID, g.creator, uuid.New(), authz.SheetsRead, authz.SpreadsheetsRead)
+	if code, got := g.call(t, http.MethodGet, rowsPath, nil, testKey); code != http.StatusOK {
+		t.Fatalf("key whose creator's custom role holds sheets:read: %d %s, want 200", code, got)
+	}
 	if code, got := g.call(t, http.MethodPost, rowsPath+"/rows", body, testKey); code != http.StatusNotFound || got != want {
-		t.Errorf("key whose creator's role lacks sheets:write: %d %s, want the missing-slug 404", code, got)
+		t.Errorf("key whose creator's custom role lacks sheets:write: %d %s, want the missing-slug 404", code, got)
 	}
 }
 
@@ -179,11 +182,11 @@ func TestDataPlane_PersonalTokenOfDemotedOwnerLosesOrgScope(t *testing.T) {
 	svc := apikey.NewService(store, apikey.Scheme{}, members, projects, discardLog(), nil)
 	ctx := fakes.BindRole(t.Context(), tenant.Context{OrgID: orgID, UserID: owner}, "owner")
 	expiry := time.Now().Add(time.Hour)
-	_, plaintext, err := svc.MintPersonal(ctx, "laptop", []string{authn.ScopeMembersRead, authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, &expiry)
+	_, plaintext, err := svc.MintPersonal(ctx, "laptop", []string{authn.ScopeMembersRead, authn.ScopeSheetsRead, authn.ScopeSheetsAdmin}, apikey.ProjectGrant{All: true}, &expiry)
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	a := NewCredentialAuthorizer(apikey.NewAuthenticator(store, nil, apikey.Scheme{}, members), nil, authz.NewResolver(g.roles), apikey.Scheme{}.Authn())
+	a := NewCredentialAuthorizer(apikey.NewAuthenticator(store, nil, apikey.Scheme{}), nil, authz.NewResolver(g.roles), apikey.Scheme{}.Authn())
 	h := g.rig
 	read := func() (int, string) {
 		rec := serve(t, NewSheetHandler(SheetHandlerParams{
@@ -193,13 +196,35 @@ func TestDataPlane_PersonalTokenOfDemotedOwnerLosesOrgScope(t *testing.T) {
 		return rec.Code, rec.Body.String()
 	}
 
+	bound := func() context.Context {
+		ctx, _, err := a.Authorize(t.Context(), plaintext, authn.ScopeSheetsRead, orgID, g.projects.ref.ID, g.sheets.ref.ID)
+		if err != nil {
+			t.Fatalf("authorize: %v", err)
+		}
+		return ctx
+	}
+
 	if code, body := read(); code != http.StatusOK {
 		t.Fatalf("owner's token: %d %s, want 200", code, body)
 	}
+	if err := authz.Can(bound(), authz.SheetsEnableWrites); err != nil {
+		t.Fatalf("owner's token with sheets:admin must hold sheets:enable_writes: %v", err)
+	}
 	members.SeatMember(orgID, owner)
 	g.roles.Set(orgID, owner, "member")
+	if code, body := read(); code != http.StatusOK {
+		t.Fatalf("demoted owner's token keeps what the member role and its scopes share: %d %s, want 200", code, body)
+	}
+	ctx = bound()
+	if err := authz.Can(ctx, authz.MembersRead); err != nil {
+		t.Errorf("a member holds members:read, so the demoted owner's token keeps it: %v", err)
+	}
+	if err := authz.Can(ctx, authz.SheetsEnableWrites); !authz.IsDeniedError(err) {
+		t.Errorf("demoted owner's token must lose sheets:enable_writes, got %v", err)
+	}
+	g.roles.Set(orgID, owner, "")
 	if code, body := read(); code != http.StatusNotFound || body != want {
-		t.Errorf("demoted owner's org-level token: %d %s, want the missing-slug 404", code, body)
+		t.Errorf("removed owner's token: %d %s, want the missing-slug 404", code, body)
 	}
 }
 

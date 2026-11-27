@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
+
+	pgent "altalune.id/opensheet/internal/platform/db/entity/postgres"
 )
 
 func (s *postgresStore) Save(ctx context.Context, o *Org) error {
@@ -43,10 +45,11 @@ func (s *postgresStore) SaveMembership(ctx context.Context, m *Membership) error
 		return err
 	}
 	stmt := s.members.INSERT(s.members.AllColumns).
-		VALUES(uuid.New(), m.OrgID, m.UserID, string(m.Role), m.CreatedAt.UTC(), m.System).
+		VALUES(uuid.New(), m.OrgID, m.UserID, string(m.Role), m.CreatedAt.UTC(), m.System, pgNullableRoleID(m.RoleID)).
 		ON_CONFLICT(s.members.OrgID, s.members.UserID).
 		DO_UPDATE(postgres.SET(
 			s.members.Role.SET(postgres.String(string(m.Role))),
+			s.members.RoleID.SET(pgRoleIDExpr(m.RoleID)),
 			s.members.System.SET(postgres.Bool(m.System)),
 		))
 	if _, execErr := stmt.ExecContext(ctx, tx); execErr != nil {
@@ -75,4 +78,18 @@ func (s *postgresStore) RemoveMember(ctx context.Context, orgID, userID uuid.UUI
 		return s.endTx(tx, owned, &MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()})
 	}
 	return s.endTx(tx, owned, nil)
+}
+
+func pgNullableRoleID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
+}
+
+func pgRoleIDExpr(id uuid.UUID) postgres.StringExpression {
+	if id == uuid.Nil {
+		return pgent.NullUUID()
+	}
+	return postgres.UUID(id)
 }
