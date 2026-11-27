@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/i18n"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
@@ -78,7 +80,11 @@ func (h *CredentialHandler) PostDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Credentials.Delete(sc.req.Context(), id); err != nil && !credential.IsNotFoundError(err) {
 		h.LogErr("web credential: delete", err)
-		h.writeSection(w, sc, templates.CredentialsView{Error: deleteMessage(err), ErrorCode: ErrorRef(err)})
+		msg := deleteMessage(err)
+		if authz.IsDeniedError(err) {
+			msg = i18n.TranslatorFrom(sc.req.Context()).T("credentials.delete_managers_only")
+		}
+		h.writeSection(w, sc, templates.CredentialsView{Error: msg, ErrorCode: ErrorRef(err)})
 		return
 	}
 	h.writeSection(w, sc, templates.CredentialsView{})

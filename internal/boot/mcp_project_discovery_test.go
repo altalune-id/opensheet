@@ -86,7 +86,7 @@ func TestMCP_KeyNeverReachesASiblingProject(t *testing.T) {
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
 	require.NoError(t, err)
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	sibling, err := f.srv.Projects.Create(orgCtx, o.ID, "sibling-project", "Sibling Project")
 	require.NoError(t, err)
 
@@ -123,7 +123,7 @@ func TestMCP_OrgKeyReachesOnlyItsGrantedProjects(t *testing.T) {
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
 	require.NoError(t, err)
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	granted, err := f.srv.Projects.Create(orgCtx, o.ID, "granted-project", "Granted Project")
 	require.NoError(t, err)
 	_, err = f.srv.Projects.Create(orgCtx, o.ID, "ungranted-project", "Ungranted Project")
@@ -163,9 +163,9 @@ func TestMCP_PersonalTokenActsForItsOwner(t *testing.T) {
 	require.NoError(t, err)
 	member, err := f.srv.Users.Create(ctx, user.CreateRequest{Email: "pat-member@example.com", Name: "PAT Member", Source: user.SourceOIDC})
 	require.NoError(t, err)
-	memberCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: member.ID})
-	_, err = f.srv.Orgs.AddMember(memberCtx, o.ID, member.ID, org.RoleMember)
+	_, err = f.srv.Orgs.AddMember(tenant.WithOrg(ctx, o.ID), o.ID, member.ID, org.RoleMember)
 	require.NoError(t, err)
+	memberCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: member.ID})
 
 	_, token, err := f.srv.APIKeys.MintPersonal(memberCtx, "laptop", []string{authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, soon())
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestMCP_PersonalTokenActsForItsOwner(t *testing.T) {
 
 	owner, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent"})
 	require.NoError(t, err)
-	require.NoError(t, f.srv.Orgs.RemoveMember(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID}), o.ID, member.ID))
+	require.NoError(t, f.srv.Orgs.RemoveMember(bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: owner.ID}), o.ID, member.ID))
 	rec = f.call(t, token, callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
 	require.Equal(t, http.StatusUnauthorized, rec.Code, "a departed member's token must be refused at the door; body=%s", rec.Body.String())
 
@@ -196,7 +196,7 @@ func TestMCP_MemberListIsAnOrgLevelRead(t *testing.T) {
 	require.NoError(t, err)
 	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
 	require.NoError(t, err)
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 
 	_, reader, err := f.srv.APIKeys.MintOrg(orgCtx, "members", []string{authn.ScopeMembersRead}, apikey.ProjectGrant{All: true}, soon())
 	require.NoError(t, err)

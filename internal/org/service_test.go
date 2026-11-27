@@ -16,7 +16,6 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/capabilities"
-	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
@@ -27,7 +26,7 @@ func newTestService(t *testing.T, orgCreation bool) (*org.Service, *fakes.Org) {
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
 		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
-	svc := org.NewService(store, capabilities.Capabilities{OrgCreation: orgCreation}, log, unexpected)
+	svc := org.NewService(store, capabilities.Capabilities{OrgCreation: orgCreation}, log, unexpected, fakes.UnitOfWork)
 	return svc, store
 }
 
@@ -92,24 +91,27 @@ func TestService_List(t *testing.T) {
 func TestService_Rename(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		svc, _ := newTestService(t, true)
-		o, err := svc.Create(context.Background(), org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: uuid.New()})
+		owner := uuid.New()
+		o, err := svc.Create(context.Background(), org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: owner})
 		require.NoError(t, err)
-		renamed, err := svc.Rename(context.Background(), o.ID, "Acme Corp")
+		renamed, err := svc.Rename(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, "Acme Corp")
 		require.NoError(t, err)
 		assert.Equal(t, "Acme Corp", renamed.Name)
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		svc, _ := newTestService(t, true)
-		_, err := svc.Rename(context.Background(), uuid.New(), "Acme")
+		id := uuid.New()
+		_, err := svc.Rename(boundAs(t, id, uuid.New(), org.RoleOwner), id, "Acme")
 		assert.True(t, org.IsNotFoundError(err), "want NotFoundError, got %T: %v", err, err)
 	})
 
 	t.Run("invalid name", func(t *testing.T) {
 		svc, _ := newTestService(t, true)
-		o, err := svc.Create(context.Background(), org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: uuid.New()})
+		owner := uuid.New()
+		o, err := svc.Create(context.Background(), org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: owner})
 		require.NoError(t, err)
-		_, err = svc.Rename(context.Background(), o.ID, "")
+		_, err = svc.Rename(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, "")
 		assert.True(t, org.IsInvalidNameError(err), "want InvalidNameError, got %T: %v", err, err)
 	})
 }
@@ -120,8 +122,7 @@ func TestService_Members(t *testing.T) {
 	owner := uuid.New()
 	o, err := svc.Create(ctx, org.CreateRequest{Slug: "acme", Name: "Acme", OwnerID: owner})
 	require.NoError(t, err)
-	// NOTE: the actor comes from the tenant scope, the way every transport supplies it.
-	ctx = tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner})
+	ctx = boundAs(t, o.ID, owner, org.RoleOwner)
 
 	t.Run("add ok", func(t *testing.T) {
 		u := uuid.New()
@@ -168,7 +169,7 @@ func TestService_Rename_SystemProtected(t *testing.T) {
 	o.System = true
 	require.NoError(t, store.Save(ctx, o))
 
-	_, err = svc.Rename(ctx, o.ID, "New Name")
+	_, err = svc.Rename(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, "New Name")
 	assert.True(t, org.IsSystemProtectedError(err), "want SystemProtectedError, got %T: %v", err, err)
 }
 
@@ -184,7 +185,7 @@ func TestService_RemoveMember_SystemProtected(t *testing.T) {
 	m.System = true
 	require.NoError(t, store.SaveMembership(ctx, m))
 
-	err = svc.RemoveMember(tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner}), o.ID, other)
+	err = svc.RemoveMember(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, other)
 	assert.True(t, org.IsSystemProtectedError(err), "want SystemProtectedError, got %T: %v", err, err)
 }
 
@@ -290,13 +291,17 @@ func (e *erroringStore) RemoveMember(ctx context.Context, o, u uuid.UUID) error 
 	return e.inner.RemoveMember(ctx, o, u)
 }
 
+func (e *erroringStore) LockOrg(ctx context.Context, o uuid.UUID) error {
+	return e.inner.LockOrg(ctx, o)
+}
+
 func newServiceWithStore(t *testing.T, store org.Store) *org.Service {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
 		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
-	return org.NewService(store, capabilities.Capabilities{OrgCreation: true}, log, unexpected)
+	return org.NewService(store, capabilities.Capabilities{OrgCreation: true}, log, unexpected, fakes.UnitOfWork)
 }
 
 func TestService_UnexpectedPaths(t *testing.T) {

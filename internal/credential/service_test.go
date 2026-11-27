@@ -101,7 +101,7 @@ func seedOAuth(
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
 	t.Helper()
 	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return tenant.Into(context.Background(), tc), tc
+	return fakes.BindRole(context.Background(), tc, "owner"), tc
 }
 
 func upload(ctx context.Context, t *testing.T, svc *credential.Service, name string) *credential.Credential {
@@ -759,8 +759,8 @@ func TestService_ByID(t *testing.T) {
 		ctx, tc := tenantCtx(t)
 		c := upload(ctx, t, svc, "prod")
 
-		other := tenant.Into(context.Background(),
-			tenant.Context{OrgID: tc.OrgID, ProjectID: uuid.New(), UserID: tc.UserID})
+		other := fakes.BindRole(context.Background(),
+			tenant.Context{OrgID: tc.OrgID, ProjectID: uuid.New(), UserID: tc.UserID}, "owner")
 		if _, err := svc.ByID(other, c.ID); !credential.IsNotFoundError(err) {
 			t.Fatalf("error = %T %v, want *NotFoundError", err, err)
 		}

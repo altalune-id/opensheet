@@ -34,6 +34,7 @@ import (
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -1314,7 +1315,7 @@ func TestGoogleConnectHandler_CallbackWithoutARefreshTokenIs400(t *testing.T) {
 
 func (f *sheetsFixture) startState(t *testing.T) string {
 	t.Helper()
-	raw, err := f.Connect.Start(context.Background(), f.Org.ID, f.Project.ID, f.Principal.UserID, f.path("/credentials"))
+	raw, err := f.Connect.Start(fakes.BindRole(context.Background(), tenant.Context{OrgID: f.Org.ID, ProjectID: f.Project.ID, UserID: f.Principal.UserID}, "owner"), f.Org.ID, f.Project.ID, f.Principal.UserID, f.path("/credentials"))
 	require.NoError(t, err)
 	u, err := url.Parse(raw)
 	require.NoError(t, err)
@@ -1587,7 +1588,7 @@ func TestGoogleConnectHandler_CallbackRefusesAStateStartedByAnotherUser(t *testi
 	other := uuid.New()
 	_, err := f.Orgs.AddMember(setTenant(context.Background(), f.Org.ID, f.Principal.UserID), f.Org.ID, other, org.RoleMember)
 	require.NoError(t, err)
-	raw, err := f.Connect.Start(context.Background(), f.Org.ID, f.Project.ID, other, f.path("/credentials"))
+	raw, err := f.Connect.Start(fakes.BindRole(context.Background(), tenant.Context{OrgID: f.Org.ID, ProjectID: f.Project.ID, UserID: other}, "owner"), f.Org.ID, f.Project.ID, other, f.path("/credentials"))
 	require.NoError(t, err)
 	u, err := url.Parse(raw)
 	require.NoError(t, err)
@@ -1606,7 +1607,7 @@ func TestGoogleConnectHandler_CallbackRefusesAnExMember(t *testing.T) {
 	ownerCtx := setTenant(context.Background(), f.Org.ID, f.Principal.UserID)
 	_, err := f.Orgs.AddMember(ownerCtx, f.Org.ID, leaver.UserID, org.RoleMember)
 	require.NoError(t, err)
-	raw, err := f.Connect.Start(context.Background(), f.Org.ID, f.Project.ID, leaver.UserID, f.path("/credentials"))
+	raw, err := f.Connect.Start(fakes.BindRole(context.Background(), tenant.Context{OrgID: f.Org.ID, ProjectID: f.Project.ID, UserID: leaver.UserID}, "owner"), f.Org.ID, f.Project.ID, leaver.UserID, f.path("/credentials"))
 	require.NoError(t, err)
 	u, err := url.Parse(raw)
 	require.NoError(t, err)
@@ -1630,7 +1631,7 @@ func TestGoogleConnectHandler_CallbackRefusesAProjectOutsideTheStatesOrg(t *test
 		"own org, another org's project": {f.Org.ID, victimProj.ID},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := f.Connect.Start(context.Background(), ids[0], ids[1], f.Principal.UserID, f.path("/credentials"))
+			raw, err := f.Connect.Start(fakes.BindRole(context.Background(), tenant.Context{OrgID: ids[0], ProjectID: ids[1], UserID: f.Principal.UserID}, "owner"), ids[0], ids[1], f.Principal.UserID, f.path("/credentials"))
 			require.NoError(t, err)
 			u, err := url.Parse(raw)
 			require.NoError(t, err)

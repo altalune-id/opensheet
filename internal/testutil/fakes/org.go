@@ -3,11 +3,13 @@ package fakes
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/db"
 )
 
 // Org is an in-memory org.Store.
@@ -21,6 +23,8 @@ type Org struct {
 	MembershipOfFailAfter int
 	MembershipOfErr       error
 	membershipOfCalls     int
+	// OnLock runs inside LockOrg, standing in for a change another transaction commits just before the lock is granted.
+	OnLock func()
 }
 
 // NewOrg returns an empty in-memory org.Store.
@@ -214,4 +218,15 @@ func (r *Org) RemoveMember(_ context.Context, orgID, userID uuid.UUID) error {
 		}
 	}
 	return &org.MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
+}
+
+// LockOrg mirrors the Postgres store: it refuses outside a unit of work and otherwise holds nothing.
+func (r *Org) LockOrg(ctx context.Context, _ uuid.UUID) error {
+	if _, ok := db.CurrentTx(ctx); !ok {
+		return errors.New("fakes.Org: LockOrg needs a unit of work")
+	}
+	if r.OnLock != nil {
+		r.OnLock()
+	}
+	return nil
 }

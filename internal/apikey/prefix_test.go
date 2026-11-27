@@ -64,7 +64,7 @@ func TestMintAndResolveAgreeUnderEveryPrefix(t *testing.T) {
 			auth := apikey.NewAuthenticator(store, nil, sc, fakes.NewMembers())
 
 			tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-			k, plaintext, err := svc.Mint(tenant.Into(t.Context(), tc), "round trip", []string{authn.ScopeSheetsRead}, nil, in(time.Hour))
+			k, plaintext, err := svc.Mint(fakes.BindRole(t.Context(), tc, "owner"), "round trip", []string{authn.ScopeSheetsRead}, nil, in(time.Hour))
 			require.NoError(t, err)
 
 			require.True(t, strings.HasPrefix(plaintext, sc.Prefix()),

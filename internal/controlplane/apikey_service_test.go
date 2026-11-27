@@ -57,8 +57,10 @@ func newAPIKeyFixtureFor(t *testing.T, manager bool, src session.Source) *apikey
 	orgID := uuid.New()
 	principal := session.Principal{UserID: uuid.New(), Email: "a@b", ActiveOrgID: orgID, Source: src}
 	managers := fakes.NewMembers()
+	role := "member"
 	if manager {
 		managers.SeatManager(orgID, principal.UserID)
+		role = "owner"
 	}
 
 	projs := fakes.NewProject()
@@ -73,7 +75,7 @@ func newAPIKeyFixtureFor(t *testing.T, manager bool, src session.Source) *apikey
 		Verifier: stubVerifier{principal: fullTokenGrant(principal)},
 	}
 
-	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc, Authz: authz.NewResolver(fakes.NewRoles().Set(orgID, principal.UserID, "owner"))})
+	srv := controlplane.New(nil, kernel, controlplane.Deps{Projects: projectSvc, Authz: authz.NewResolver(fakes.NewRoles().Set(orgID, principal.UserID, role))})
 	srv.Authn = authn.Chain{apikey.NewAuthenticator(keyStore, nil, apikey.Scheme{}, fakes.NewMembers()), tokens.NewAuthenticator(kernel.Verifier, authn.Scheme{Prefix: apikey.DefaultPrefix})}
 	srv.APIKeys = keySvc
 	resource, err := tokens.NewResource("https://app.example.com/api")

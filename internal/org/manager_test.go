@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/opensheet/internal/org"
-	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // SECURITY: RequireManager is the one owner/admin gate every surface asks, so each denial must be the same typed error.
@@ -89,7 +88,7 @@ func TestRemoveMemberRunsItsHooks(t *testing.T) {
 		got = append(got, [2]uuid.UUID{orgID, userID})
 		return nil
 	})
-	actor := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner})
+	actor := boundAs(t, o.ID, owner, org.RoleOwner)
 	require.NoError(t, svc.RemoveMember(actor, o.ID, member))
 	require.Equal(t, [][2]uuid.UUID{{o.ID, member}}, got, "every hook runs once with the removed membership")
 

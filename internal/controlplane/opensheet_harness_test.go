@@ -135,7 +135,7 @@ func buildOSHarnessOn(t *testing.T, p session.Principal, aerr error, realKeys bo
 	snaps := fakes.NewSheetSnapshots()
 
 	sl := testSealer(t)
-	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected)
+	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected, fakes.UnitOfWork)
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
 	credSvc := credential.NewService(creds, log, reporter.Unexpected, sl)
 	sprdSvc := spreadsheet.NewService(sprds, log, reporter.Unexpected, stubTokenSources{}, googleFactory(t),

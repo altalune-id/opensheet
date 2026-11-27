@@ -62,7 +62,7 @@ func newHarnessOpts(t *testing.T, p session.Principal, verr error) *harness {
 	tds := fakes.NewTodo()
 	keys := fakes.NewAPIKey()
 
-	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected)
+	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected, fakes.UnitOfWork)
 	projectSvc := project.NewService(projs, log, reporter.Unexpected)
 	todoSvc := todo.NewService(tds, log, reporter.Unexpected, &fakes.Queue{})
 

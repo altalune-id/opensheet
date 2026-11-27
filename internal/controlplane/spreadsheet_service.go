@@ -96,6 +96,11 @@ func (s *SpreadsheetService) Update(ctx context.Context, req *connect.Request[sp
 	if err != nil {
 		return nil, err
 	}
+	if req.Msg.GetWritable() && !sp.Writable {
+		if err := authz.Can(tctx, authz.SpreadsheetsEnableWrites); err != nil {
+			return nil, err
+		}
+	}
 	if req.Msg.Title != nil {
 		sp, err = s.spreadsheets.Retitle(tctx, id, req.Msg.GetTitle())
 		if err != nil {

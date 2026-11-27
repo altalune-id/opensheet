@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
@@ -34,7 +35,7 @@ func (h *ProjectHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	}
 	Render(w, r, templates.ProjectsLayout(
 		h.LayoutForOrg(r, "Projects", o.Slug, "projects"),
-		templates.ProjectsView{OrgSlug: o.Slug, Projects: projectSummaries(items)},
+		templates.ProjectsView{OrgSlug: o.Slug, Projects: projectSummaries(items), CanCreate: holds(r, authz.ProjectsWrite)},
 	))
 }
 
@@ -44,7 +45,11 @@ func (h *ProjectHandler) GetNew(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	o := sc.org
+	o, r := sc.org, sc.req
+	if !holds(r, authz.ProjectsWrite) {
+		h.refuseRole(w, r, "projects.create_managers_only")
+		return
+	}
 	Render(w, r, templates.ProjectNewLayout(
 		h.LayoutForOrg(r, "Create project", o.Slug, "projects"),
 		templates.ProjectNewView{OrgSlug: o.Slug, Slug: slugs.Generate()},
@@ -58,6 +63,10 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, sid, o, r := sc.principal, sc.sid, sc.org, sc.req
+	if !holds(r, authz.ProjectsWrite) {
+		h.refuseRole(w, r, "projects.create_managers_only")
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
@@ -67,6 +76,10 @@ func (h *ProjectHandler) PostCreate(w http.ResponseWriter, r *http.Request) {
 	created, err := h.Projects.Create(r.Context(), o.ID, slug, name)
 	if err != nil {
 		h.LogErr("web project: create", err)
+		if authz.IsDeniedError(err) {
+			h.refuseRole(w, r, "projects.create_managers_only", err)
+			return
+		}
 		msg := err.Error()
 		if project.IsAlreadyExistsError(err) {
 			msg = "Slug is already taken."
@@ -95,20 +108,22 @@ func (h *ProjectHandler) PostRename(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, o, proj, r := sc.principal, sc.org, sc.project, sc.req
+	o, proj, r := sc.org, sc.project, sc.req
+	if !holds(r, authz.ProjectsWrite) {
+		h.refuseRole(w, r, "projects.rename_managers_only")
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
 		return
 	}
 	name := strings.TrimSpace(r.PostForm.Get("name"))
-	// SECURITY: RequireProject admits any org member, so renaming needs an owner or admin; a failed lookup refuses.
-	canManage, mErr := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
-	if mErr != nil || !canManage {
-		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "You must be an admin or owner to rename this project.")
-		return
-	}
 	if _, err := h.Projects.Rename(r.Context(), proj.ID, name); err != nil {
 		h.LogErr("web project: rename", err)
+		if authz.IsDeniedError(err) {
+			h.refuseRole(w, r, "projects.rename_managers_only", err)
+			return
+		}
 		if project.IsSystemProtectedError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Rename not allowed", "This project is system-protected.", err)
 			return

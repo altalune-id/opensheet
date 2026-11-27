@@ -157,7 +157,7 @@ func TestBootServer_ProducerOnlyStillDeclaresJobs(t *testing.T) {
 	require.NoError(t, err)
 	o, err := srv.Orgs.BootstrapSingleton(ctx, "q-org", "Q Org", owner.ID)
 	require.NoError(t, err)
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	p, err := srv.Projects.Create(orgCtx, o.ID, "q-project", "Q Project")
 	require.NoError(t, err)
 	projCtx := tenant.WithProject(orgCtx, p.ID)

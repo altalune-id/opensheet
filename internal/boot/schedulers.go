@@ -73,7 +73,7 @@ func buildScheduler(
 	wallClock := map[string]bool{}
 	for _, p := range publishedSchedulers(providers) {
 		for _, j := range p.SchedulerJobs() {
-			if rErr := runner.Register(j); rErr != nil {
+			if rErr := runner.Register(systemJob(j)); rErr != nil {
 				return nil, fmt.Errorf("boot: register job %q: %w", j.Name, rErr)
 			}
 			wallClock[j.Name] = scheduler.UsesWallClock(j.Schedule)

@@ -11,6 +11,7 @@ import (
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/gwerr"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -82,17 +83,27 @@ func (w *ProvisionWorkflow) Run(ctx context.Context, req ProvisionRequest) (*Spr
 	ctx, span := tracer.Start(ctx, "spreadsheet.Provision")
 	defer span.End()
 
-	if err := w.validate(req); err != nil {
-		return nil, nil, err
-	}
 	tc, err := tenant.From(ctx)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := authz.Can(ctx, authz.SheetsAdmin); err != nil {
+		span.RecordError(err)
+		return nil, nil, err
+	}
+	if err := w.validate(req); err != nil {
 		return nil, nil, err
 	}
 	sp, err := w.existing(ctx, tc, req.IdempotencyKey)
 	if err != nil {
 		span.RecordError(err)
 		return nil, nil, err
+	}
+	if sp != nil && !sp.Writable {
+		if err := authz.Can(ctx, authz.SheetsEnableWrites); err != nil {
+			span.RecordError(err)
+			return nil, nil, err
+		}
 	}
 	credentialID := req.CredentialID
 	if sp != nil {

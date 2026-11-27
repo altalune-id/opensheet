@@ -7,6 +7,9 @@ import (
 	"github.com/google/uuid"
 
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
+	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 // Members is an in-memory membership gate for tests: seated users are members, and seated managers also manage.
@@ -95,4 +98,23 @@ func (p *OrgProjects) ProjectIDs(_ context.Context, orgID uuid.UUID) ([]uuid.UUI
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]uuid.UUID(nil), p.byOrg[orgID]...), nil
+}
+
+// BindRole returns ctx scoped to tc, carrying tc's person bound in tc's org with role's built-in permissions; an empty role holds nothing.
+func BindRole(ctx context.Context, tc tenant.Context, role string) context.Context {
+	perms := authz.Builtin(role)
+	held := make([]string, 0, len(perms))
+	for _, p := range perms {
+		held = append(held, string(p))
+	}
+	return session.PrincipalInto(tenant.Into(ctx, tc), session.Principal{
+		UserID:          tc.UserID,
+		Source:          session.SourceOIDC,
+		ActiveOrgID:     tc.OrgID,
+		ActiveProjectID: tc.ProjectID,
+		Held:            held,
+		HeldOrg:         "Acme",
+		HeldOrgID:       tc.OrgID,
+		HeldRole:        role,
+	})
 }

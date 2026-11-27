@@ -42,7 +42,9 @@ func assertConsumerWiring(ps []queue.Provider) error {
 func handlersOf(ps []queue.Provider) []queue.Handler {
 	var hs []queue.Handler
 	for _, p := range ps {
-		hs = append(hs, p.ConsumerHandlers()...)
+		for _, h := range p.ConsumerHandlers() {
+			hs = append(hs, systemHandler(h))
+		}
 	}
 	return hs
 }
@@ -50,7 +52,9 @@ func handlersOf(ps []queue.Provider) []queue.Handler {
 func listenersOf(ps []queue.ListenerProvider) []queue.Listener {
 	var ls []queue.Listener
 	for _, p := range ps {
-		ls = append(ls, p.Listeners()...)
+		for _, l := range p.Listeners() {
+			ls = append(ls, systemListener(l))
+		}
 	}
 	return ls
 }

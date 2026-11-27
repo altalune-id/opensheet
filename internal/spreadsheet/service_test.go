@@ -122,7 +122,7 @@ func newStoreSvc(t *testing.T, store spreadsheet.Store) (*spreadsheet.Service, *
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
 	t.Helper()
 	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return tenant.Into(context.Background(), tc), tc
+	return fakes.BindRole(context.Background(), tc, "owner"), tc
 }
 
 func seed(t *testing.T, store *fakes.Spreadsheet, tc tenant.Context, fileID string) *spreadsheet.Spreadsheet {
@@ -542,7 +542,7 @@ func TestService_SetWritable(t *testing.T) {
 		_, tc := tenantCtx(t)
 		sp := seed(t, store, tc, goodFileID)
 
-		other := tenant.Into(context.Background(), tenant.Context{OrgID: tc.OrgID, ProjectID: uuid.New()})
+		other := fakes.BindRole(context.Background(), tenant.Context{OrgID: tc.OrgID, ProjectID: uuid.New()}, "owner")
 		_, err := svc.SetWritable(other, sp.ID, true)
 		if !spreadsheet.IsNotFoundError(err) {
 			t.Fatalf("want IsNotFoundError, got %T: %v", err, err)

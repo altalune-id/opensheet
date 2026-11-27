@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/icons"
 )
@@ -330,13 +331,18 @@ templ NoAccessCallout(d web.LayoutData, v NoAccessView, lost bool, code string) 
 // SECURITY: the flag is enforced on the server; this checkbox only carries the operator's intent.
 templ spreadsheetWritableField(d web.LayoutData, writable bool) {
 	<fieldset>
-		<label class="flex items-start gap-2 text-sm text-foreground">
-			<input data-spreadsheet-writable type="checkbox" name="writable" value="1" checked?={ writable } class="mt-0.5 size-4"/>
+		<label class={ "flex items-start gap-2 text-sm text-foreground", templ.KV("opacity-60", !writable && !heldIn(d, authz.SpreadsheetsEnableWrites)) }>
+			<input data-spreadsheet-writable type="checkbox" name="writable" value="1" checked?={ writable } disabled?={ !writable && !heldIn(d, authz.SpreadsheetsEnableWrites) } if !writable && !heldIn(d, authz.SpreadsheetsEnableWrites) {
+				aria-describedby="spreadsheet-writes-reason"
+			} class="mt-0.5 size-4 shrink-0"/>
 			<span>
 				{ d.Tr("spreadsheets.writable") }
 				<span class="mt-0.5 block text-xs text-muted-foreground">{ d.Tr("spreadsheets.writable_hint") }</span>
 			</span>
 		</label>
+		if !writable && !heldIn(d, authz.SpreadsheetsEnableWrites) {
+			<p id="spreadsheet-writes-reason" class="mt-1 text-xs text-muted-foreground">{ d.Tr("writes.managers_only") }</p>
+		}
 	</fieldset>
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/go-jet/jet/v2/sqlite"
 	"github.com/google/uuid"
 
+	pdb "altalune.id/opensheet/internal/platform/db"
 	sqliteent "altalune.id/opensheet/internal/platform/db/entity/sqlite"
 )
 
@@ -134,7 +135,7 @@ func (s *sqliteStore) Save(ctx context.Context, o *Org) error {
 			s.orgs.UpdatedAt.SET(sqlite.String(now)),
 			s.orgs.System.SET(sqlite.Int64(boolToInt(o.System))),
 		))
-	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+	if _, err := stmt.ExecContext(ctx, s.conn(ctx)); err != nil {
 		if isSQLiteUniqueViolation(err, "orgs.system") {
 			return &SystemOrgExistsError{Slug: o.Slug}
 		}
@@ -157,7 +158,7 @@ func (s *sqliteStore) SystemOrg(ctx context.Context) (*Org, error) {
 		ORDER_BY(s.orgs.CreatedAt.ASC(), s.orgs.ID.ASC()).
 		LIMIT(1)
 	var row sqliteOrgRow
-	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			return nil, &NotFoundError{System: true}
 		}
@@ -176,7 +177,7 @@ func (s *sqliteStore) List(ctx context.Context, userID uuid.UUID) ([]*Org, error
 		WHERE(s.members.UserID.EQ(sqlite.String(userID.String()))).
 		ORDER_BY(s.orgs.CreatedAt.ASC(), s.orgs.ID.ASC())
 	var rows []sqliteOrgRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: List: %w", err)
 	}
 	out := make([]*Org, 0, len(rows))
@@ -205,7 +206,7 @@ func (s *sqliteStore) SaveMembership(ctx context.Context, m *Membership) error {
 			s.members.Role.SET(sqlite.String(string(m.Role))),
 			s.members.System.SET(sqlite.Int64(boolToInt(m.System))),
 		))
-	if _, err := stmt.ExecContext(ctx, s.db); err != nil {
+	if _, err := stmt.ExecContext(ctx, s.conn(ctx)); err != nil {
 		return fmt.Errorf("org.sqlite: SaveMembership: %w", err)
 	}
 	return nil
@@ -218,7 +219,7 @@ func (s *sqliteStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUID)
 			AND(s.members.UserID.EQ(sqlite.String(userID.String())))).
 		LIMIT(1)
 	var row sqliteMembershipRow
-	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			return nil, &MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
 		}
@@ -237,7 +238,7 @@ func (s *sqliteStore) listMembersStmt(orgID uuid.UUID) sqlite.SelectStatement {
 func (s *sqliteStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
 	stmt := s.listMembersStmt(orgID)
 	var rows []sqliteMembershipRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: ListMembers: %w", err)
 	}
 	out := make([]*Membership, 0, len(rows))
@@ -268,7 +269,7 @@ func (s *sqliteStore) listMemberProfilesStmt(orgID uuid.UUID) sqlite.SelectState
 func (s *sqliteStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*MemberProfile, error) {
 	stmt := s.listMemberProfilesStmt(orgID)
 	var rows []sqliteMemberProfileRow
-	if err := stmt.QueryContext(ctx, s.db, &rows); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &rows); err != nil {
 		return nil, fmt.Errorf("org.sqlite: ListMemberProfiles: %w", err)
 	}
 	out := make([]*MemberProfile, 0, len(rows))
@@ -286,7 +287,7 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, orgID, userID uuid.UUID)
 	stmt := s.members.DELETE().
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.members.UserID.EQ(sqlite.String(userID.String()))))
-	res, err := stmt.ExecContext(ctx, s.db)
+	res, err := stmt.ExecContext(ctx, s.conn(ctx))
 	if err != nil {
 		return fmt.Errorf("org.sqlite: RemoveMember: %w", err)
 	}
@@ -306,7 +307,7 @@ func (s *sqliteStore) queryOrg(ctx context.Context, cond sqlite.BoolExpression, 
 		WHERE(cond).
 		LIMIT(1)
 	var row sqliteOrgRow
-	if err := stmt.QueryContext(ctx, s.db, &row); err != nil {
+	if err := stmt.QueryContext(ctx, s.conn(ctx), &row); err != nil {
 		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound
 		}
@@ -328,4 +329,13 @@ func boolToInt(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *sqliteStore) LockOrg(context.Context, uuid.UUID) error { return nil }
+
+func (s *sqliteStore) conn(ctx context.Context) qrm.DB {
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return tx
+	}
+	return s.db
 }

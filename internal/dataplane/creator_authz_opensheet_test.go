@@ -13,6 +13,7 @@ import (
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
+	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
 
@@ -176,7 +177,7 @@ func TestDataPlane_PersonalTokenOfDemotedOwnerLosesOrgScope(t *testing.T) {
 	members.SeatManager(orgID, owner)
 	projects.Add(orgID, g.projects.ref.ID)
 	svc := apikey.NewService(store, apikey.Scheme{}, members, projects, discardLog(), nil)
-	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: orgID, UserID: owner})
+	ctx := fakes.BindRole(t.Context(), tenant.Context{OrgID: orgID, UserID: owner}, "owner")
 	expiry := time.Now().Add(time.Hour)
 	_, plaintext, err := svc.MintPersonal(ctx, "laptop", []string{authn.ScopeMembersRead, authn.ScopeSheetsRead}, apikey.ProjectGrant{All: true}, &expiry)
 	if err != nil {
@@ -199,5 +200,18 @@ func TestDataPlane_PersonalTokenOfDemotedOwnerLosesOrgScope(t *testing.T) {
 	g.roles.Set(orgID, owner, "member")
 	if code, body := read(); code != http.StatusNotFound || body != want {
 		t.Errorf("demoted owner's org-level token: %d %s, want the missing-slug 404", code, body)
+	}
+}
+
+func TestPublicSheetRead_NoPrincipal(t *testing.T) {
+	g := newTokenRig(authn.ScopeSheetsRead)
+	g.sheets.ref.Visibility = sheet.VisibilityPublic
+
+	code, body := g.call(t, http.MethodGet, rowsPath, nil, "")
+	if code != http.StatusOK {
+		t.Fatalf("public read with no credential: %d %s, want 200", code, body)
+	}
+	if g.keys.calls != 0 || g.identity.calls != 0 {
+		t.Errorf("public read resolved a credential: keys %d, tokens %d", g.keys.calls, g.identity.calls)
 	}
 }

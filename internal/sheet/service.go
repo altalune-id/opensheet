@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -60,6 +61,10 @@ func NewService(
 
 // Create publishes a spreadsheet tab under the requested slug in the caller's tenant scope.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error) {
+	return s.create(ctx, req, true)
+}
+
+func (s *Service) create(ctx context.Context, req CreateRequest, checkEnableWrites bool) (*Sheet, error) {
 	ctx, span := tracer.Start(ctx, "sheet.Create",
 		trace.WithAttributes(
 			attribute.String("spreadsheet_id", req.SpreadsheetID.String()),
@@ -76,6 +81,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
 
+	if err := authz.Can(ctx, authz.SheetsAdmin); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+	if checkEnableWrites && req.Writable {
+		if err := authz.Can(ctx, authz.SheetsEnableWrites); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+	}
 	if err := s.gatePublic(req.Visibility, req.Slug); err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -133,6 +148,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Sheet, error)
 
 // PublishTab returns the writable key sheet published under slug for spreadsheetID's tab, creating it when the slug is free; a slug another spreadsheet holds is an *AlreadyExistsError.
 func (s *Service) PublishTab(ctx context.Context, spreadsheetID uuid.UUID, tab, slug string) (*Sheet, error) {
+	if err := authz.Can(ctx, authz.SheetsAdmin); err != nil {
+		return nil, err
+	}
 	sh, err := s.BySlug(ctx, slug)
 	if err == nil {
 		if sh.SpreadsheetID != spreadsheetID {
@@ -143,9 +161,9 @@ func (s *Service) PublishTab(ctx context.Context, spreadsheetID uuid.UUID, tab, 
 	if !IsNotFoundError(err) {
 		return nil, err
 	}
-	return s.Create(ctx, CreateRequest{
+	return s.create(ctx, CreateRequest{
 		SpreadsheetID: spreadsheetID, Tab: tab, Slug: slug, Visibility: VisibilityKey, Writable: true,
-	})
+	}, false)
 }
 
 // ByID returns the identified sheet when it belongs to the caller's tenant scope.
@@ -201,6 +219,10 @@ func (s *Service) List(ctx context.Context) ([]*Sheet, error) {
 		attribute.String("org_id", tc.OrgID.String()),
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
+	if err := authz.Can(ctx, authz.SheetsRead); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	out, err := s.store.List(ctx, tc.OrgID, tc.ProjectID)
 	if err != nil {
@@ -219,6 +241,10 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Sh
 
 	tc, err := tenant.From(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := authz.Can(ctx, authz.SheetsAdmin); err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 
@@ -244,6 +270,17 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Sh
 		if tErr := sh.SetTTL(*in.CacheTTL); tErr != nil {
 			span.RecordError(tErr)
 			return nil, tErr
+		}
+	}
+	writableAfter := sh.Writable
+	if in.Writable != nil {
+		writableAfter = *in.Writable
+	}
+	retab := in.Tab != nil && *in.Tab != sh.Tab
+	if writableAfter && (!sh.Writable || retab) {
+		if err := authz.Can(ctx, authz.SheetsEnableWrites); err != nil {
+			span.RecordError(err)
+			return nil, err
 		}
 	}
 	if in.Tab != nil {
@@ -274,6 +311,10 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
+	if err := authz.Can(ctx, authz.SheetsAdmin); err != nil {
+		span.RecordError(err)
+		return err
+	}
 	if _, err := s.loadScoped(ctx, span, tc, id, "sheet.Delete"); err != nil {
 		return err
 	}
@@ -296,6 +337,10 @@ func (s *Service) PurgeCache(ctx context.Context, id uuid.UUID) error {
 
 	tc, err := tenant.From(ctx)
 	if err != nil {
+		return err
+	}
+	if err := authz.Can(ctx, authz.CachePurge); err != nil {
+		span.RecordError(err)
 		return err
 	}
 	sh, err := s.loadScoped(ctx, span, tc, id, "sheet.PurgeCache")

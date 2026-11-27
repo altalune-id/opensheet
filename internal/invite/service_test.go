@@ -11,6 +11,7 @@ import (
 
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/invite"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/mailer"
@@ -38,9 +39,10 @@ func newService(t *testing.T, store invite.Store) (*invite.Service, *int) {
 	return invite.NewService(store, send, accept, true, newTestLogger(), unf), &unex
 }
 
-func tenantCtx() (context.Context, tenant.Context) {
+func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
+	t.Helper()
 	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return tenant.Into(context.Background(), tc), tc
+	return boundAs(t, tc, "admin"), tc
 }
 
 func seedInvite(t *testing.T, store invite.Store, orgID uuid.UUID) *invite.Invite {
@@ -68,7 +70,7 @@ func TestService_ListPending(t *testing.T) {
 	t.Run("returns tenant-scoped pending invites", func(t *testing.T) {
 		store := fakes.NewInvite()
 		svc, unex := newService(t, store)
-		ctx, tc := tenantCtx()
+		ctx, tc := tenantCtx(t)
 
 		seedInvite(t, store, tc.OrgID)
 		seedInvite(t, store, uuid.New())
@@ -85,11 +87,11 @@ func TestService_ListPending(t *testing.T) {
 		}
 	})
 
-	t.Run("missing tenant surfaces MissingError", func(t *testing.T) {
+	t.Run("missing tenant is refused", func(t *testing.T) {
 		svc, _ := newService(t, fakes.NewInvite())
 		_, err := svc.ListPending(context.Background())
-		if !tenant.IsMissingError(err) {
-			t.Errorf("want MissingError, got %v", err)
+		if !authz.IsDeniedError(err) {
+			t.Errorf("want DeniedError, got %v", err)
 		}
 	})
 
@@ -98,7 +100,7 @@ func TestService_ListPending(t *testing.T) {
 		store.ListErr = errors.New("boom")
 		store.StickyError = true
 		svc, unex := newService(t, store)
-		ctx, _ := tenantCtx()
+		ctx, _ := tenantCtx(t)
 		if _, err := svc.ListPending(ctx); err == nil {
 			t.Fatal("want err")
 		}
@@ -114,7 +116,7 @@ func TestService_Revoke(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		store := fakes.NewInvite()
 		svc, unex := newService(t, store)
-		ctx, tc := tenantCtx()
+		ctx, tc := tenantCtx(t)
 		inv := seedInvite(t, store, tc.OrgID)
 
 		if err := svc.Revoke(ctx, inv.ID); err != nil {
@@ -134,7 +136,7 @@ func TestService_Revoke(t *testing.T) {
 		other := uuid.New()
 		inv := seedInvite(t, store, other)
 
-		ctx, _ := tenantCtx()
+		ctx, _ := tenantCtx(t)
 		if err := svc.Revoke(ctx, inv.ID); !invite.IsNotFoundError(err) {
 			t.Errorf("want IsNotFoundError, got %v", err)
 		}
@@ -142,7 +144,7 @@ func TestService_Revoke(t *testing.T) {
 
 	t.Run("missing id returns NotFoundError", func(t *testing.T) {
 		svc, _ := newService(t, fakes.NewInvite())
-		ctx, _ := tenantCtx()
+		ctx, _ := tenantCtx(t)
 		if err := svc.Revoke(ctx, uuid.New()); !invite.IsNotFoundError(err) {
 			t.Errorf("want IsNotFoundError, got %v", err)
 		}
@@ -154,7 +156,7 @@ func TestService_Send_DelegatesToWorkflow(t *testing.T) {
 	store := fakes.NewInvite()
 	svc, unex := newService(t, store)
 	tc := tenant.Context{OrgID: uuid.New(), UserID: uuid.New()}
-	ctx := tenant.Into(context.Background(), tc)
+	ctx := boundAs(t, tc, "admin")
 
 	inv, err := svc.Send(ctx, invite.SendRequest{Email: "alice@example.com", Role: invite.RoleMember, TTL: 0})
 	if err != nil {
@@ -189,7 +191,7 @@ func TestService_Send_Disabled(t *testing.T) {
 	if svc.Enabled() {
 		t.Fatal("Enabled must be false when disabled")
 	}
-	ctx, _ := tenantCtx()
+	ctx, _ := tenantCtx(t)
 	_, err := svc.Send(ctx, invite.SendRequest{Email: "alice@example.com", Role: invite.RoleMember})
 	if !invite.IsInvitesDisabledError(err) {
 		t.Errorf("want IsInvitesDisabledError, got %T: %v", err, err)
@@ -210,7 +212,7 @@ func TestService_Send_EnabledDoesNotBlock(t *testing.T) {
 	if !svc.Enabled() {
 		t.Fatal("Enabled must be true when enabled")
 	}
-	ctx, _ := tenantCtx()
+	ctx, _ := tenantCtx(t)
 	_, err := svc.Send(ctx, invite.SendRequest{Email: "alice@example.com", Role: invite.RoleMember})
 	if err != nil {
 		t.Errorf("unexpected err: %v", err)

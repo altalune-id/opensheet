@@ -12,6 +12,7 @@ import (
 
 	"altalune.id/opensheet/gworkspace"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/sealer"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
@@ -65,6 +66,10 @@ func (w *ConnectWorkflow) Start(
 	}
 	if orgID == uuid.Nil || projectID == uuid.Nil || userID == uuid.Nil {
 		return "", &tenant.UnscopedError{}
+	}
+	if err := authz.Can(tenant.WithOrg(ctx, orgID), authz.CredentialsWrite); err != nil {
+		span.RecordError(err)
+		return "", err
 	}
 	span.SetAttributes(
 		attribute.String("org_id", orgID.String()),

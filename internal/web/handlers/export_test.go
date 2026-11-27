@@ -26,3 +26,6 @@ func OrgScopeOrgID(sc OrgScope) uuid.UUID { return sc.org.ID }
 
 // ProjectScopeRequest returns the request a ProjectScope carries.
 func ProjectScopeRequest(sc ProjectScope) *http.Request { return sc.req }
+
+// APIKeyErrorKindOf returns the banner kind the API key page shows for err.
+func APIKeyErrorKindOf(err error) string { return apiKeyErrorKind(err) }

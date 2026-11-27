@@ -46,15 +46,13 @@ func TestPostgres_BootstrapSingleton_WithoutTenantContext_UnderRLS(t *testing.T)
 	)
 	require.NoError(t, err)
 
-	store := org.NewStore(
-		db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix},
-		db.Pool{W: sqlDB, R: sqlDB},
-		tenant.NewPgConn(sqlDB),
-	)
+	dbCfg := db.DBConfig{Driver: db.DriverPostgres, Schema: h.Schema, TablePrefix: prefix}
+	pool, pc := db.Pool{W: sqlDB, R: sqlDB}, tenant.NewPgConn(sqlDB)
+	store := org.NewStore(dbCfg, pool, pc)
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
 		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
-	svc := org.NewService(store, capabilities.Capabilities{}, slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)
+	svc := org.NewService(store, capabilities.Capabilities{}, slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected, tenant.NewUnitOfWork(dbCfg, pool, pc))
 
 	o, err := svc.BootstrapSingleton(t.Context(), "acme", "Acme", ownerID)
 	require.NoError(t, err, "bootstrap must not require a tenant scope it cannot have yet")

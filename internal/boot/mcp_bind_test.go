@@ -47,7 +47,7 @@ func TestMCP_RemovedCreatorsCredentialsAreRefused(t *testing.T) {
 
 	projectID, err := uuid.Parse(f.projectID)
 	require.NoError(t, err)
-	creatorCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, ProjectID: projectID, UserID: creator.ID})
+	creatorCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, ProjectID: projectID, UserID: creator.ID})
 	scopes := []string{authn.ScopeMembersRead}
 	_, key, err := f.srv.APIKeys.MintOrg(creatorCtx, "creator-key", scopes, apikey.ProjectGrant{All: true}, soon())
 	require.NoError(t, err)

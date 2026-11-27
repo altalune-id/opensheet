@@ -148,7 +148,7 @@ func newConnect(t *testing.T, resp tokenResponse, opts ...func(*connectFixture, 
 
 func (f *connectFixture) start(t *testing.T, tc tenant.Context) string {
 	t.Helper()
-	raw, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
+	raw, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
 
-		raw, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
+		raw, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
 		if err != nil {
 			t.Fatalf("Start: %v", err)
 		}
@@ -241,7 +241,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 			{OrgID: uuid.New(), UserID: uuid.New()},
 			{OrgID: uuid.New(), ProjectID: uuid.New()},
 		} {
-			_, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, "")
+			_, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, "")
 			if !tenant.IsUnscopedError(err) {
 				t.Fatalf("error = %T %v, want tenant.UnscopedError", err, err)
 			}
@@ -251,7 +251,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 	t.Run("an off-site returnTo is refused", func(t *testing.T) {
 		f := newConnect(t, tokenResponse{})
 		tc := scope(t)
-		_, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, "https://evil.example.com/")
+		_, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, "https://evil.example.com/")
 		if !credential.IsStateInvalidError(err) {
 			t.Fatalf("error = %T %v, want *StateInvalidError", err, err)
 		}
@@ -262,7 +262,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 			cfg.ClientID = ""
 		})
 		tc := scope(t)
-		_, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, "")
+		_, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, "")
 		if !credential.IsNotConfiguredError(err) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}
@@ -280,7 +280,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 			},
 		)
 		tc := scope(t)
-		raw, err := w.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
+		raw, err := w.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, testReturnTo)
 		if err != nil {
 			t.Fatalf("Start: %v", err)
 		}
@@ -298,7 +298,7 @@ func TestConnectWorkflow_Start(t *testing.T) {
 			fx.secret = nil
 		})
 		tc := scope(t)
-		_, err := f.workflow.Start(t.Context(), tc.OrgID, tc.ProjectID, tc.UserID, "")
+		_, err := f.workflow.Start(fakes.BindRole(t.Context(), tc, "owner"), tc.OrgID, tc.ProjectID, tc.UserID, "")
 		if !credential.IsNotConfiguredError(err) {
 			t.Fatalf("error = %T %v, want *NotConfiguredError", err, err)
 		}

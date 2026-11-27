@@ -34,9 +34,7 @@ type DeniedError struct {
 	Scopes     []string
 }
 
-func (e *DeniedError) Error() string {
-	return "authz: " + string(e.Permission) + " denied (" + string(e.Side) + ")"
-}
+func (e *DeniedError) Error() string { return e.message() }
 
 // ToAppError maps DeniedError to ORG011 for members:write and apikeys:write, which replace the manager gate, and ROL001 otherwise.
 func (e *DeniedError) ToAppError() *apperror.AppError {
