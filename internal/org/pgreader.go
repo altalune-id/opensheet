@@ -76,6 +76,24 @@ func (s *postgresStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUI
 	return row.toMembership(), nil
 }
 
+func (s *postgresStore) LockOrg(ctx context.Context, orgID uuid.UUID) error {
+	tx, ok := pdb.CurrentTx(ctx)
+	if !ok {
+		return errors.New("org.postgres: LockOrg needs a unit of work")
+	}
+	stmt := postgres.SELECT(s.orgs.ID).FROM(s.orgs).WHERE(s.orgs.ID.EQ(postgres.UUID(orgID))).FOR(postgres.NO_KEY_UPDATE())
+	var row struct {
+		ID uuid.UUID `alias:"orgs.id"`
+	}
+	if err := stmt.QueryContext(ctx, tx, &row); err != nil {
+		if errors.Is(err, qrm.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return &NotFoundError{ID: orgID.String()}
+		}
+		return fmt.Errorf("org.postgres: LockOrg: %w", err)
+	}
+	return nil
+}
+
 func (s *postgresStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error) {
 	tx, owned, err := s.txAcquire(ctx)
 	if err != nil {

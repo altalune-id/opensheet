@@ -11,6 +11,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -46,6 +48,16 @@ func (s *Service) Enabled() bool { return s.enabled }
 func (s *Service) Send(ctx context.Context, req SendRequest) (*Invite, error) {
 	ctx, span := tracer.Start(ctx, "invite.Send")
 	defer span.End()
+	if err := authz.CanOrgWide(ctx, authz.MembersWrite); err != nil {
+		return nil, err
+	}
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if refusal := org.RoleChangeRefusal(authz.Held(ctx), org.HeldRole(ctx, tc.OrgID), "", org.Role(req.Role)); refusal != nil {
+		return nil, refusal
+	}
 	if !s.enabled {
 		return nil, &InvitesDisabledError{Reason: "invites require OIDC in selfhosted mode; set OPENSHEET_OIDC_ISSUER to enable"}
 	}
@@ -74,6 +86,9 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) (*AcceptResult,
 func (s *Service) ListPending(ctx context.Context) ([]*Invite, error) {
 	ctx, span := tracer.Start(ctx, "invite.ListPending")
 	defer span.End()
+	if err := authz.CanOrgWide(ctx, authz.MembersWrite); err != nil {
+		return nil, err
+	}
 
 	tc, err := tenant.From(ctx)
 	if err != nil {
@@ -95,6 +110,9 @@ func (s *Service) Revoke(ctx context.Context, id uuid.UUID) error {
 	ctx, span := tracer.Start(ctx, "invite.Revoke",
 		trace.WithAttributes(attribute.String("invite.id", id.String())))
 	defer span.End()
+	if err := authz.CanOrgWide(ctx, authz.MembersWrite); err != nil {
+		return err
+	}
 
 	tc, err := tenant.From(ctx)
 	if err != nil {

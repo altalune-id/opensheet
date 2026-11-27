@@ -339,3 +339,31 @@ func TestSpreadsheet_Update_UnknownID_ReturnsNotFound(t *testing.T) {
 		t.Errorf("code = %v, want NotFound", got)
 	}
 }
+
+func TestSpreadsheet_Update_MemberTitleWithWritableChangesNothing(t *testing.T) {
+	orgID := uuid.New()
+	p := humanPrincipal(orgID)
+	h := newOSHarness(t, p)
+	asMember(t, h, p)
+	proj := h.seedProject(orgID)
+	sp := h.seedSpreadsheet(orgID, proj.ID)
+	title, on := "Renamed", true
+
+	req := connect.NewRequest(&spreadsheetv1.UpdateRequest{
+		ProjectId:     proj.ID.String(),
+		SpreadsheetId: sp.ID.String(),
+		Title:         &title,
+		Writable:      &on,
+	})
+	withBearer(req.Header())
+	if _, err := h.spreadsheetClient().Update(t.Context(), req); err == nil {
+		t.Fatal("member enabling writes must be refused")
+	}
+	stored, err := h.sprds.ByID(t.Context(), sp.ID)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if stored.Title != "Prices" || stored.Writable {
+		t.Errorf("refused update wrote: title %q, writable %v", stored.Title, stored.Writable)
+	}
+}

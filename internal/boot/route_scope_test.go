@@ -96,6 +96,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/all-projects", url.Values{}},
 		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, base + "/members/" + id + "/remove", url.Values{}},
+		{http.MethodPost, base + "/members/" + id + "/role", url.Values{"role": {"member"}}},
 		{http.MethodPost, base + "/projects", url.Values{"slug": {"probe-new-project"}, "name": {"Probe New Project"}}},
 		{http.MethodPost, pbase + "/rename", url.Values{"name": {"Renamed"}}},
 		{http.MethodPost, pbase + "/credentials", url.Values{"name": {"Probe"}}},
@@ -289,7 +290,7 @@ func TestRoutes_UserWithAnActiveOrgNeverHitsATenantScopeError(t *testing.T) {
 	require.NoError(t, err, "org.Create must work with no ambient tenant scope — the signup case")
 
 	// NOTE: without the project, every project-scoped probe short-circuits on the handler's own 404 and reaches no handler code.
-	orgCtx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	_, err = srv.Projects.Create(orgCtx, o.ID, "probe-project", "Probe Project")
 	require.NoError(t, err)
 

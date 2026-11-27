@@ -29,7 +29,7 @@ func TestConsole_EveryProjectNavTargetIsMounted(t *testing.T) {
 	require.NoError(t, err)
 	o, err := srv.Orgs.Create(context.Background(), org.CreateRequest{Slug: "nav-org", Name: "Nav Org", OwnerID: owner.ID})
 	require.NoError(t, err)
-	orgCtx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	_, err = srv.Projects.Create(orgCtx, o.ID, "nav-project", "Nav Project")
 	require.NoError(t, err)
 	cookie := probeCookie(t, srv, session.Principal{UserID: owner.ID, ActiveOrgID: o.ID})

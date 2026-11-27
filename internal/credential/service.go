@@ -16,7 +16,9 @@ import (
 
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/sealer"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -73,6 +75,10 @@ func (s *Service) UploadServiceAccount(ctx context.Context, name string, raw []b
 		attribute.String("org_id", tc.OrgID.String()),
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
+	if err := authz.Can(ctx, authz.CredentialsWrite); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	email, err := serviceAccountEmail(raw)
 	if err != nil {
@@ -128,6 +134,10 @@ func (s *Service) List(ctx context.Context) ([]*Credential, error) {
 		attribute.String("org_id", tc.OrgID.String()),
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
+	if err := authz.Can(ctx, authz.CredentialsRead); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	out, err := s.store.List(ctx, tc.OrgID, tc.ProjectID)
 	if err != nil {
@@ -144,8 +154,22 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		trace.WithAttributes(attribute.String("credential.id", id.String())))
 	defer span.End()
 
-	if _, err := s.scoped(ctx, span, id, "credential.Delete"); err != nil {
+	if _, err := tenant.From(ctx); err != nil {
 		return err
+	}
+	if err := authz.Can(ctx, authz.CredentialsWrite); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	c, err := s.scoped(ctx, span, id, "credential.Delete")
+	if err != nil {
+		return err
+	}
+	if actor := actorOf(session.PrincipalFrom(ctx)); actor == uuid.Nil || actor != c.AuthorizedByUserID {
+		if err := authz.Can(ctx, authz.CredentialsManage); err != nil {
+			span.RecordError(err)
+			return err
+		}
 	}
 	if err := s.store.Delete(ctx, id); err != nil {
 		span.RecordError(err)
@@ -155,6 +179,14 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		return s.unexpected(ctx, "credential.Delete: delete", err, "credential_id", id)
 	}
 	return nil
+}
+
+// SECURITY: a key acts for its creator, never for its nil UserID, so a key cannot pass as the connector of a credential.
+func actorOf(p session.Principal) uuid.UUID {
+	if p.Source == session.SourceAPIKey {
+		return p.KeyOwnerID
+	}
+	return p.UserID
 }
 
 // MarkReauthNeeded records that Google rejected the credential and a human must reconnect it.

@@ -31,7 +31,7 @@ func openAPIServer(t *testing.T, enabled bool, auth *controlplane.BasicAuth) *ht
 		Reporter: reporter,
 		Verifier: stubVerifier{principal: session.Principal{}},
 	}
-	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected)
+	orgSvc := org.NewService(orgs, capabilities.Capabilities{OrgCreation: true}, log, reporter.Unexpected, fakes.UnitOfWork)
 	srv := controlplane.New(nil, kernel, controlplane.Deps{
 		Orgs:     orgSvc,
 		Projects: project.NewService(projs, log, reporter.Unexpected),

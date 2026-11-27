@@ -472,7 +472,9 @@ templ projectSidebar(d web.LayoutData) {
 			@projectMenu(d, d.ActiveProject.Slug)
 		} else {
 			<p class="mt-1 mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">{ d.Tr("common.project") }</p>
-			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
+			if canCreateProject(d) {
+				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class={ orgItemClass(false) }>@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.create_project") }</span></a>
+			}
 		}
 	</div>
 }
@@ -564,10 +566,12 @@ templ projectSwitcherPill(d web.LayoutData) {
 					<a href={ templ.SafeURL(d.ProjectPath(p.Slug, "/overview")) } class="block rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">{ p.Name }</a>
 				}
 			}
-			<div class="my-1 border-t border-subtle"></div>
-			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
-				@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_project") }</span>
-			</a>
+			if canCreateProject(d) {
+				<div class="my-1 border-t border-subtle"></div>
+				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="flex items-center gap-2 rounded px-3 py-2 text-sm text-foreground/90 hover:bg-muted">
+					@icons.Icon("plus", "h-4 w-4 text-muted-foreground") <span>{ d.Tr("nav.new_project") }</span>
+				</a>
+			}
 		</div>
 	</details>
 }

@@ -22,8 +22,8 @@ func in(d time.Duration) *time.Time {
 // SECURITY: every new key expires within a year, so a leaked or forgotten key dies on its own; keys already in the field are untouched.
 func TestEveryMintRequiresABoundedLifetime(t *testing.T) {
 	f := newOrgKeyFixture(t)
-	orgCtx := tenant.Into(t.Context(), f.admin)
-	projCtx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: f.admin.UserID})
+	orgCtx := fakes.BindRole(t.Context(), f.admin, "admin")
+	projCtx := fakes.BindRole(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: f.admin.UserID}, "admin")
 	scopes := []string{authn.ScopeSheetsRead}
 	all := apikey.ProjectGrant{All: true}
 

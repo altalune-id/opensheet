@@ -78,13 +78,13 @@ func newSvcGoogle(
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
 	t.Helper()
 	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return tenant.Into(context.Background(), tc), tc
+	return fakes.BindRole(context.Background(), tc, "owner"), tc
 }
 
 func scopedTo(orgID, projectID uuid.UUID) context.Context {
-	return tenant.Into(context.Background(), tenant.Context{
+	return fakes.BindRole(context.Background(), tenant.Context{
 		OrgID: orgID, ProjectID: projectID, UserID: uuid.New(),
-	})
+	}, "owner")
 }
 
 func TestService_Create(t *testing.T) {

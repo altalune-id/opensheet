@@ -16,6 +16,7 @@ import (
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/config"
+	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/platform/tokens"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/todo"
@@ -68,7 +69,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	inviteStore := invite.NewStore(cfg.DB, pool, pgConn)
 	onboardStore := onboard.NewStore(cfg.DB, pool)
 
-	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected)
+	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected, tenant.NewUnitOfWork(cfg.DB, pool, pgConn))
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
 	todos := todo.NewService(todoStore, log, reporter.Unexpected, k.Queue)
 	onboards := onboard.NewService(onboardStore, log, reporter.Unexpected)

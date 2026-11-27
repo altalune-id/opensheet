@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/boot"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authz"
@@ -71,10 +72,14 @@ func TestCLI_LocalCommandsBind(t *testing.T) {
 		Source: "local", UserID: member.ID.String(), Email: member.Email, ActiveOrgID: o.ID.String(),
 	}})
 
-	for _, args := range [][]string{
-		{"project", "list"},
-		{"project", "create", "--name", "Beta", "--slug", "beta"},
+	for _, c := range []struct {
+		args    []string
+		refusal string
+	}{
+		{args: []string{"project", "list"}},
+		{args: []string{"project", "create", "--name", "Beta", "--slug", "beta"}, refusal: apperror.CodePermissionDenied},
 	} {
+		args := c.args
 		t.Run(args[1], func(t *testing.T) {
 			rec := &recordedRoles{}
 			bootFn := func(ctx context.Context, cfg *config.Config, _ ...boot.Option) (*boot.Server, error) {
@@ -91,8 +96,15 @@ func TestCLI_LocalCommandsBind(t *testing.T) {
 			root.SetOut(buf)
 			root.SetErr(buf)
 			root.SetArgs(args)
-			if err := root.ExecuteContext(context.Background()); err != nil {
+			err := root.ExecuteContext(context.Background())
+			if c.refusal == "" && err != nil {
 				t.Fatalf("%v: %v (%s)", args, err, buf.String())
+			}
+			if c.refusal != "" {
+				ae, ok := apperror.AsAppError(err)
+				if !ok || ae.Code() != c.refusal {
+					t.Fatalf("%v: err = %v, want %s", args, err, c.refusal)
+				}
 			}
 			if got := rec.resolved(); len(got) != 1 || got[0] != "member" {
 				t.Fatalf("held role resolved = %v, want one bind as member", got)

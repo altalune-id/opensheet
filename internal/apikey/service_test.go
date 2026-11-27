@@ -38,7 +38,7 @@ func newAPIKeyService(t *testing.T, store apikey.Store) (*apikey.Service, *int) 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
 	t.Helper()
 	tc := tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}
-	return tenant.Into(t.Context(), tc), tc
+	return fakes.BindRole(t.Context(), tc, "owner"), tc
 }
 
 func mintSeeded(t *testing.T, store *fakes.APIKey, orgID, projectID uuid.UUID, scopes []string, resourceIDs []uuid.UUID) (*apikey.APIKey, string) {
@@ -245,7 +245,7 @@ func TestService_RevokeRefusesKeyFromAnotherProjectInSameOrg(t *testing.T) {
 
 	k, _ := mintSeeded(t, store, orgID, projB, []string{authn.ScopeSheetsRead}, nil)
 
-	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: orgID, ProjectID: projA, UserID: uuid.New()})
+	ctx := fakes.BindRole(t.Context(), tenant.Context{OrgID: orgID, ProjectID: projA, UserID: uuid.New()}, "owner")
 	err := svc.Revoke(ctx, k.ID)
 	assert.True(t, apikey.IsNotFoundError(err), "got %T: %v", err, err)
 	assert.Zero(t, *unex)
@@ -263,7 +263,7 @@ func TestService_RevokeRefusesKeyFromAnotherOrg(t *testing.T) {
 
 	k, _ := mintSeeded(t, store, uuid.New(), projectID, []string{authn.ScopeSheetsRead}, nil)
 
-	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: projectID, UserID: uuid.New()})
+	ctx := fakes.BindRole(t.Context(), tenant.Context{OrgID: uuid.New(), ProjectID: projectID, UserID: uuid.New()}, "owner")
 	err := svc.Revoke(ctx, k.ID)
 	assert.True(t, apikey.IsNotFoundError(err), "got %T: %v", err, err)
 	assert.Zero(t, *unex)

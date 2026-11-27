@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"altalune.id/opensheet/internal/org"
-	"altalune.id/opensheet/internal/platform/tenant"
 )
 
 func TestBootstrapSingleton_CreatesWhenMissing(t *testing.T) {
@@ -112,7 +111,7 @@ func TestRename_ProtectedSystem(t *testing.T) {
 	require.NoError(t, err)
 	_ = store
 
-	_, err = svc.Rename(context.Background(), o.ID, "Renamed")
+	_, err = svc.Rename(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, "Renamed")
 	require.Error(t, err)
 	assert.True(t, org.IsSystemProtectedError(err))
 }
@@ -124,9 +123,7 @@ func TestRemoveMember_ProtectedSystem(t *testing.T) {
 	o, err := svc.BootstrapSingleton(context.Background(), "sys", "System", owner)
 	require.NoError(t, err)
 
-	// NOTE: the actor comes from the tenant scope, the way every transport supplies it.
-	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner})
-	err = svc.RemoveMember(ctx, o.ID, owner)
+	err = svc.RemoveMember(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, owner)
 	require.Error(t, err)
 	assert.True(t, org.IsSystemProtectedError(err))
 }
@@ -142,8 +139,7 @@ func TestRemoveMember_HappyPath(t *testing.T) {
 	_, err = svc.AddMember(context.Background(), o.ID, newbie, org.RoleMember)
 	require.NoError(t, err)
 
-	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: owner})
-	require.NoError(t, svc.RemoveMember(ctx, o.ID, newbie))
+	require.NoError(t, svc.RemoveMember(boundAs(t, o.ID, owner, org.RoleOwner), o.ID, newbie))
 
 	_, err = svc.MembershipOf(context.Background(), o.ID, newbie)
 	assert.True(t, org.IsMembershipMissingError(err))
@@ -152,8 +148,8 @@ func TestRemoveMember_HappyPath(t *testing.T) {
 func TestRemoveMember_NotFound(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestService(t, true)
-	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), UserID: uuid.New()})
-	err := svc.RemoveMember(ctx, uuid.New(), uuid.New())
+	orgID := uuid.New()
+	err := svc.RemoveMember(boundAs(t, orgID, uuid.New(), org.RoleOwner), orgID, uuid.New())
 	require.Error(t, err)
 	assert.True(t, org.IsMembershipMissingError(err))
 }

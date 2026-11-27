@@ -38,7 +38,7 @@ func seedForeignTenant(t *testing.T, f *mcpFixture) foreignTenant {
 	o, err := f.srv.Orgs.Create(ctx, org.CreateRequest{Slug: "foreign-org", Name: "Foreign Org", OwnerID: outsider.ID})
 	require.NoError(t, err)
 
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: outsider.ID})
+	orgCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: outsider.ID})
 	p, err := f.srv.Projects.Create(orgCtx, o.ID, "foreign-project", "Foreign Project")
 	require.NoError(t, err)
 

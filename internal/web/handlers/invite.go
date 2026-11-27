@@ -11,6 +11,7 @@ import (
 
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/web"
@@ -35,18 +36,18 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, o, r := sc.principal, sc.org, sc.req
-	slug := o.Slug
-	items, err := h.Invites.ListPending(r.Context())
-	if err != nil {
-		h.LogErr("web invite: list", err)
-		h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
-		return
+	o, r := sc.org, sc.req
+	view := templates.InvitesView{OrgSlug: o.Slug, CanManage: holds(r, authz.MembersWrite), Disabled: !h.Caps.InvitesEnabled}
+	if view.CanManage {
+		items, err := h.Invites.ListPending(r.Context())
+		if err != nil {
+			h.LogErr("web invite: list", err)
+			h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
+			return
+		}
+		view.Invites = inviteRows(items)
 	}
-	canManage, _ := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
-	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", slug, "invites"), templates.InvitesView{
-		OrgSlug: slug, Invites: inviteRows(items), CanManage: canManage, Disabled: !h.Caps.InvitesEnabled,
-	}))
+	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", o.Slug, "invites"), view))
 }
 
 // PostSend handles POST /orgs/{slug}/invites.
@@ -55,11 +56,10 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, o, r := sc.principal, sc.org, sc.req
+	o, r := sc.org, sc.req
 	slug := o.Slug
-	canManage, _ := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
-	if !canManage {
-		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can invite.")
+	if !holds(r, authz.MembersWrite) {
+		h.refuseRole(w, r, "invites.read_only")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -75,6 +75,10 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role}); err != nil {
 		h.LogErr("web invite: send", err)
+		if authz.IsDeniedError(err) {
+			h.refuseRole(w, r, "invites.read_only", err)
+			return
+		}
 		if invite.IsInvitesDisabledError(err) {
 			h.ErrorPage(w, r, http.StatusConflict, "Invites disabled", err.Error(), err)
 			return
@@ -91,11 +95,10 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, o, r := sc.principal, sc.org, sc.req
+	o, r := sc.org, sc.req
 	slug := o.Slug
-	canManage, _ := h.Orgs.IsManager(r.Context(), o.ID, p.UserID)
-	if !canManage {
-		h.ErrorPage(w, r, http.StatusForbidden, "Not allowed", "Only owners and admins can revoke invites.")
+	if !holds(r, authz.MembersWrite) {
+		h.refuseRole(w, r, "invites.read_only")
 		return
 	}
 	id, err := uuid.Parse(r.PathValue("id"))
@@ -105,6 +108,10 @@ func (h *InviteHandler) PostRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Invites.Revoke(r.Context(), id); err != nil {
 		h.LogErr("web invite: revoke", err)
+		if authz.IsDeniedError(err) {
+			h.refuseRole(w, r, "invites.read_only", err)
+			return
+		}
 		if invite.IsNotFoundError(err) {
 			h.ErrorPage(w, r, http.StatusNotFound, "Invite not found", "That invite no longer exists.", err)
 			return

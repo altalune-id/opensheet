@@ -244,7 +244,8 @@ func newDefinerService(t *testing.T, f *definerFixture) *org.Service {
 			&apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
 	return org.NewService(f.store, capabilities.Capabilities{OrgCreation: true},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected)
+		slog.New(slog.NewTextHandler(io.Discard, nil)), unexpected,
+		tenant.NewUnitOfWork(db.DBConfig{Driver: db.DriverPostgres}, db.Pool{W: f.appConn, R: f.appConn}, tenant.NewPgConn(f.appConn)))
 }
 
 func (f *definerFixture) assertOrgAndOwnerCommitted(t *testing.T, o *org.Org, ownerID uuid.UUID) {

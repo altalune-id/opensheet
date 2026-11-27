@@ -85,7 +85,7 @@ func newFixture(t *testing.T) *handlerFixture {
 	users := user.NewService(userStore, user.GenesisConfig{}, discardLogger(), passthroughUnexpected())
 
 	orgStore := fakes.NewOrg()
-	orgs := org.NewService(orgStore, caps, discardLogger(), passthroughUnexpected())
+	orgs := org.NewService(orgStore, caps, discardLogger(), passthroughUnexpected(), fakes.UnitOfWork)
 
 	projStore := fakes.NewProject()
 	projects := project.NewService(projStore, discardLogger(), passthroughUnexpected())
@@ -1296,11 +1296,11 @@ func (f *handlerFixture) seedOrg(t *testing.T, slug string, owner uuid.UUID) *or
 }
 
 func setTenant(ctx context.Context, orgID, userID uuid.UUID) context.Context {
-	return tenant.Into(ctx, tenant.Context{OrgID: orgID, UserID: userID})
+	return authz.AsSystem(tenant.Into(ctx, tenant.Context{OrgID: orgID, UserID: userID}))
 }
 
 func setTenantProject(ctx context.Context, orgID, projectID, userID uuid.UUID) context.Context {
-	return tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID, UserID: userID})
+	return authz.AsSystem(tenant.Into(ctx, tenant.Context{OrgID: orgID, ProjectID: projectID, UserID: userID}))
 }
 
 // NOTE: a fragment rendered with Deps.Base instead of Deps.fragment loses ActiveOrg, so ProjectPath collapses to /orgs.

@@ -9,6 +9,7 @@ import (
 
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/credential"
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/spreadsheet"
 	"altalune.id/opensheet/internal/web"
@@ -332,7 +333,11 @@ func (h *SpreadsheetHandler) detail(w http.ResponseWriter, sc ProjectScope, sp *
 }
 
 func (h *SpreadsheetHandler) renderDetailError(w http.ResponseWriter, sc ProjectScope, sp *spreadsheet.Spreadsheet, cause error) {
-	view, ok := h.detail(w, sc, sp, templates.SpreadsheetView{Error: registerMessage(cause), ErrorCode: ErrorRef(cause)})
+	msg := registerMessage(cause)
+	if deniedWrites(cause) {
+		msg = i18n.TranslatorFrom(sc.req.Context()).T("writes.managers_only")
+	}
+	view, ok := h.detail(w, sc, sp, templates.SpreadsheetView{Error: msg, ErrorCode: ErrorRef(cause)})
 	if !ok {
 		return
 	}

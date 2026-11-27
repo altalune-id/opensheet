@@ -13,6 +13,7 @@ import (
 	"altalune.id/opensheet/gworkspace/gsheet"
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/gwerr"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
 
@@ -69,6 +70,10 @@ func (s *Service) Register(ctx context.Context, credentialID uuid.UUID, googleFi
 		attribute.String("org_id", tc.OrgID.String()),
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
+	if err := authz.Can(ctx, authz.SpreadsheetsWrite); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	sp, err := New(tc.OrgID, tc.ProjectID, credentialID, googleFileID, title)
 	if err != nil {
@@ -108,6 +113,10 @@ func (s *Service) List(ctx context.Context) ([]*Spreadsheet, error) {
 		attribute.String("org_id", tc.OrgID.String()),
 		attribute.String("project_id", tc.ProjectID.String()),
 	)
+	if err := authz.Can(ctx, authz.SpreadsheetsRead); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	out, err := s.store.List(ctx, tc.OrgID, tc.ProjectID)
 	if err != nil {
@@ -164,7 +173,7 @@ func (s *Service) Retitle(ctx context.Context, id uuid.UUID, title string) (*Spr
 		trace.WithAttributes(attribute.String("spreadsheet.id", id.String())))
 	defer span.End()
 
-	sp, err := s.resolve(ctx, id, "Retitle")
+	sp, err := s.resolveGated(ctx, id, "Retitle", authz.SpreadsheetsWrite)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -186,7 +195,7 @@ func (s *Service) Rebind(ctx context.Context, id, credentialID uuid.UUID) (*Spre
 		trace.WithAttributes(attribute.String("spreadsheet.id", id.String())))
 	defer span.End()
 
-	sp, err := s.resolve(ctx, id, "Rebind")
+	sp, err := s.resolveGated(ctx, id, "Rebind", authz.SpreadsheetsWrite)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -211,10 +220,16 @@ func (s *Service) SetWritable(ctx context.Context, id uuid.UUID, writable bool) 
 		))
 	defer span.End()
 
-	sp, err := s.resolve(ctx, id, "SetWritable")
+	sp, err := s.resolveGated(ctx, id, "SetWritable", authz.SpreadsheetsWrite)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
+	}
+	if writable && !sp.Writable {
+		if err := authz.Can(ctx, authz.SpreadsheetsEnableWrites); err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
 	}
 	sp.SetWritable(writable)
 	if err := s.store.Save(ctx, sp); err != nil {
@@ -230,7 +245,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		trace.WithAttributes(attribute.String("spreadsheet.id", id.String())))
 	defer span.End()
 
-	if _, err := s.resolve(ctx, id, "Delete"); err != nil {
+	if _, err := s.resolveGated(ctx, id, "Delete", authz.SpreadsheetsWrite); err != nil {
 		span.RecordError(err)
 		return err
 	}
@@ -250,7 +265,7 @@ func (s *Service) ListTabs(ctx context.Context, id uuid.UUID) ([]string, error) 
 		trace.WithAttributes(attribute.String("spreadsheet.id", id.String())))
 	defer span.End()
 
-	sp, err := s.resolve(ctx, id, "ListTabs")
+	sp, err := s.resolveGated(ctx, id, "ListTabs", authz.SpreadsheetsRead)
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
@@ -286,7 +301,7 @@ func (s *Service) AddTab(ctx context.Context, spreadsheetID uuid.UUID, title str
 		trace.WithAttributes(attribute.String("spreadsheet.id", spreadsheetID.String())))
 	defer span.End()
 
-	sp, err := s.resolve(ctx, spreadsheetID, "AddTab")
+	sp, err := s.resolveGated(ctx, spreadsheetID, "AddTab", authz.SpreadsheetsWrite)
 	if err != nil {
 		span.RecordError(err)
 		return err
@@ -313,6 +328,16 @@ func (s *Service) AddTab(ctx context.Context, spreadsheetID uuid.UUID, title str
 		return s.translate(ctx, "spreadsheet.AddTab: add tab", gwerr.AppError(err), sp)
 	}
 	return nil
+}
+
+func (s *Service) resolveGated(ctx context.Context, id uuid.UUID, op string, p authz.Permission) (*Spreadsheet, error) {
+	if _, err := tenant.From(ctx); err != nil {
+		return nil, err
+	}
+	if err := authz.Can(ctx, p); err != nil {
+		return nil, err
+	}
+	return s.resolve(ctx, id, op)
 }
 
 func (s *Service) resolve(ctx context.Context, id uuid.UUID, op string) (*Spreadsheet, error) {

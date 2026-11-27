@@ -128,7 +128,7 @@ func newMCPFixture(t *testing.T, opts mcpOpts) *mcpFixture {
 	o, err := srv.Orgs.Create(ctx, org.CreateRequest{Slug: "mcp-org", Name: "MCP Org", OwnerID: owner.ID})
 	require.NoError(t, err)
 
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	p, err := srv.Projects.Create(orgCtx, o.ID, "mcp-project", "MCP Project")
 	require.NoError(t, err)
 

@@ -123,7 +123,7 @@ func newPGMultiOrg(t *testing.T, principal func(f *pgMultiOrg) session.Principal
 		orgs: orgs, projs: project.NewStore(dbCfg, pool, pc), creds: credential.NewStore(dbCfg, pool, pc),
 	})
 	log := slog.New(slog.DiscardHandler)
-	f.orgSvc = org.NewService(orgs, capabilities.Capabilities{}, log, apperror.NewReporter(log, false).Unexpected)
+	f.orgSvc = org.NewService(orgs, capabilities.Capabilities{}, log, apperror.NewReporter(log, false).Unexpected, tenant.NewUnitOfWork(dbCfg, pool, pc))
 	return f
 }
 

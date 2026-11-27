@@ -33,7 +33,7 @@ func failOnUnexpected(t *testing.T) apperror.UnexpectedFunc {
 }
 
 func tenantCtx(orgID, userID uuid.UUID) context.Context {
-	return tenant.Into(context.Background(), tenant.Context{OrgID: orgID, UserID: userID})
+	return fakes.BindRole(context.Background(), tenant.Context{OrgID: orgID, UserID: userID}, "owner")
 }
 
 func TestService_Create_OK(t *testing.T) {

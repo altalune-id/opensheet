@@ -1,6 +1,9 @@
 package templates
 
 import (
+	"slices"
+
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/icons"
 )
@@ -8,6 +11,7 @@ import (
 type ProjectsView struct {
 	OrgSlug  string
 	Projects []ProjectSummary
+	CanCreate bool
 	Error    string
 	ErrorCode string
 }
@@ -19,18 +23,25 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 				<h1 class="text-2xl font-semibold text-foreground">{ d.Tr("projects.title") }</h1>
 				<p class="mt-1 text-sm text-muted-foreground">{ d.Tr("projects.subtitle") }</p>
 			</div>
-			<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
-				@icons.Icon("plus", "h-4 w-4")
-				<span>{ d.Tr("nav.new_project") }</span>
-			</a>
+			if v.CanCreate {
+				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+					@icons.Icon("plus", "h-4 w-4")
+					<span>{ d.Tr("nav.new_project") }</span>
+				</a>
+			}
 		</header>
+		if !v.CanCreate {
+			<p class="mt-6 rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{ d.Tr("projects.create_managers_only") }</p>
+		}
 		if v.Error != "" {
 			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
 		if len(v.Projects) == 0 {
 			<div class="mt-6 rounded-lg border border-dashed border-border bg-card p-8 text-center">
 				<p class="text-sm text-muted-foreground">{ d.Tr("projects.empty") }</p>
+				if v.CanCreate {
 				<a href={ templ.SafeURL(d.OrgPath("/projects/new")) } class="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">{ d.Tr("projects.create_first") }</a>
+				}
 			</div>
 		} else {
 			<ul class="mt-6 divide-y divide-border/50 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
@@ -59,6 +70,14 @@ templ ProjectsPage(d web.LayoutData, v ProjectsView) {
 			</ul>
 		}
 	</section>
+}
+
+func heldIn(d web.LayoutData, p authz.Permission) bool {
+	return d.Principal != nil && slices.Contains(d.Principal.Held, string(p))
+}
+
+func canCreateProject(d web.LayoutData) bool {
+	return heldIn(d, authz.ProjectsWrite)
 }
 
 templ ProjectsLayout(d web.LayoutData, v ProjectsView) {

@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/tenant"
 	slugs "altalune.id/opensheet/slug"
 )
@@ -40,6 +41,10 @@ func (s *Service) Create(ctx context.Context, orgID uuid.UUID, slug, name string
 	defer span.End()
 
 	if _, err := tenant.From(ctx); err != nil {
+		return nil, err
+	}
+	if err := authz.CanOrgWide(tenant.WithOrg(ctx, orgID), authz.ProjectsWrite); err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 
@@ -175,6 +180,10 @@ func (s *Service) Rename(ctx context.Context, id uuid.UUID, name string) (*Proje
 	defer span.End()
 
 	if _, err := tenant.From(ctx); err != nil {
+		return nil, err
+	}
+	if err := authz.CanOrgWide(ctx, authz.ProjectsWrite); err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	p, err := s.store.ByID(ctx, id)

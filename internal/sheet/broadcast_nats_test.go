@@ -72,7 +72,7 @@ func TestSnapshotInvalidated_EveryReplicaDropsItsMemoryEntries(t *testing.T) {
 	ns := startNATSServer(t)
 	a, b := startReplica(t, ns.ClientURL()), startReplica(t, ns.ClientURL())
 	store := fakes.NewSheet()
-	ctx := tenant.Into(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()})
+	ctx := fakes.BindRole(context.Background(), tenant.Context{OrgID: uuid.New(), ProjectID: uuid.New(), UserID: uuid.New()}, "owner")
 	tc, err := tenant.From(ctx)
 	require.NoError(t, err)
 	sh := savedSheet(t, store, tc.OrgID, tc.ProjectID)

@@ -85,12 +85,17 @@ func Can(ctx context.Context, p Permission) error {
 	if sys, _ := ctx.Value(systemKey{}).(bool); sys {
 		return nil
 	}
-	pr := session.PrincipalFrom(ctx)
-	tc, err := tenant.From(ctx)
-	if err == nil && tc.OrgID == pr.HeldOrgID && pr.HeldOrgID != uuid.Nil && slices.Contains(pr.Held, string(p)) {
+	pr, bound := boundPrincipal(ctx)
+	if bound && slices.Contains(pr.Held, string(p)) {
 		return nil
 	}
 	return &DeniedError{Permission: p, Org: pr.HeldOrg, Side: sideOf(pr, p), Scopes: slices.Clone(pr.Scopes)}
+}
+
+func boundPrincipal(ctx context.Context) (session.Principal, bool) {
+	pr := session.PrincipalFrom(ctx)
+	tc, err := tenant.From(ctx)
+	return pr, err == nil && tc.OrgID == pr.HeldOrgID && pr.HeldOrgID != uuid.Nil
 }
 
 // CanOrgWide is Can plus a grant that covers every project of the org.

@@ -46,7 +46,8 @@ func newPersonalFixture(t *testing.T) *personalFixture {
 }
 
 func (f *personalFixture) ctx(t *testing.T, userID uuid.UUID) context.Context {
-	return tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, UserID: userID})
+	role := map[uuid.UUID]string{f.alice: "member", f.bob: "member", f.admin: "admin"}[userID]
+	return fakes.BindRole(t.Context(), tenant.Context{OrgID: f.orgID, UserID: userID}, role)
 }
 
 func (f *personalFixture) mint(t *testing.T, owner uuid.UUID, grant apikey.ProjectGrant) (*apikey.APIKey, string) {
@@ -129,7 +130,9 @@ func TestAuthenticate_PersonalTokenSheetScopesOnlyUnaffected(t *testing.T) {
 
 	_, plaintext = f.mint(t, f.alice, apikey.ProjectGrant{All: true})
 	f.members.Remove(f.orgID, f.alice)
-	for name, m := range map[string]apikey.Members{"departed owner": f.members, "membership outage": unreachableMembers{}, "no membership check": nil} {
+	for name, m := range map[string]interface {
+		RequireManager(context.Context, uuid.UUID, uuid.UUID) error
+	}{"departed owner": f.members, "membership outage": unreachableMembers{}, "no membership check": nil} {
 		p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}, m).Authenticate(t.Context(), plaintext)
 		require.NoError(t, err, name)
 		assert.Equal(t, f.alice, p.KeyOwnerID, name)
@@ -191,7 +194,7 @@ func TestAnOrgLevelScopeNeedsAManagerOwner(t *testing.T) {
 	all := apikey.ProjectGrant{All: true}
 
 	_, _, err := f.svc.MintPersonal(f.ctx(t, f.alice), "x", org, all, in(time.Hour))
-	assert.True(t, orgpkg.IsNotManagerError(err), "a plain member must not mint an org-level scope, got %v", err)
+	assert.True(t, isManagerRefusal(err), "a plain member must not mint an org-level scope, got %v", err)
 
 	_, _, err = f.svc.MintPersonal(f.ctx(t, f.admin), "admin", org, all, in(time.Hour))
 	require.NoError(t, err)
@@ -199,7 +202,7 @@ func TestAnOrgLevelScopeNeedsAManagerOwner(t *testing.T) {
 
 func TestAProjectKeyRefusesAnOrgLevelScope(t *testing.T) {
 	f := newPersonalFixture(t)
-	ctx := tenant.Into(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: f.admin})
+	ctx := fakes.BindRole(t.Context(), tenant.Context{OrgID: f.orgID, ProjectID: f.a, UserID: f.admin}, "admin")
 	_, _, err := f.svc.Mint(ctx, "x", []string{authn.ScopeMembersRead}, nil, in(time.Hour))
 	assert.True(t, apikey.IsScopeLevelError(err), "got %v", err)
 	_, _, err = f.svc.MintOrg(f.ctx(t, f.admin), "org", []string{authn.ScopeMembersRead}, apikey.ProjectGrant{All: true}, in(time.Hour))

@@ -580,6 +580,8 @@ func parseTTL(raw string) (ttl time.Duration, failure string) {
 
 func publishMessage(tr *i18n.Translator, err error) string {
 	switch {
+	case deniedWrites(err):
+		return tr.T("writes.managers_only")
 	case sheet.IsInvalidSlugError(err),
 		sheet.IsInvalidVisibilityError(err),
 		sheet.IsInvalidTTLError(err),

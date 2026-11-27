@@ -116,7 +116,7 @@ func TestBootstrap_CredentialsFailClosedWithoutAKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap org: %v", err)
 	}
-	orgCtx := tenant.Into(ctx, tenant.Context{OrgID: o.ID, UserID: owner.ID})
+	orgCtx := bindAs(t, srv, tenant.Context{OrgID: o.ID, UserID: owner.ID})
 	p, err := srv.Projects.Create(orgCtx, o.ID, "sealer-project", "Sealer Project")
 	if err != nil {
 		t.Fatalf("create project: %v", err)

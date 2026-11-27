@@ -14,6 +14,7 @@ import (
 
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 )
@@ -21,10 +22,14 @@ import (
 //nolint:gochecknoglobals // OTel tracer is a package-level fixture, not runtime state.
 var tracer = otel.Tracer("altalune.id/opensheet/internal/apikey")
 
-// Members is the org membership gate: RequireManager guards org and project keys, RequireMember guards a personal token.
+// Members is the org membership gate a personal token's owner passes.
 type Members interface {
-	RequireManager(ctx context.Context, orgID, userID uuid.UUID) error
 	RequireMember(ctx context.Context, orgID, userID uuid.UUID) error
+}
+
+// TODO: drop with custom roles, with the RequireManager use-time check of org-level personal tokens.
+type managers interface {
+	RequireManager(ctx context.Context, orgID, userID uuid.UUID) error
 }
 
 // Projects lists an org's project ids, so a grant can only name the org's own projects.
@@ -32,7 +37,7 @@ type Projects interface {
 	ProjectIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 }
 
-// Service is the API key driving port. SECURITY: every caller-initiated write asks Members first — an owner or admin for an org or project key, the owner for a personal token.
+// Service is the API key driving port. SECURITY: every caller-initiated write asks authz first — apikeys:write for an org or project key, membership for the owner of a personal token.
 type Service struct {
 	store      Store
 	scheme     Scheme
@@ -139,6 +144,10 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]*APIKey, err
 	ctx, span := tracer.Start(ctx, "apikey.List")
 	defer span.End()
 	span.SetAttributes(attribute.String("project_id", projectID.String()))
+	if err := authz.Can(ctx, authz.APIKeysRead); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	out, err := s.store.List(ctx, projectID)
 	if err != nil {
@@ -152,6 +161,10 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]*APIKey, err
 func (s *Service) ListOrg(ctx context.Context) ([]*APIKey, error) {
 	ctx, span := tracer.Start(ctx, "apikey.ListOrg")
 	defer span.End()
+	if err := authz.Can(ctx, authz.APIKeysRead); err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
 
 	out, err := s.store.ListOrg(ctx)
 	if err != nil {
@@ -262,14 +275,28 @@ func (s *Service) mintGate(ctx context.Context, kind Kind, scopes []string, expi
 	if err := requireMintable(scopes); err != nil {
 		return tenant.Context{}, err
 	}
+	for _, sc := range scopes {
+		if err := authz.CanPutScope(ctx, sc); err != nil {
+			return tenant.Context{}, err
+		}
+	}
 	return tc, validateLifetime(expiresAt, s.now())
 }
 
 func (s *Service) requireMinter(ctx context.Context, kind Kind, tc tenant.Context, scopes []string) error {
-	if kind == KindPersonal {
-		return requireOwner(ctx, s.members, tc.OrgID, tc.UserID, scopes)
+	switch kind {
+	case KindPersonal:
+		if err := s.members.RequireMember(ctx, tc.OrgID, tc.UserID); err != nil {
+			return err
+		}
+		if hasOrgLevelScope(scopes) {
+			return authz.CanOrgWide(ctx, authz.APIKeysWrite)
+		}
+		return nil
+	case KindOrg:
+		return authz.CanOrgWide(ctx, authz.APIKeysWrite)
 	}
-	return s.members.RequireManager(ctx, tc.OrgID, tc.UserID)
+	return authz.Can(ctx, authz.APIKeysWrite)
 }
 
 // SECURITY: a personal token belongs to its owner alone — to anyone else it reads as absent — and every other kind needs an owner or admin.
@@ -282,8 +309,11 @@ func (s *Service) loadForChange(ctx context.Context, id uuid.UUID) (tenant.Conte
 	if err != nil {
 		return tenant.Context{}, nil, err
 	}
-	if k.Kind != KindPersonal {
-		return tc, k, s.members.RequireManager(ctx, tc.OrgID, tc.UserID)
+	switch k.Kind {
+	case KindOrg:
+		return tc, k, authz.CanOrgWide(ctx, authz.APIKeysWrite)
+	case KindProject:
+		return tc, k, authz.Can(ctx, authz.APIKeysWrite)
 	}
 	if tc.UserID == uuid.Nil || k.CreatedBy != tc.UserID {
 		return tenant.Context{}, nil, &NotFoundError{}
@@ -293,19 +323,14 @@ func (s *Service) loadForChange(ctx context.Context, id uuid.UUID) (tenant.Conte
 
 func requireMintable(scopes []string) error {
 	for _, sc := range scopes {
-		if authn.Valid(sc) && !authn.Mintable(sc) {
+		if !authn.Valid(sc) {
+			return &UnknownScopeError{Scope: sc}
+		}
+		if !authn.Mintable(sc) {
 			return &RetiredScopeError{Scope: sc}
 		}
 	}
 	return nil
-}
-
-// SECURITY: the one owner rule, asked at mint and on every use of an org-level personal token — a member, or an owner or admin when the token holds an org-level scope.
-func requireOwner(ctx context.Context, m Members, orgID, userID uuid.UUID, scopes []string) error {
-	if hasOrgLevelScope(scopes) {
-		return m.RequireManager(ctx, orgID, userID)
-	}
-	return m.RequireMember(ctx, orgID, userID)
 }
 
 func hasOrgLevelScope(scopes []string) bool {
@@ -351,11 +376,11 @@ type Authenticator struct {
 	store   Store
 	usage   *UsageWorker
 	scheme  Scheme
-	members Members
+	members managers
 }
 
 // NewAuthenticator binds an Authenticator to its store, usage recorder, key scheme and the manager gate a personal token's org-level scope is checked against on every use. usage may be nil.
-func NewAuthenticator(s Store, u *UsageWorker, scheme Scheme, members Members) *Authenticator {
+func NewAuthenticator(s Store, u *UsageWorker, scheme Scheme, members managers) *Authenticator {
 	return &Authenticator{store: s, usage: u, scheme: scheme, members: members}
 }
 
@@ -389,12 +414,12 @@ func (a *Authenticator) resolve(ctx context.Context, raw string) (*APIKey, error
 	if k.Kind == KindPersonal && k.CreatedBy == uuid.Nil {
 		return nil, &authn.UnauthorizedError{}
 	}
-	// TODO: drop when members:read moves to Can.
+	// TODO: drop with custom roles, with the managers interface.
 	if k.Kind == KindPersonal && hasOrgLevelScope(k.Scopes) {
 		if a.members == nil {
 			return nil, &authn.UnauthorizedError{}
 		}
-		if err := requireOwner(tenant.WithOrg(ctx, k.OrgID), a.members, k.OrgID, k.CreatedBy, k.Scopes); err != nil {
+		if err := a.members.RequireManager(tenant.WithOrg(ctx, k.OrgID), k.OrgID, k.CreatedBy); err != nil {
 			return nil, ownerRefusal(err)
 		}
 	}

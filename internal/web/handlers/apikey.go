@@ -13,6 +13,7 @@ import (
 	"altalune.id/opensheet/internal/apikey"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/web"
 	"altalune.id/opensheet/internal/web/templates"
@@ -194,14 +195,6 @@ func (h *APIKeyHandler) changeInto(w http.ResponseWriter, r *http.Request, write
 	write(nil, "", "")
 }
 
-func (h *APIKeyHandler) canManage(r *http.Request, orgID, userID uuid.UUID) bool {
-	ok, err := h.Orgs.IsManager(r.Context(), orgID, userID)
-	if err != nil {
-		h.LogErr("web apikey: role", err)
-	}
-	return ok
-}
-
 func baseView(base string, minted *templates.APIKeyMinted, errKind, code string) templates.APIKeysView {
 	return templates.APIKeysView{
 		Base:      base,
@@ -224,7 +217,7 @@ func (h *APIKeyHandler) projectView(sc ProjectScope, minted *templates.APIKeyMin
 	}
 	v := baseView(h.ProjectURL(sc, "/apikeys"), minted, errKind, code)
 	v.Scopes = projectScopes(v.Scopes)
-	v.CanManage = h.canManage(sc.req, sc.org.ID, sc.principal.UserID)
+	v.CanManage = holds(sc.req, authz.APIKeysWrite)
 	v.Resources = resourceView(resources)
 	for _, k := range items {
 		row := apiKeyRow(k, v.Base, nil)
@@ -247,7 +240,7 @@ func (h *APIKeyHandler) orgView(sc OrgScope, minted *templates.APIKeyMinted, err
 	}
 	v := baseView(web.Path(h.Cfg.HTTP.BasePath, "/orgs/"+sc.org.Slug+"/apikeys"), minted, errKind, code)
 	v.OrgLevel, v.HasGrant, v.Projects = true, true, options
-	v.CanManage = h.canManage(sc.req, sc.org.ID, sc.principal.UserID)
+	v.CanManage = holds(sc.req, authz.APIKeysWrite)
 	for _, k := range items {
 		v.Items = append(v.Items, apiKeyRow(k, v.Base, options))
 	}
@@ -359,7 +352,7 @@ func expiryOptions() []templates.APIKeyExpiryOption {
 
 func apiKeyErrorKind(err error) string {
 	switch {
-	case org.IsNotManagerError(err):
+	case org.IsNotManagerError(err), authz.IsDeniedError(err):
 		return templates.APIKeyErrorNotManager
 	case apikey.IsUnknownScopeError(err), apikey.IsRetiredScopeError(err), apikey.IsScopeLevelError(err):
 		return templates.APIKeyErrorScope
