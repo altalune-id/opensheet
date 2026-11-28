@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/google/uuid"
@@ -129,13 +130,27 @@ func (r *Org) SaveMembership(_ context.Context, m *org.Membership) error {
 	for i, x := range r.memberships {
 		if x.OrgID == m.OrgID && x.UserID == m.UserID {
 			c := *m
+			c.AllProjects, c.ProjectIDs = x.AllProjects, slices.Clone(x.ProjectIDs)
 			r.memberships[i] = &c
 			return nil
 		}
 	}
 	c := *m
+	c.AllProjects, c.ProjectIDs = true, nil
 	r.memberships = append(r.memberships, &c)
 	return nil
+}
+
+func (r *Org) SetProjectGrant(_ context.Context, orgID, userID uuid.UUID, g org.ProjectGrant) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, x := range r.memberships {
+		if x.OrgID == orgID && x.UserID == userID {
+			x.AllProjects, x.ProjectIDs = g.All, slices.Clone(g.ProjectIDs)
+			return nil
+		}
+	}
+	return &org.MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
 }
 
 func (r *Org) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*org.Membership, error) {
@@ -148,6 +163,7 @@ func (r *Org) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*org.Mem
 	for _, x := range r.memberships {
 		if x.OrgID == orgID && x.UserID == userID {
 			c := *x
+			c.ProjectIDs = slices.Clone(c.ProjectIDs)
 			return &c, nil
 		}
 	}
@@ -168,6 +184,7 @@ func (r *Org) ListMembers(_ context.Context, orgID uuid.UUID) ([]*org.Membership
 	for _, x := range r.memberships {
 		if x.OrgID == orgID {
 			c := *x
+			c.ProjectIDs = slices.Clone(c.ProjectIDs)
 			out = append(out, &c)
 		}
 	}
@@ -187,13 +204,15 @@ func (r *Org) ListMemberProfiles(_ context.Context, orgID uuid.UUID) ([]*org.Mem
 			email, name = lookup()
 		}
 		out = append(out, &org.MemberProfile{
-			UserID:    x.UserID,
-			Email:     email,
-			Name:      name,
-			Role:      x.Role,
-			RoleID:    x.RoleID,
-			CreatedAt: x.CreatedAt,
-			System:    x.System,
+			UserID:      x.UserID,
+			Email:       email,
+			Name:        name,
+			Role:        x.Role,
+			RoleID:      x.RoleID,
+			CreatedAt:   x.CreatedAt,
+			System:      x.System,
+			AllProjects: x.AllProjects,
+			ProjectIDs:  slices.Clone(x.ProjectIDs),
 		})
 	}
 	return out, nil
@@ -230,4 +249,11 @@ func (r *Org) LockOrg(ctx context.Context, _ uuid.UUID) error {
 		r.OnLock()
 	}
 	return nil
+}
+
+// UnrestrictedMembers answers every MembershipOf with an all-projects member, for tests that do not exercise grants.
+type UnrestrictedMembers struct{}
+
+func (UnrestrictedMembers) MembershipOf(_ context.Context, orgID, userID uuid.UUID) (*org.Membership, error) {
+	return &org.Membership{OrgID: orgID, UserID: userID, Role: org.RoleMember, AllProjects: true}, nil
 }

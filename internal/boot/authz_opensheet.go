@@ -48,5 +48,12 @@ func (a authzRoleSource) RoleOf(ctx context.Context, orgID, userID uuid.UUID) (r
 	if err != nil {
 		return "", uuid.Nil, "", session.Grant{}, err
 	}
-	return string(m.Role), m.RoleID, o.Name, session.Grant{OrgID: orgID, All: true}, nil
+	return string(m.Role), m.RoleID, o.Name, memberGrant(orgID, m), nil
+}
+
+func memberGrant(orgID uuid.UUID, m *org.Membership) session.Grant {
+	if m.AllProjects {
+		return session.Grant{OrgID: orgID, All: true}
+	}
+	return session.Grant{OrgID: orgID, ProjectIDs: m.ProjectIDs}
 }

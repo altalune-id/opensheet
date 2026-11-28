@@ -11,8 +11,8 @@ domain interfaces — SQLite is dev/demo, Postgres is production.
 
 ```
 schema/
-├── migrations/postgres/    # 001_init … 021_roles, VERSION
-├── migrations/sqlite/      # 001_init … 018_roles, VERSION
+├── migrations/postgres/    # 001_init … 022_membership_projects, VERSION
+├── migrations/sqlite/      # 001_init … 019_membership_projects, VERSION
 ├── migrator.go             # goose runner, template rendering, embed FS
 ├── migrator_templatefs.go  # per-boot template-rendered file system
 ├── rls_guard.go            # boot-time BYPASSRLS assertion
@@ -42,6 +42,10 @@ erDiagram
     orgs ||--o{ roles : "defines"
     roles |o--o{ memberships : "custom role"
     roles |o--o{ invites : "custom role"
+    memberships ||--o{ membership_projects : "grants"
+    invites ||--o{ invite_projects : "grants"
+    projects ||--o{ membership_projects : "granted"
+    projects ||--o{ invite_projects : "granted"
     projects ||--o{ todos : "contains"
     projects ||--o{ blog_posts : "contains"
     blog_posts ||--o{ blog_post_tags : "tagged"
@@ -57,11 +61,23 @@ erDiagram
         uuid user_id FK
         text role "owner|admin|member|custom"
         uuid role_id FK "set exactly when role is custom"
+        bool all_projects "always true for an owner"
     }
     invites {
         uuid org_id FK
         text role "owner|admin|member|custom"
         uuid role_id FK "set exactly when role is custom"
+        bool all_projects "always true for an owner"
+    }
+    membership_projects {
+        uuid org_id FK
+        uuid membership_id FK
+        uuid project_id FK
+    }
+    invite_projects {
+        uuid org_id FK
+        uuid invite_id FK
+        uuid project_id FK
     }
     roles {
         uuid id PK
@@ -118,7 +134,7 @@ pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 | --------------------------------------- | ------------------------------------------------------ |
 | `resolve_api_key_by_secret_hash(bytea)` | a key and its project grant, by hash                   |
 | `resolve_org_by_slug(text)`             | an org from a path slug                                |
-| `resolve_invite_by_token_hash(text)`    | an invite from its link                                |
+| `resolve_invite_by_token_hash(text)`    | an invite and its project grant, from its link         |
 | `list_pending_invites_for_email(text)`  | invites waiting for a signing-up user                  |
 | `list_orgs_for_user(uuid)`              | a user's orgs, to resolve their tenant                 |
 | `list_org_ids()`                        | every org id, for cross-tenant jobs                    |
@@ -150,7 +166,7 @@ pinned by `TestMigrateUp_DefinerFunctionsAreOwnedByTheMigrationRole`.
 
 Postgres `001`–`005` and `012`–`018`, and SQLite `001`–`003` and `010`–`015`, are the template's,
 content byte-identical to it. They are **never edited, renamed, renumbered or deleted**.
-opensheet's own are Postgres `006`–`011` and `019`–`021`, and SQLite `004`–`009` and `016`–`018`. A new template migration lands
+opensheet's own are Postgres `006`–`011` and `019`–`022`, and SQLite `004`–`009` and `016`–`019`. A new template migration lands
 at opensheet's next free number; a new opensheet migration takes the next free number too.
 
 The template's later edits to Postgres `001_init` and `005_definer_functions` and SQLite
@@ -255,6 +271,12 @@ erDiagram
   SQLite rebuilds `memberships` and `invites`, which also gain `UNIQUE (org_id, id)`. Postgres
   replaces `resolve_invite_by_token_hash` and `list_pending_invites_for_email` to return `role_id`.
   The down deletes custom-role members and invites, which the restored CHECK refuses.
+- `022_membership_projects` (SQLite `019`) gives `memberships` and `invites` a project grant:
+  `all_projects` (default true, so existing rows keep every project) or the rows in
+  `membership_projects` and `invite_projects`. A CHECK keeps every owner at `all_projects`. Both
+  grant tables use composite `(org_id, ...)` keys, so a row cannot cross orgs. Postgres replaces
+  the two invite functions again to return `all_projects` and `project_ids`. The down drops the
+  grant, so every restricted member and invite reaches every project again.
 - `sheets.generation` guards the projection: a refresh captures it before fetching and discards
   its write if it moved, and a `PATCH` holds it as a per-sheet write lock.
 

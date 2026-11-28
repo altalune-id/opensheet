@@ -209,3 +209,28 @@ func TestMCP_MemberListIsAnOrgLevelRead(t *testing.T) {
 	rec = f.call(t, f.readKey, callToolBody(mcpinternal.ToolMemberList, map[string]any{}))
 	require.Equal(t, apperror.CodeForbidden, toolPayload(t, rec).Code, "a key without members:read must be refused; body=%s", rec.Body.String())
 }
+
+func TestMCP_ProjectListShowsGrantOnly(t *testing.T) {
+	f := newMCPFixture(t, mcpOpts{enabled: true})
+	ctx := t.Context()
+	agent, err := f.srv.Users.EnsureFromOIDC(ctx, user.Claims{Issuer: f.issuer.url, Subject: tokenSubject, Email: tokenEmail, EmailVerified: true, Name: "MCP Agent"})
+	require.NoError(t, err)
+	o, err := f.srv.Orgs.BySlug(ctx, "mcp-org")
+	require.NoError(t, err)
+	other, err := f.srv.Users.Create(ctx, user.CreateRequest{Email: "second-owner@example.com", Name: "Second Owner", Source: user.SourceOIDC})
+	require.NoError(t, err)
+	_, err = f.srv.Orgs.AddMember(tenant.WithOrg(ctx, o.ID), o.ID, other.ID, org.RoleOwner)
+	require.NoError(t, err)
+	ownerCtx := bindAs(t, f.srv, tenant.Context{OrgID: o.ID, UserID: other.ID})
+	sibling, err := f.srv.Projects.Create(ownerCtx, o.ID, "sibling-project", "Sibling Project")
+	require.NoError(t, err)
+	require.NoError(t, f.srv.Orgs.SetRole(ownerCtx, o.ID, agent.ID, org.RoleMember, uuid.Nil))
+	require.NoError(t, f.srv.Orgs.SetProjectGrant(ownerCtx, o.ID, agent.ID, org.ProjectGrant{ProjectIDs: []uuid.UUID{uuid.MustParse(f.projectID)}}))
+
+	rec := f.call(t, f.issuer.mint(t, mcpAudience, []string{authn.ScopeSheetsRead}), callToolBody(mcpinternal.ToolProjectList, map[string]any{}))
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.NotContains(t, rec.Body.String(), sibling.ID.String(), "project_list leaked a project outside the grant")
+	projects := projectsFromTool(t, rec)
+	require.Len(t, projects, 1)
+	require.Equal(t, f.projectID, projects[0].ID)
+}

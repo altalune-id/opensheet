@@ -77,7 +77,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 	uow := tenant.NewUnitOfWork(cfg.DB, pool, pgConn)
 	resolver := newAuthzResolver(orgStore, roleStore)
 
-	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected, uow, org.WithPermissions(resolver))
+	orgs := org.NewService(orgStore, caps, log, reporter.Unexpected, uow, org.WithPermissions(resolver), org.WithProjects(projectStoreForGrants{store: projectStore}))
 	roles := newRoleService(cfg, roleStore, orgStore, log, reporter.Unexpected, uow)
 	projects := project.NewService(projectStore, log, reporter.Unexpected)
 	todos := todo.NewService(todoStore, log, reporter.Unexpected, k.Queue)
@@ -95,7 +95,7 @@ func buildServices(cfg *config.Config, k *platform.Kernel, caps capabilities.Cap
 		reporter.Unexpected,
 	)
 	acceptWorkflow := newAcceptWorkflow(inviteStore, userStore, orgStore, uow, log, reporter.Unexpected)
-	invites := invite.NewService(inviteStore, sendWorkflow, acceptWorkflow, invitesEnabled, log, reporter.Unexpected, invite.WithPermissions(resolver))
+	invites := invite.NewService(inviteStore, sendWorkflow, acceptWorkflow, invitesEnabled, log, reporter.Unexpected, invite.WithPermissions(resolver), invite.WithMembers(orgStore), invite.WithProjects(projectStoreForGrants{store: projectStore}))
 
 	users := user.NewService(
 		userStore,

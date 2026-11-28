@@ -14,6 +14,7 @@ import (
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/session"
+	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/web/handlers"
 )
 
@@ -46,7 +47,7 @@ func TestInviteHandler_PostSend_ReturnsConflictWhenDisabled(t *testing.T) {
 	require.NoError(t, err)
 
 	sendWorkflow := invite.NewSendWorkflow(f.InvStore, nopMailer{}, "http://localhost", discardLogger(), passthroughUnexpected())
-	invites := invite.NewService(f.InvStore, sendWorkflow, nil, false, discardLogger(), passthroughUnexpected())
+	invites := invite.NewService(f.InvStore, sendWorkflow, nil, false, discardLogger(), passthroughUnexpected(), invite.WithMembers(fakes.UnrestrictedMembers{}))
 
 	h := handlers.NewInviteHandler(f.Deps, f.Orgs, invites)
 	mux := http.NewServeMux()

@@ -31,6 +31,10 @@ index opensheet_credentials_org_project_idx
 CREATE INDEX opensheet_credentials_org_project_idx
   ON opensheet_credentials (org_id, project_id)
 
+index opensheet_invite_projects_org_project_idx
+CREATE INDEX opensheet_invite_projects_org_project_idx
+  ON opensheet_invite_projects (org_id, project_id)
+
 index opensheet_invites_email_pending_idx
 CREATE INDEX opensheet_invites_email_pending_idx
   ON opensheet_invites (email)
@@ -39,6 +43,10 @@ CREATE INDEX opensheet_invites_email_pending_idx
 index opensheet_invites_role_idx
 CREATE INDEX opensheet_invites_role_idx
   ON opensheet_invites (org_id, role_id) WHERE role_id IS NOT NULL
+
+index opensheet_membership_projects_org_project_idx
+CREATE INDEX opensheet_membership_projects_org_project_idx
+  ON opensheet_membership_projects (org_id, project_id)
 
 index opensheet_memberships_role_idx
 CREATE INDEX opensheet_memberships_role_idx
@@ -213,6 +221,17 @@ CREATE TABLE opensheet_credentials (
   UNIQUE (project_id, name)
 )
 
+table opensheet_invite_projects
+CREATE TABLE opensheet_invite_projects (
+  org_id      TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  invite_id   TEXT NOT NULL,
+  project_id  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (invite_id, project_id),
+  FOREIGN KEY (org_id, invite_id) REFERENCES opensheet_invites(org_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id, project_id) REFERENCES opensheet_projects(org_id, id) ON DELETE CASCADE
+)
+
 table opensheet_invites
 CREATE TABLE "opensheet_invites" (
   id                  TEXT PRIMARY KEY,
@@ -224,10 +243,21 @@ CREATE TABLE "opensheet_invites" (
   expires_at          TEXT NOT NULL,
   accepted_at         TEXT,
   invited_by          TEXT NOT NULL REFERENCES opensheet_users(id),
-  created_at          TEXT NOT NULL,
+  created_at          TEXT NOT NULL, all_projects INTEGER NOT NULL DEFAULT 1 CHECK (role <> 'owner' OR all_projects = 1),
   UNIQUE (org_id, id),
   CONSTRAINT opensheet_invites_role_custom CHECK ((role = 'custom') = (role_id IS NOT NULL)),
   CONSTRAINT opensheet_invites_role_fk FOREIGN KEY (org_id, role_id) REFERENCES opensheet_roles (org_id, id)
+)
+
+table opensheet_membership_projects
+CREATE TABLE opensheet_membership_projects (
+  org_id         TEXT NOT NULL REFERENCES opensheet_orgs(id) ON DELETE CASCADE,
+  membership_id  TEXT NOT NULL,
+  project_id     TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  PRIMARY KEY (membership_id, project_id),
+  FOREIGN KEY (org_id, membership_id) REFERENCES opensheet_memberships(org_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id, project_id) REFERENCES opensheet_projects(org_id, id) ON DELETE CASCADE
 )
 
 table opensheet_memberships
@@ -238,7 +268,7 @@ CREATE TABLE "opensheet_memberships" (
   role                TEXT NOT NULL CHECK (role IN ('owner','admin','member','custom')),
   role_id             TEXT,
   system              INTEGER NOT NULL DEFAULT 0,
-  created_at          TEXT NOT NULL,
+  created_at          TEXT NOT NULL, all_projects INTEGER NOT NULL DEFAULT 1 CHECK (role <> 'owner' OR all_projects = 1),
   UNIQUE (org_id, user_id),
   UNIQUE (org_id, id),
   CONSTRAINT opensheet_memberships_role_custom CHECK ((role = 'custom') = (role_id IS NOT NULL)),

@@ -12,7 +12,7 @@ import (
 	customrole "altalune.id/opensheet/internal/role"
 )
 
-// Roles is an in-memory role source for authz.NewResolver: every member's grant covers every project.
+// Roles is an in-memory role source for authz.NewResolver: a member's grant covers every project unless Restrict narrows it.
 type Roles struct {
 	mu        sync.Mutex
 	byOrg     map[uuid.UUID]map[uuid.UUID]held
@@ -24,8 +24,10 @@ type Roles struct {
 }
 
 type held struct {
-	role   string
-	roleID uuid.UUID
+	role       string
+	roleID     uuid.UUID
+	restricted bool
+	projectIDs []uuid.UUID
 }
 
 // NewRoles returns a role source with no members, naming every org "Acme".
@@ -54,6 +56,16 @@ func (r *Roles) Revise(roleID uuid.UUID, perms ...authz.Permission) *Roles {
 	return r
 }
 
+// Restrict narrows userID's grant in orgID to projectIDs; the member must already be Set.
+func (r *Roles) Restrict(orgID, userID uuid.UUID, projectIDs ...uuid.UUID) *Roles {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.byOrg[orgID][userID]
+	h.restricted, h.projectIDs = true, slices.Clone(projectIDs)
+	r.byOrg[orgID][userID] = h
+	return r
+}
+
 func (r *Roles) set(orgID, userID uuid.UUID, h held) *Roles {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -73,7 +85,7 @@ func (r *Roles) RoleOf(_ context.Context, orgID, userID uuid.UUID) (role string,
 		return "", uuid.Nil, "", session.Grant{}, r.Err
 	}
 	h := r.byOrg[orgID][userID]
-	return h.role, h.roleID, r.OrgName, session.Grant{OrgID: orgID, All: true}, nil
+	return h.role, h.roleID, r.OrgName, session.Grant{OrgID: orgID, All: !h.restricted, ProjectIDs: slices.Clone(h.projectIDs)}, nil
 }
 
 // CustomPermissions returns the permissions SetCustom or Revise gave roleID, or *customrole.NotFoundError.

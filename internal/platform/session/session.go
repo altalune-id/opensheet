@@ -49,7 +49,9 @@ type Principal struct {
 	// HeldOrgID is the org Held was resolved in. SECURITY: Held answers for this org only.
 	HeldOrgID uuid.UUID `json:"-"`
 	// HeldRole is the role Held came from.
-	HeldRole        string `json:"-"`
+	HeldRole string `json:"-"`
+	// Member is the project grant of the person the principal acts for. SECURITY: set only by authz Bind; the zero value reaches nothing.
+	Member          Grant `json:"-"`
 	IsAdmin         bool
 	Locale          string
 	TermsAcceptedAt time.Time

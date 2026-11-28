@@ -102,20 +102,21 @@ Both `401`s carry `WWW-Authenticate: Bearer error="invalid_token"` naming the AP
 
 ## ROL — Roles and permissions
 
-`ROL010`-`ROL012` are reserved for project grants.
-
-| Code     | Constant                             | Meaning                 |
-| -------- | ------------------------------------ | ----------------------- |
-| `ROL001` | `apperror.CodePermissionDenied`      | Permission Denied       |
-| `ROL002` | `apperror.CodeRoleNotFound`          | Role Not Found          |
-| `ROL003` | `apperror.CodeRoleInUse`             | Role In Use             |
-| `ROL004` | `apperror.CodeRoleEscalation`        | Role Escalation         |
-| `ROL005` | `apperror.CodeRoleInvalidPermission` | Role Invalid Permission |
-| `ROL006` | `apperror.CodeRoleSystemOrg`         | Role System Org         |
-| `ROL007` | `apperror.CodeRoleInvalidName`       | Role Invalid Name       |
-| `ROL008` | `apperror.CodeRoleAlreadyExists`     | Role Already Exists     |
-| `ROL009` | `apperror.CodeRoleStaleVersion`      | Role Stale Version      |
-| `ROL013` | `apperror.CodeRoleLastOwner`         | Role Last Owner         |
+| Code     | Constant                              | Meaning                  |
+| -------- | ------------------------------------- | ------------------------ |
+| `ROL001` | `apperror.CodePermissionDenied`       | Permission Denied        |
+| `ROL002` | `apperror.CodeRoleNotFound`           | Role Not Found           |
+| `ROL003` | `apperror.CodeRoleInUse`              | Role In Use              |
+| `ROL004` | `apperror.CodeRoleEscalation`         | Role Escalation          |
+| `ROL005` | `apperror.CodeRoleInvalidPermission`  | Role Invalid Permission  |
+| `ROL006` | `apperror.CodeRoleSystemOrg`          | Role System Org          |
+| `ROL007` | `apperror.CodeRoleInvalidName`        | Role Invalid Name        |
+| `ROL008` | `apperror.CodeRoleAlreadyExists`      | Role Already Exists      |
+| `ROL009` | `apperror.CodeRoleStaleVersion`       | Role Stale Version       |
+| `ROL010` | `apperror.CodeProjectGrantEmpty`      | Project Grant Empty      |
+| `ROL011` | `apperror.CodeProjectGrantConflict`   | Project Grant Conflict   |
+| `ROL012` | `apperror.CodeProjectGrantEscalation` | Project Grant Escalation |
+| `ROL013` | `apperror.CodeRoleLastOwner`          | Role Last Owner          |
 
 ## APK — API keys
 

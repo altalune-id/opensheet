@@ -6,13 +6,14 @@ import "github.com/go-jet/jet/v2/postgres"
 type Memberships struct {
 	postgres.Table
 
-	ID        postgres.ColumnString
-	OrgID     postgres.ColumnString
-	UserID    postgres.ColumnString
-	Role      postgres.ColumnString
-	RoleID    postgres.ColumnString
-	CreatedAt postgres.ColumnTimestampz
-	System    postgres.ColumnBool
+	ID          postgres.ColumnString
+	OrgID       postgres.ColumnString
+	UserID      postgres.ColumnString
+	Role        postgres.ColumnString
+	RoleID      postgres.ColumnString
+	CreatedAt   postgres.ColumnTimestampz
+	System      postgres.ColumnBool
+	AllProjects postgres.ColumnBool
 
 	AllColumns postgres.ColumnList
 }
@@ -23,24 +24,26 @@ func NewMemberships(schema, tablePrefix string) *Memberships {
 		schema = "public"
 	}
 	var (
-		id        = postgres.StringColumn("id")
-		orgID     = postgres.StringColumn("org_id")
-		userID    = postgres.StringColumn("user_id")
-		role      = postgres.StringColumn("role")
-		roleID    = postgres.StringColumn("role_id")
-		createdAt = postgres.TimestampzColumn("created_at")
-		system    = postgres.BoolColumn("system")
-		all       = postgres.ColumnList{id, orgID, userID, role, createdAt, system, roleID}
+		id          = postgres.StringColumn("id")
+		orgID       = postgres.StringColumn("org_id")
+		userID      = postgres.StringColumn("user_id")
+		role        = postgres.StringColumn("role")
+		roleID      = postgres.StringColumn("role_id")
+		createdAt   = postgres.TimestampzColumn("created_at")
+		system      = postgres.BoolColumn("system")
+		allProjects = postgres.BoolColumn("all_projects")
+		all         = postgres.ColumnList{id, orgID, userID, role, createdAt, system, roleID, allProjects}
 	)
 	return &Memberships{
-		Table:      postgres.NewTable(schema, tablePrefix+"memberships", "memberships", all...),
-		ID:         id,
-		OrgID:      orgID,
-		UserID:     userID,
-		Role:       role,
-		RoleID:     roleID,
-		CreatedAt:  createdAt,
-		System:     system,
-		AllColumns: all,
+		Table:       postgres.NewTable(schema, tablePrefix+"memberships", "memberships", all...),
+		ID:          id,
+		OrgID:       orgID,
+		UserID:      userID,
+		Role:        role,
+		RoleID:      roleID,
+		CreatedAt:   createdAt,
+		System:      system,
+		AllProjects: allProjects,
+		AllColumns:  all,
 	}
 }

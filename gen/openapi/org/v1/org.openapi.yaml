@@ -237,6 +237,16 @@ components:
         joinedAt:
           title: joined_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        allProjects:
+          type: boolean
+          title: all_projects
+          description: AllProjects is true when the member reaches every project of the organization
+        projectIds:
+          type: array
+          items:
+            type: string
+          title: project_ids
+          description: ProjectIds lists a restricted member's projects, shown only to a caller who manages members organization-wide
       title: Member
       additionalProperties: false
 security: []

@@ -19,7 +19,8 @@ func requireUTC(t *testing.T, got time.Time) {
 
 func TestPgInviteRow_ReadsInstantsInUTC(t *testing.T) {
 	at := wibInstant()
-	inv := (&pgInviteRow{ExpiresAt: at, CreatedAt: at, AcceptedAt: &at}).toInvite()
+	inv, err := (&pgInviteRow{ExpiresAt: at, CreatedAt: at, AcceptedAt: &at}).toInvite()
+	require.NoError(t, err)
 	requireUTC(t, inv.ExpiresAt)
 	requireUTC(t, inv.CreatedAt)
 	requireUTC(t, *inv.UsedAt)

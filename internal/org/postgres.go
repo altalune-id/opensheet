@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -25,6 +26,8 @@ type postgresStore struct {
 	pc                   *tenant.PgConn
 	orgs                 *pgent.Orgs
 	members              *pgent.Memberships
+	grants               *pgent.MembershipProjects
+	grantsExpr           postgres.Expression
 	users                *pgent.Users
 	resolveBySlugStmt    string
 	resolveSystemOrgStmt string
@@ -37,10 +40,14 @@ func newPostgresStore(pool pdb.Pool, pc *tenant.PgConn, schema, tablePrefix stri
 	}
 	fnPrefix := schema + "." + tablePrefix
 	return &postgresStore{
-		pool:                 pool,
-		pc:                   pc,
-		orgs:                 pgent.NewOrgs(schema, tablePrefix),
-		members:              pgent.NewMemberships(schema, tablePrefix),
+		pool:    pool,
+		pc:      pc,
+		orgs:    pgent.NewOrgs(schema, tablePrefix),
+		members: pgent.NewMemberships(schema, tablePrefix),
+		grants:  pgent.NewMembershipProjects(schema, tablePrefix),
+		// NOTE: Raw because go-jet has no builder for a correlated array_agg subquery in a projection.
+		grantsExpr: postgres.Raw("COALESCE((SELECT array_agg(g.project_id ORDER BY g.created_at, g.project_id) FROM " + fnPrefix +
+			"membership_projects g WHERE g.org_id = memberships.org_id AND g.membership_id = memberships.id), '{}')::text"),
 		users:                pgent.NewUsers(schema, tablePrefix),
 		resolveBySlugStmt:    orgFuncSelect + fnPrefix + "resolve_org_by_slug(#slug) AS o",
 		resolveSystemOrgStmt: orgFuncSelect + fnPrefix + "resolve_system_org() AS o",
@@ -71,45 +78,61 @@ func (r *pgOrgRow) toOrg() *Org {
 }
 
 type pgMembershipRow struct {
-	OrgID     uuid.UUID  `alias:"memberships.org_id"`
-	UserID    uuid.UUID  `alias:"memberships.user_id"`
-	Role      string     `alias:"memberships.role"`
-	RoleID    *uuid.UUID `alias:"memberships.role_id"`
-	CreatedAt time.Time  `alias:"memberships.created_at"`
-	System    bool       `alias:"memberships.system"`
+	OrgID       uuid.UUID  `alias:"memberships.org_id"`
+	UserID      uuid.UUID  `alias:"memberships.user_id"`
+	Role        string     `alias:"memberships.role"`
+	RoleID      *uuid.UUID `alias:"memberships.role_id"`
+	CreatedAt   time.Time  `alias:"memberships.created_at"`
+	System      bool       `alias:"memberships.system"`
+	AllProjects bool       `alias:"memberships.all_projects"`
+	ProjectIDs  string     `alias:"memberships.project_ids"`
 }
 
-func (r *pgMembershipRow) toMembership() *Membership {
-	return &Membership{
-		OrgID:     r.OrgID,
-		UserID:    r.UserID,
-		Role:      Role(r.Role),
-		RoleID:    derefUUID(r.RoleID),
-		CreatedAt: r.CreatedAt.UTC(),
-		System:    r.System,
+func (r *pgMembershipRow) toMembership() (*Membership, error) {
+	projectIDs, err := parsePgUUIDArray(r.ProjectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("org.postgres: parse project_ids: %w", err)
 	}
+	return &Membership{
+		OrgID:       r.OrgID,
+		UserID:      r.UserID,
+		Role:        Role(r.Role),
+		RoleID:      derefUUID(r.RoleID),
+		CreatedAt:   r.CreatedAt.UTC(),
+		System:      r.System,
+		AllProjects: r.AllProjects,
+		ProjectIDs:  projectIDs,
+	}, nil
 }
 
 type pgMemberProfileRow struct {
-	UserID    uuid.UUID  `alias:"memberships.user_id"`
-	Role      string     `alias:"memberships.role"`
-	RoleID    *uuid.UUID `alias:"memberships.role_id"`
-	CreatedAt time.Time  `alias:"memberships.created_at"`
-	System    bool       `alias:"memberships.system"`
-	Email     string     `alias:"users.email"`
-	Name      string     `alias:"users.name"`
+	UserID      uuid.UUID  `alias:"memberships.user_id"`
+	Role        string     `alias:"memberships.role"`
+	RoleID      *uuid.UUID `alias:"memberships.role_id"`
+	CreatedAt   time.Time  `alias:"memberships.created_at"`
+	System      bool       `alias:"memberships.system"`
+	Email       string     `alias:"users.email"`
+	Name        string     `alias:"users.name"`
+	AllProjects bool       `alias:"memberships.all_projects"`
+	ProjectIDs  string     `alias:"memberships.project_ids"`
 }
 
-func (r *pgMemberProfileRow) toProfile() *MemberProfile {
-	return &MemberProfile{
-		UserID:    r.UserID,
-		Email:     r.Email,
-		Name:      r.Name,
-		Role:      Role(r.Role),
-		RoleID:    derefUUID(r.RoleID),
-		CreatedAt: r.CreatedAt.UTC(),
-		System:    r.System,
+func (r *pgMemberProfileRow) toProfile() (*MemberProfile, error) {
+	projectIDs, err := parsePgUUIDArray(r.ProjectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("org.postgres: parse project_ids: %w", err)
 	}
+	return &MemberProfile{
+		UserID:      r.UserID,
+		Email:       r.Email,
+		Name:        r.Name,
+		Role:        Role(r.Role),
+		RoleID:      derefUUID(r.RoleID),
+		CreatedAt:   r.CreatedAt.UTC(),
+		System:      r.System,
+		AllProjects: r.AllProjects,
+		ProjectIDs:  projectIDs,
+	}, nil
 }
 
 func (s *postgresStore) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
@@ -152,6 +175,23 @@ func isPostgresUniqueViolation(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23505"
+}
+
+func parsePgUUIDArray(raw string) ([]uuid.UUID, error) {
+	body := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(raw), "{"), "}")
+	if body == "" {
+		return []uuid.UUID{}, nil
+	}
+	parts := strings.Split(body, ",")
+	out := make([]uuid.UUID, 0, len(parts))
+	for _, p := range parts {
+		id, err := uuid.Parse(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 func derefUUID(id *uuid.UUID) uuid.UUID {

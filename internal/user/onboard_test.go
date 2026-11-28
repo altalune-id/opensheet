@@ -385,3 +385,60 @@ func TestOnboard_UnknownMode(t *testing.T) {
 		t.Fatal("expected error for invalid mode")
 	}
 }
+
+func TestOnboard_AcceptCopiesGrant(t *testing.T) {
+	t.Parallel()
+	orgs, projects, invites, users := newFakeOrgs(), newFakeProjects(), newFakeInvites(), fakes.NewUser()
+	orgA := &user.OrgRef{ID: uuid.New(), Slug: "acme", Name: "Acme", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	if err := orgs.Save(context.Background(), orgA); err != nil {
+		t.Fatal(err)
+	}
+	p1 := uuid.New()
+	if err := invites.Save(context.Background(), &user.InviteRef{
+		ID: uuid.New(), OrgID: orgA.ID, Email: "rita@example.com", Role: "member",
+		ProjectIDs: []uuid.UUID{p1}, ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wf := user.NewOnboardWorkflow(users, orgs, projects, invites, user.Policy{Mode: user.PolicyModeCloud}, newTestLogger(), noopUnexpected())
+
+	userID := uuid.New()
+	if _, err := wf.Onboard(context.Background(), userID, "rita@example.com"); err != nil {
+		t.Fatalf("Onboard: %v", err)
+	}
+	m, err := orgs.MembershipOf(context.Background(), orgA.ID, userID)
+	if err != nil {
+		t.Fatalf("membership: %v", err)
+	}
+	if m.AllProjects || len(m.ProjectIDs) != 1 || m.ProjectIDs[0] != p1 {
+		t.Errorf("membership grant = all:%v ids:%v, want only %v", m.AllProjects, m.ProjectIDs, p1)
+	}
+}
+
+func TestOnboard_SignInDefaultProjectInsideGrant(t *testing.T) {
+	t.Parallel()
+	orgs, projects, invites, users := newFakeOrgs(), newFakeProjects(), newFakeInvites(), fakes.NewUser()
+	orgA := &user.OrgRef{ID: uuid.New(), Slug: "acme", Name: "Acme", OwnerID: uuid.New(), CreatedAt: time.Now().UTC()}
+	if err := orgs.Save(context.Background(), orgA); err != nil {
+		t.Fatal(err)
+	}
+	first, granted := uuid.New(), uuid.New()
+	for _, p := range []*user.ProjectRef{{ID: first, OrgID: orgA.ID, Slug: "first", Name: "First"}, {ID: granted, OrgID: orgA.ID, Slug: "granted", Name: "Granted"}} {
+		if err := projects.Save(context.Background(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userID := uuid.New()
+	if err := orgs.SaveMembership(context.Background(), &user.MembershipRef{OrgID: orgA.ID, UserID: userID, Role: "member", ProjectIDs: []uuid.UUID{granted}}); err != nil {
+		t.Fatal(err)
+	}
+	wf := user.NewOnboardWorkflow(users, orgs, projects, invites, user.Policy{Mode: user.PolicyModeCloud}, newTestLogger(), noopUnexpected())
+
+	res, err := wf.Onboard(context.Background(), userID, "rita@example.com")
+	if err != nil {
+		t.Fatalf("Onboard: %v", err)
+	}
+	if res.ProjectID != granted {
+		t.Errorf("project = %v, want the first project the grant reaches (%v)", res.ProjectID, granted)
+	}
+}

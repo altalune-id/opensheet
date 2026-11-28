@@ -24,10 +24,7 @@ type APIKeyScopeOption struct {
 }
 
 // APIKeyProjectOption is one project an org key or personal token can be granted.
-type APIKeyProjectOption struct {
-	ID   string
-	Name string
-}
+type APIKeyProjectOption = GrantOption
 
 // APIKeyResourceOption is one resource inside a project a project key can be pinned to.
 type APIKeyResourceOption struct {
@@ -290,34 +287,8 @@ templ APIKeyList(d web.LayoutData, v APIKeysView) {
 	</div>
 }
 
-templ apikeyGrantFields(d web.LayoutData, v APIKeysView) {
-	<fieldset class="group">
-		<legend class="block text-sm font-medium text-foreground/90">{ d.Tr("apikey.access_label") }</legend>
-		<div class="mt-1.5 flex flex-wrap gap-2">
-			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
-				<input type="radio" name="grant" value="selected" checked class="h-3.5 w-3.5"/>
-				<span>{ d.Tr("apikey.selected_projects") }</span>
-			</label>
-			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
-				<input type="radio" name="grant" value="all" class="h-3.5 w-3.5"/>
-				<span>{ d.Tr("apikey.all_projects") }</span>
-			</label>
-		</div>
-		@APIKeyGrantProjects(d, v.Projects)
-		<p class="mt-1 text-xs text-muted-foreground">{ d.Tr("apikey.all_projects_note") }</p>
-	</fieldset>
-}
-
-// APIKeyGrantProjects is the project picker a personal token form swaps in when its org changes.
-templ APIKeyGrantProjects(d web.LayoutData, projects []APIKeyProjectOption) {
-	<div id="apikey-grant-projects" class="mt-2 flex flex-wrap gap-2 group-has-[input[value=all]:checked]:hidden">
-		for _, p := range projects {
-			<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
-				<input type="checkbox" name="project_ids" value={ p.ID } class="h-3.5 w-3.5 rounded border-border"/>
-				<span>{ p.Name }</span>
-			</label>
-		}
-	</div>
+func apikeyGrantCopy(d web.LayoutData) GrantCopy {
+	return GrantCopy{Legend: d.Tr("apikey.access_label"), All: d.Tr("apikey.all_projects"), Some: d.Tr("apikey.selected_projects"), Hint: d.Tr("apikey.all_projects_note")}
 }
 
 templ apikeyResourceFields(d web.LayoutData, v APIKeysView) {
@@ -408,7 +379,7 @@ templ apikeyMintForm(d web.LayoutData, v APIKeysView) {
 			@apikeyOrgField(d, v)
 		}
 		if v.HasGrant {
-			@apikeyGrantFields(d, v)
+			@ProjectGrantFields(apikeyGrantCopy(d), GrantView{Options: v.Projects}, "apikey-grant-projects")
 		}
 		if len(v.Resources) > 0 {
 			@apikeyResourceFields(d, v)

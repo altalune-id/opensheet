@@ -19,6 +19,8 @@ type Store interface {
 	ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Membership, error)
 	ListMemberProfiles(ctx context.Context, orgID uuid.UUID) ([]*MemberProfile, error)
 	RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error
+	// SetProjectGrant replaces a membership's project grant; SaveMembership never writes it.
+	SetProjectGrant(ctx context.Context, orgID, userID uuid.UUID, g ProjectGrant) error
 	// LockOrg holds orgID's row for the unit of work on ctx, so membership changes to one org run one at a time.
 	LockOrg(ctx context.Context, orgID uuid.UUID) error
 }

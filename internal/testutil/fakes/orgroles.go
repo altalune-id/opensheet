@@ -26,7 +26,7 @@ type OrgRoles struct {
 	Roles rolePermissions
 }
 
-// RoleOf returns userID's role and custom role id in orgID, "" for a non-member or a missing org, and any other store error raw.
+// RoleOf returns userID's role, custom role id and project grant in orgID, "" for a non-member or a missing org, and any other store error raw.
 func (a OrgRoles) RoleOf(ctx context.Context, orgID, userID uuid.UUID) (role string, roleID uuid.UUID, orgName string, grant session.Grant, err error) {
 	m, err := a.Orgs.MembershipOf(ctx, orgID, userID)
 	if org.IsMembershipMissingError(err) {
@@ -42,7 +42,14 @@ func (a OrgRoles) RoleOf(ctx context.Context, orgID, userID uuid.UUID) (role str
 	if err != nil {
 		return "", uuid.Nil, "", session.Grant{}, err
 	}
-	return string(m.Role), m.RoleID, o.Name, session.Grant{OrgID: orgID, All: true}, nil
+	return string(m.Role), m.RoleID, o.Name, memberGrant(orgID, m), nil
+}
+
+func memberGrant(orgID uuid.UUID, m *org.Membership) session.Grant {
+	if m.AllProjects {
+		return session.Grant{OrgID: orgID, All: true}
+	}
+	return session.Grant{OrgID: orgID, ProjectIDs: m.ProjectIDs}
 }
 
 // CustomPermissions reads roleID's permissions from Roles; without Roles every custom role is *customrole.NotFoundError.

@@ -20,6 +20,10 @@ func requireUTC(t *testing.T, got time.Time) {
 func TestPgRows_ReadInstantsInUTC(t *testing.T) {
 	at := wibInstant()
 	requireUTC(t, (&pgOrgRow{CreatedAt: at}).toOrg().CreatedAt)
-	requireUTC(t, (&pgMembershipRow{CreatedAt: at}).toMembership().CreatedAt)
-	requireUTC(t, (&pgMemberProfileRow{CreatedAt: at}).toProfile().CreatedAt)
+	m, err := (&pgMembershipRow{CreatedAt: at}).toMembership()
+	require.NoError(t, err)
+	requireUTC(t, m.CreatedAt)
+	p, err := (&pgMemberProfileRow{CreatedAt: at}).toProfile()
+	require.NoError(t, err)
+	requireUTC(t, p.CreatedAt)
 }

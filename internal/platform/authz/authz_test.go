@@ -330,6 +330,8 @@ func TestPermissionFor_ReturnsBasePermission(t *testing.T) {
 }
 
 func TestErrorCodes_ROLRegistered(t *testing.T) {
+	// NOTE: the org package builds these and platform may not import it; TestErrorCodes_ProjectGrantRegistered checks them.
+	projectGrantCodes := map[string]bool{"ROL010": true, "ROL011": true, "ROL012": true}
 	codesSrc, err := os.ReadFile(filepath.Join("..", "..", "apperror", "codes.go"))
 	require.NoError(t, err)
 	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "errors", "opensheet.md"))
@@ -359,6 +361,9 @@ func TestErrorCodes_ROLRegistered(t *testing.T) {
 		built[ae.Code()] = ae
 	}
 	for code := range registered {
+		if projectGrantCodes[code] {
+			continue
+		}
 		assert.Regexp(t, "(?m)^\\|\\s*`"+code+"`\\s*\\|", string(doc), "%s has no row in docs/errors/opensheet.md", code)
 		ae, ok := built[code]
 		if !assert.True(t, ok, "no error constructs %s", code) {

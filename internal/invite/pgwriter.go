@@ -2,7 +2,9 @@ package invite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/go-jet/jet/v2/postgres"
 	"github.com/google/uuid"
@@ -14,6 +16,12 @@ func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
 	tx, owned, tc, err := s.txAcquire(ctx)
 	if err != nil {
 		return err
+	}
+	var existing []struct {
+		ID uuid.UUID `alias:"invites.id"`
+	}
+	if qErr := postgres.SELECT(s.table.ID).FROM(s.table).WHERE(s.table.ID.EQ(postgres.UUID(i.ID))).QueryContext(ctx, tx, &existing); qErr != nil {
+		return s.endTx(tx, owned, fmt.Errorf("invite.postgres.Save: lookup: %w", qErr))
 	}
 	stmt := s.table.INSERT(s.table.AllColumns).
 		VALUES(
@@ -27,6 +35,7 @@ func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
 			tc.UserID,
 			i.CreatedAt.UTC(),
 			pgNullableUUID(i.RoleID),
+			i.AllProjects,
 		).
 		ON_CONFLICT(s.table.ID).
 		// SECURITY: the conflict clause carries the tenant predicate; without it an attacker-supplied row id updates another org's row.
@@ -53,7 +62,26 @@ func (s *postgresStore) Save(ctx context.Context, i *Invite) error {
 	if n == 0 {
 		return s.endTx(tx, owned, &NotFoundError{ID: i.ID.String()})
 	}
-	return s.endTx(tx, owned, nil)
+	if len(existing) > 0 {
+		return s.endTx(tx, owned, nil)
+	}
+	return s.endTx(tx, owned, s.addGrants(ctx, tx, tc.OrgID, i))
+}
+
+// NOTE: a grant is written with the invite only; a later Save, such as the one that accepts it, never changes it.
+func (s *postgresStore) addGrants(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, i *Invite) error {
+	if len(i.ProjectIDs) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	ins := s.grants.INSERT(s.grants.AllColumns)
+	for _, id := range i.ProjectIDs {
+		ins = ins.VALUES(orgID, i.ID, id, now)
+	}
+	if _, err := ins.ON_CONFLICT(s.grants.InviteID, s.grants.ProjectID).DO_NOTHING().ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("invite.postgres.Save: add grants: %w", err)
+	}
+	return nil
 }
 
 func (s *postgresStore) Delete(ctx context.Context, id uuid.UUID) error {

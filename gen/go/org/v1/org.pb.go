@@ -29,8 +29,12 @@ type Member struct {
 	Email  string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
 	Name   string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	// Role is owner, admin or member
-	Role          string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
-	JoinedAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=joined_at,json=joinedAt,proto3" json:"joined_at,omitempty"`
+	Role     string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
+	JoinedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=joined_at,json=joinedAt,proto3" json:"joined_at,omitempty"`
+	// AllProjects is true when the member reaches every project of the organization
+	AllProjects bool `protobuf:"varint,6,opt,name=all_projects,json=allProjects,proto3" json:"all_projects,omitempty"`
+	// ProjectIds lists a restricted member's projects, shown only to a caller who manages members organization-wide
+	ProjectIds    []string `protobuf:"bytes,7,rep,name=project_ids,json=projectIds,proto3" json:"project_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -96,6 +100,20 @@ func (x *Member) GetRole() string {
 func (x *Member) GetJoinedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.JoinedAt
+	}
+	return nil
+}
+
+func (x *Member) GetAllProjects() bool {
+	if x != nil {
+		return x.AllProjects
+	}
+	return false
+}
+
+func (x *Member) GetProjectIds() []string {
+	if x != nil {
+		return x.ProjectIds
 	}
 	return nil
 }
@@ -184,13 +202,16 @@ var File_org_v1_org_proto protoreflect.FileDescriptor
 
 const file_org_v1_org_proto_rawDesc = "" +
 	"\n" +
-	"\x10org/v1/org.proto\x12\x06org.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18mcp/v1/annotations.proto\"\x98\x01\n" +
+	"\x10org/v1/org.proto\x12\x06org.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18mcp/v1/annotations.proto\"\xdc\x01\n" +
 	"\x06Member\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x127\n" +
-	"\tjoined_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\"\x14\n" +
+	"\tjoined_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\x12!\n" +
+	"\fall_projects\x18\x06 \x01(\bR\vallProjects\x12\x1f\n" +
+	"\vproject_ids\x18\a \x03(\tR\n" +
+	"projectIds\"\x14\n" +
 	"\x12ListMembersRequest\"?\n" +
 	"\x13ListMembersResponse\x12(\n" +
 	"\amembers\x18\x01 \x03(\v2\x0e.org.v1.MemberR\amembers2\x84\x02\n" +

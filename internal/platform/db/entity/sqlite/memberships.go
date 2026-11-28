@@ -6,13 +6,14 @@ import "github.com/go-jet/jet/v2/sqlite"
 type Memberships struct {
 	sqlite.Table
 
-	ID        sqlite.ColumnString
-	OrgID     sqlite.ColumnString
-	UserID    sqlite.ColumnString
-	Role      sqlite.ColumnString
-	RoleID    sqlite.ColumnString
-	CreatedAt sqlite.ColumnString
-	System    sqlite.ColumnInteger
+	ID          sqlite.ColumnString
+	OrgID       sqlite.ColumnString
+	UserID      sqlite.ColumnString
+	Role        sqlite.ColumnString
+	RoleID      sqlite.ColumnString
+	CreatedAt   sqlite.ColumnString
+	System      sqlite.ColumnInteger
+	AllProjects sqlite.ColumnBool
 
 	AllColumns sqlite.ColumnList
 }
@@ -20,24 +21,26 @@ type Memberships struct {
 // NewMemberships builds the memberships binding.
 func NewMemberships(tablePrefix string) *Memberships {
 	var (
-		id        = sqlite.StringColumn("id")
-		orgID     = sqlite.StringColumn("org_id")
-		userID    = sqlite.StringColumn("user_id")
-		role      = sqlite.StringColumn("role")
-		roleID    = sqlite.StringColumn("role_id")
-		createdAt = sqlite.StringColumn("created_at")
-		system    = sqlite.IntegerColumn("system")
-		all       = sqlite.ColumnList{id, orgID, userID, role, createdAt, system, roleID}
+		id          = sqlite.StringColumn("id")
+		orgID       = sqlite.StringColumn("org_id")
+		userID      = sqlite.StringColumn("user_id")
+		role        = sqlite.StringColumn("role")
+		roleID      = sqlite.StringColumn("role_id")
+		createdAt   = sqlite.StringColumn("created_at")
+		system      = sqlite.IntegerColumn("system")
+		allProjects = sqlite.BoolColumn("all_projects")
+		all         = sqlite.ColumnList{id, orgID, userID, role, createdAt, system, roleID, allProjects}
 	)
 	return &Memberships{
-		Table:      sqlite.NewTable("", tablePrefix+"memberships", "memberships", all...),
-		ID:         id,
-		OrgID:      orgID,
-		UserID:     userID,
-		Role:       role,
-		RoleID:     roleID,
-		CreatedAt:  createdAt,
-		System:     system,
-		AllColumns: all,
+		Table:       sqlite.NewTable("", tablePrefix+"memberships", "memberships", all...),
+		ID:          id,
+		OrgID:       orgID,
+		UserID:      userID,
+		Role:        role,
+		RoleID:      roleID,
+		CreatedAt:   createdAt,
+		System:      system,
+		AllProjects: allProjects,
+		AllColumns:  all,
 	}
 }

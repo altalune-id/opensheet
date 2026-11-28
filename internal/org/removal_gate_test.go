@@ -14,15 +14,16 @@ import (
 )
 
 type removalFixture struct {
-	svc   *org.Service
-	store *fakes.Org
-	orgID uuid.UUID
+	svc      *org.Service
+	store    *fakes.Org
+	projects *fakes.OrgProjects
+	orgID    uuid.UUID
 }
 
 func newRemovalFixture(t *testing.T, roles ...org.Role) (*removalFixture, []uuid.UUID) {
 	t.Helper()
-	store := fakes.NewOrg()
-	f := &removalFixture{svc: newServiceWithStore(t, store), store: store, orgID: uuid.New()}
+	store, projects := fakes.NewOrg(), fakes.NewOrgProjects()
+	f := &removalFixture{svc: newServiceWithStore(t, store, org.WithProjects(projects)), store: store, projects: projects, orgID: uuid.New()}
 	ids := make([]uuid.UUID, 0, len(roles))
 	scoped := tenant.WithOrg(t.Context(), f.orgID)
 	for _, role := range roles {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 
 	apperrorv1 "altalune.id/opensheet/gen/go/apperror/v1"
@@ -380,5 +381,60 @@ func (e *NotManagerError) ToAppError() *apperror.AppError {
 // IsNotManagerError reports whether err's tree contains a *NotManagerError.
 func IsNotManagerError(err error) bool {
 	_, ok := errors.AsType[*NotManagerError](err)
+	return ok
+}
+
+// ProjectGrantEmptyError refuses a restricted grant that names no project.
+type ProjectGrantEmptyError struct{}
+
+func (*ProjectGrantEmptyError) Error() string { return "org: project grant names no project" }
+
+// ToAppError maps ProjectGrantEmptyError to ROL010 InvalidArgument.
+func (*ProjectGrantEmptyError) ToAppError() *apperror.AppError {
+	return apperror.New(apperror.CodeProjectGrantEmpty, "Pick at least one project, or give access to all projects.", codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeProjectGrantEmpty, Meta: map[string]string{"field": "project_ids"}})
+}
+
+// IsProjectGrantEmptyError reports whether err's tree contains a *ProjectGrantEmptyError.
+func IsProjectGrantEmptyError(err error) bool {
+	_, ok := errors.AsType[*ProjectGrantEmptyError](err)
+	return ok
+}
+
+// ProjectGrantConflictError refuses a grant that is both all projects and a project list.
+type ProjectGrantConflictError struct{}
+
+func (*ProjectGrantConflictError) Error() string {
+	return "org: project grant is both all projects and a project list"
+}
+
+// ToAppError maps ProjectGrantConflictError to ROL011 InvalidArgument.
+func (*ProjectGrantConflictError) ToAppError() *apperror.AppError {
+	return apperror.New(apperror.CodeProjectGrantConflict, "Choose all projects or a list of projects, not both.", codes.InvalidArgument,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeProjectGrantConflict, Meta: map[string]string{"field": "project_ids"}})
+}
+
+// IsProjectGrantConflictError reports whether err's tree contains a *ProjectGrantConflictError.
+func IsProjectGrantConflictError(err error) bool {
+	_, ok := errors.AsType[*ProjectGrantConflictError](err)
+	return ok
+}
+
+// ProjectGrantEscalationError refuses granting a project the caller does not reach.
+type ProjectGrantEscalationError struct{ ProjectID uuid.UUID }
+
+func (e *ProjectGrantEscalationError) Error() string {
+	return "org: project grant reaches beyond the caller: project=" + e.ProjectID.String()
+}
+
+// ToAppError maps ProjectGrantEscalationError to ROL012 PermissionDenied.
+func (e *ProjectGrantEscalationError) ToAppError() *apperror.AppError {
+	return apperror.New(apperror.CodeProjectGrantEscalation, "You can only give access to projects you can open yourself.", codes.PermissionDenied,
+		&apperrorv1.ErrorDetail{Code: apperror.CodeProjectGrantEscalation, Meta: map[string]string{"project_id": e.ProjectID.String()}})
+}
+
+// IsProjectGrantEscalationError reports whether err's tree contains a *ProjectGrantEscalationError.
+func IsProjectGrantEscalationError(err error) bool {
+	_, ok := errors.AsType[*ProjectGrantEscalationError](err)
 	return ok
 }

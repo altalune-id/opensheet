@@ -2,6 +2,7 @@ package fakes
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 
@@ -46,6 +47,10 @@ func (f *Invite) Save(_ context.Context, i *invite.Invite) error {
 		return err
 	}
 	cp := *i
+	cp.ProjectIDs = slices.Clone(cp.ProjectIDs)
+	if prev, ok := f.byID[i.ID]; ok {
+		cp.AllProjects, cp.ProjectIDs = prev.AllProjects, slices.Clone(prev.ProjectIDs)
+	}
 	f.byID[i.ID] = &cp
 	f.byHash[i.TokenHash] = i.ID
 	return nil
@@ -66,6 +71,7 @@ func (f *Invite) ByID(_ context.Context, id uuid.UUID) (*invite.Invite, error) {
 		return nil, &invite.NotFoundError{ID: id.String()}
 	}
 	cp := *i
+	cp.ProjectIDs = slices.Clone(cp.ProjectIDs)
 	return &cp, nil
 }
 
@@ -84,6 +90,7 @@ func (f *Invite) ByTokenHash(_ context.Context, hash string) (*invite.Invite, er
 		return nil, &invite.NotFoundError{}
 	}
 	cp := *f.byID[id]
+	cp.ProjectIDs = slices.Clone(cp.ProjectIDs)
 	return &cp, nil
 }
 
@@ -103,6 +110,7 @@ func (f *Invite) ListPending(_ context.Context, orgID uuid.UUID) ([]*invite.Invi
 			continue
 		}
 		cp := *i
+		cp.ProjectIDs = slices.Clone(cp.ProjectIDs)
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt.Before(out[b].CreatedAt) })
@@ -128,6 +136,7 @@ func (f *Invite) FindPendingForEmail(_ context.Context, email string) ([]*invite
 			continue
 		}
 		cp := *i
+		cp.ProjectIDs = slices.Clone(cp.ProjectIDs)
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt.Before(out[b].CreatedAt) })

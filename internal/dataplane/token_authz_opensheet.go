@@ -72,7 +72,7 @@ func (a *credentialAuthorizer) authorize(ctx context.Context, raw, scope string,
 	}
 	p = session.PrincipalFrom(bctx)
 	if !p.ReachesProject(tc.OrgID, tc.ProjectID) {
-		return nil, session.Principal{}, &authn.UnauthorizedError{}
+		return nil, session.Principal{}, &SheetNotFoundError{}
 	}
 	perm, ok := authz.PermissionFor(scope)
 	if !ok || !reaches(p) {

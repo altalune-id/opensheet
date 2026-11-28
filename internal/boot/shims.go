@@ -44,7 +44,19 @@ func (s orgStoreForInvite) ByID(ctx context.Context, id uuid.UUID) (*invite.OrgR
 }
 
 func (s orgStoreForInvite) SaveMembership(ctx context.Context, m *invite.MembershipRef) error {
-	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID})
+	return saveWithGrant(ctx, s.store, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID},
+		org.ProjectGrant{All: m.AllProjects, ProjectIDs: m.ProjectIDs})
+}
+
+// SECURITY: the store never writes a grant on SaveMembership, so a restricted grant follows in the caller's unit of work; dropping it would widen the member to every project.
+func saveWithGrant(ctx context.Context, store org.Store, m *org.Membership, g org.ProjectGrant) error {
+	if err := store.SaveMembership(ctx, m); err != nil {
+		return err
+	}
+	if g.All {
+		return nil
+	}
+	return store.SetProjectGrant(ctx, m.OrgID, m.UserID, g)
 }
 
 func (s orgStoreForInvite) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*invite.MembershipRef, error) {
@@ -55,7 +67,7 @@ func (s orgStoreForInvite) MembershipOf(ctx context.Context, orgID, userID uuid.
 	if err != nil {
 		return nil, err
 	}
-	return &invite.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: invite.Role(m.Role), RoleID: m.RoleID}, nil
+	return &invite.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: invite.Role(m.Role), RoleID: m.RoleID, AllProjects: m.AllProjects, ProjectIDs: m.ProjectIDs}, nil
 }
 
 type orgStaffForRoles struct {
@@ -145,11 +157,12 @@ func (s orgStoreForOnboard) MembershipOf(ctx context.Context, orgID, userID uuid
 	if err != nil {
 		return nil, err
 	}
-	return &user.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: string(m.Role), RoleID: m.RoleID}, nil
+	return &user.MembershipRef{OrgID: m.OrgID, UserID: m.UserID, Role: string(m.Role), RoleID: m.RoleID, AllProjects: m.AllProjects, ProjectIDs: m.ProjectIDs}, nil
 }
 
 func (s orgStoreForOnboard) SaveMembership(ctx context.Context, m *user.MembershipRef) error {
-	return s.store.SaveMembership(ctx, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID})
+	return saveWithGrant(ctx, s.store, &org.Membership{OrgID: m.OrgID, UserID: m.UserID, Role: org.Role(m.Role), RoleID: m.RoleID},
+		org.ProjectGrant{All: m.AllProjects, ProjectIDs: m.ProjectIDs})
 }
 
 type projectStoreForOnboard struct{ store project.Store }
@@ -209,13 +222,15 @@ func toUserInvites(invs []*invite.Invite) []*user.InviteRef {
 	out := make([]*user.InviteRef, 0, len(invs))
 	for _, inv := range invs {
 		out = append(out, &user.InviteRef{
-			ID:         inv.ID,
-			OrgID:      inv.OrgID,
-			Email:      inv.Email,
-			Role:       string(inv.Role),
-			RoleID:     inv.RoleID,
-			ExpiresAt:  inv.ExpiresAt,
-			AcceptedAt: inv.UsedAt,
+			ID:          inv.ID,
+			OrgID:       inv.OrgID,
+			Email:       inv.Email,
+			Role:        string(inv.Role),
+			RoleID:      inv.RoleID,
+			ExpiresAt:   inv.ExpiresAt,
+			AcceptedAt:  inv.UsedAt,
+			AllProjects: inv.AllProjects,
+			ProjectIDs:  inv.ProjectIDs,
 		})
 	}
 	return out
@@ -264,4 +279,19 @@ func (s projectSlugs) SlugOf(ctx context.Context, projectID uuid.UUID) (string, 
 		return "", err
 	}
 	return p.Slug, nil
+}
+
+type projectStoreForGrants struct{ store project.Store }
+
+// NOTE: reads the store, not the service, so the check sees every project of orgID whatever the caller reaches.
+func (s projectStoreForGrants) ProjectIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	list, err := s.store.List(tenant.WithOrg(ctx, orgID), orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uuid.UUID, 0, len(list))
+	for _, p := range list {
+		out = append(out, p.ID)
+	}
+	return out, nil
 }

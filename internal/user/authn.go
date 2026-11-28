@@ -12,6 +12,7 @@ import (
 
 type orgMemberships interface {
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]*OrgRef, error)
+	MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*MembershipRef, error)
 }
 
 type projectLister interface {
@@ -89,7 +90,7 @@ func (a *Authenticator) resolveTenant(ctx context.Context, p session.Principal) 
 		return p, nil
 	}
 	p.ActiveOrgID = orgID
-	p.ActiveProjectID = a.pickProject(ctx, orgID)
+	p.ActiveProjectID = a.pickProject(ctx, orgID, p.UserID)
 	return p, nil
 }
 
@@ -102,15 +103,30 @@ func pickOrg(orgs []*OrgRef) uuid.UUID {
 }
 
 // SECURITY: the principal holds no tenant scope yet, so bind to the org just resolved.
-func (a *Authenticator) pickProject(ctx context.Context, orgID uuid.UUID) uuid.UUID {
+func (a *Authenticator) pickProject(ctx context.Context, orgID, userID uuid.UUID) uuid.UUID {
 	if a.projects == nil {
 		return uuid.Nil
 	}
-	list, err := a.projects.ListByOrg(tenant.WithOrg(ctx, orgID), orgID)
-	if err != nil || len(list) == 0 {
+	scoped := tenant.WithOrg(ctx, orgID)
+	m, err := a.orgs.MembershipOf(scoped, orgID, userID)
+	if err != nil {
 		return uuid.Nil
 	}
-	return list[0].ID
+	list, err := a.projects.ListByOrg(scoped, orgID)
+	if err != nil {
+		return uuid.Nil
+	}
+	return firstReachable(m, list)
+}
+
+func firstReachable(m *MembershipRef, list []*ProjectRef) uuid.UUID {
+	g := session.Grant{OrgID: m.OrgID, All: m.AllProjects, ProjectIDs: m.ProjectIDs}
+	for _, p := range list {
+		if g.Reaches(p.OrgID, p.ID) {
+			return p.ID
+		}
+	}
+	return uuid.Nil
 }
 
 func needsIdentity(p session.Principal) bool {

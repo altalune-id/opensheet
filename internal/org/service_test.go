@@ -285,6 +285,10 @@ func (e *erroringStore) ListMemberProfiles(ctx context.Context, o uuid.UUID) ([]
 	}
 	return e.inner.ListMemberProfiles(ctx, o)
 }
+func (e *erroringStore) SetProjectGrant(ctx context.Context, o, u uuid.UUID, g org.ProjectGrant) error {
+	return e.inner.SetProjectGrant(ctx, o, u, g)
+}
+
 func (e *erroringStore) RemoveMember(ctx context.Context, o, u uuid.UUID) error {
 	if e.removeErr != nil {
 		return e.removeErr
@@ -296,13 +300,13 @@ func (e *erroringStore) LockOrg(ctx context.Context, o uuid.UUID) error {
 	return e.inner.LockOrg(ctx, o)
 }
 
-func newServiceWithStore(t *testing.T, store org.Store) *org.Service {
+func newServiceWithStore(t *testing.T, store org.Store, opts ...org.Option) *org.Service {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	unexpected := func(_ context.Context, msg string, cause error, _ ...any) *apperror.AppError {
 		return apperror.New("opensheet.unexpected", msg, codes.Internal, &apperrorv1.ErrorDetail{Code: "opensheet.unexpected"}).WithCause(cause)
 	}
-	return org.NewService(store, capabilities.Capabilities{OrgCreation: true}, log, unexpected, fakes.UnitOfWork)
+	return org.NewService(store, capabilities.Capabilities{OrgCreation: true}, log, unexpected, fakes.UnitOfWork, opts...)
 }
 
 func TestService_UnexpectedPaths(t *testing.T) {

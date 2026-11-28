@@ -30,7 +30,18 @@ type Service struct {
 	unexpected apperror.UnexpectedFunc
 	uow        tenant.UnitOfWork
 	perms      Permissions
+	projects   Projects
 	onRemoved  []MemberRemovedFunc
+}
+
+// Projects lists the projects of an org, so a grant names only real projects of that org.
+type Projects interface {
+	ProjectIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// WithProjects checks granted project ids through p; without it a grant naming any project is refused.
+func WithProjects(p Projects) Option {
+	return func(s *Service) { s.projects = p }
 }
 
 // Permissions resolves what a role holds, for the escalation guard.
@@ -347,7 +358,7 @@ func (s *Service) removable(ctx context.Context, orgID, userID uuid.UUID) error 
 	if err != nil {
 		return err
 	}
-	actorRole, held, err := s.actor(ctx, orgID, tc.UserID)
+	actorRole, held, _, err := s.actor(ctx, orgID, tc.UserID)
 	if err != nil {
 		return err
 	}
@@ -388,6 +399,12 @@ func (s *Service) SetRole(ctx context.Context, orgID, userID uuid.UUID, role Rol
 		if err != nil || (m.Role == role && m.RoleID == roleID) {
 			return err
 		}
+		// SECURITY: an owner always reaches every project, and the owner CHECK refuses the save otherwise, so the grant widens first in the same unit of work.
+		if role == RoleOwner && !m.AllProjects {
+			if err := s.store.SetProjectGrant(ctx, orgID, userID, ProjectGrant{All: true}); err != nil {
+				return s.unexpected(ctx, "org.SetRole: widen grant", err, "org_id", orgID.String(), "user_id", userID.String())
+			}
+		}
 		updated := *m
 		updated.Role, updated.RoleID = role, roleID
 		if err := s.store.SaveMembership(ctx, &updated); err != nil {
@@ -413,7 +430,7 @@ func (s *Service) settable(ctx context.Context, orgID, userID uuid.UUID, next Ro
 	if err != nil {
 		return nil, err
 	}
-	actorRole, held, err := s.actor(ctx, orgID, tc.UserID)
+	actorRole, held, _, err := s.actor(ctx, orgID, tc.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -461,27 +478,27 @@ func RoleChangeRefusal(held []authz.Permission, actorRole, current, next Role, c
 }
 
 // SECURITY: reads the actor's membership now, so a role lost since the request was bound grants nothing; only a member bound and still seated as a built-in owner acts as owner.
-func (s *Service) actor(ctx context.Context, orgID, actorID uuid.UUID) (Role, []authz.Permission, error) {
+func (s *Service) actor(ctx context.Context, orgID, actorID uuid.UUID) (Role, []authz.Permission, ProjectGrant, error) {
 	m, err := s.store.MembershipOf(ctx, orgID, actorID)
 	if err != nil && !IsMembershipMissingError(err) && !IsNotFoundError(err) {
-		return "", nil, s.unexpected(ctx, "org: actor membership", err, "org_id", orgID.String(), "user_id", actorID.String())
+		return "", nil, ProjectGrant{}, s.unexpected(ctx, "org: actor membership", err, "org_id", orgID.String(), "user_id", actorID.String())
 	}
 	var held []authz.Permission
 	if err == nil {
 		perms, err := s.permissionsOf(ctx, m.Role, m.RoleID)
 		if err != nil && !IsInvalidRoleError(err) {
-			return "", nil, err
+			return "", nil, ProjectGrant{}, err
 		}
 		held = slices.DeleteFunc(authz.Held(ctx), func(p authz.Permission) bool { return !slices.Contains(perms, p) })
 	}
 	if !authz.Covers(held, authz.MembersWrite) {
-		return "", nil, &authz.DeniedError{Permission: authz.MembersWrite, Org: session.PrincipalFrom(ctx).HeldOrg, Side: authz.SideRole}
+		return "", nil, ProjectGrant{}, &authz.DeniedError{Permission: authz.MembersWrite, Org: session.PrincipalFrom(ctx).HeldOrg, Side: authz.SideRole}
 	}
 	actorRole := m.Role
 	if actorRole != HeldRole(ctx, orgID) {
 		actorRole = ""
 	}
-	return actorRole, held, nil
+	return actorRole, held, ProjectGrant{All: m.AllProjects || m.Role == RoleOwner, ProjectIDs: m.ProjectIDs}, nil
 }
 
 func (s *Service) permissionsOf(ctx context.Context, r Role, roleID uuid.UUID) ([]authz.Permission, error) {
@@ -637,4 +654,86 @@ func scopeForBootstrap(ctx context.Context, ownerID uuid.UUID) (context.Context,
 	}
 	id := uuid.New()
 	return tenant.Into(ctx, tenant.Context{OrgID: id, UserID: ownerID}), id
+}
+
+// SetProjectGrant sets the projects userID reaches in orgID. SECURITY: the caller must hold every permission of the target's role and reach every project it grants; an owner always reaches every project.
+func (s *Service) SetProjectGrant(ctx context.Context, orgID, userID uuid.UUID, g ProjectGrant) error {
+	ctx, span := tracer.Start(ctx, "org.SetProjectGrant")
+	defer span.End()
+
+	ctx = tenant.WithOrg(ctx, orgID)
+	if err := authz.CanOrgWide(ctx, authz.MembersWrite); err != nil {
+		return err
+	}
+	if err := g.Validate(); err != nil {
+		return err
+	}
+	if err := s.grantable(ctx, orgID, userID, g); err != nil {
+		return err
+	}
+	return s.uow(ctx, func(ctx context.Context) error {
+		if err := s.store.LockOrg(ctx, orgID); err != nil {
+			return s.unexpected(ctx, "org.SetProjectGrant: lock", err, "org_id", orgID.String())
+		}
+		if err := s.grantable(ctx, orgID, userID, g); err != nil {
+			return err
+		}
+		if err := s.store.SetProjectGrant(ctx, orgID, userID, g); err != nil {
+			if IsMembershipMissingError(err) {
+				return err
+			}
+			return s.unexpected(ctx, "org.SetProjectGrant: save", err, "org_id", orgID.String(), "user_id", userID.String())
+		}
+		return nil
+	})
+}
+
+// SECURITY: must run again under the org lock, or a concurrent change to the actor's or target's role or grant slips past the checks.
+func (s *Service) grantable(ctx context.Context, orgID, userID uuid.UUID, g ProjectGrant) error {
+	m, err := s.store.MembershipOf(ctx, orgID, userID)
+	if err != nil {
+		if IsMembershipMissingError(err) || IsNotFoundError(err) {
+			return err
+		}
+		return s.unexpected(ctx, "org.SetProjectGrant: MembershipOf", err, "org_id", orgID.String(), "user_id", userID.String())
+	}
+	if m.System {
+		return &SystemProtectedError{Op: "set_project_grant", OrgID: orgID.String(), UserID: userID.String(), Resource: "membership"}
+	}
+	if m.Role == RoleOwner {
+		return &ProjectGrantConflictError{}
+	}
+	tc, err := tenant.From(ctx)
+	if err != nil {
+		return err
+	}
+	_, held, actorGrant, err := s.actor(ctx, orgID, tc.UserID)
+	if err != nil {
+		return err
+	}
+	targetPerms, err := s.permissionsOf(ctx, m.Role, m.RoleID)
+	if err != nil {
+		return err
+	}
+	if !authz.Covers(held, targetPerms...) {
+		return &authz.EscalationError{Role: string(m.Role)}
+	}
+	if err := s.inOrg(ctx, orgID, g); err != nil {
+		return err
+	}
+	return g.Within(actorGrant)
+}
+
+func (s *Service) inOrg(ctx context.Context, orgID uuid.UUID, g ProjectGrant) error {
+	if len(g.ProjectIDs) == 0 {
+		return nil
+	}
+	if s.projects == nil {
+		return &ProjectGrantEscalationError{ProjectID: g.ProjectIDs[0]}
+	}
+	ids, err := s.projects.ProjectIDs(ctx, orgID)
+	if err != nil {
+		return s.unexpected(ctx, "org.SetProjectGrant: projects", err, "org_id", orgID.String())
+	}
+	return g.InOrg(ids)
 }

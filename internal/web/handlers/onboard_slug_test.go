@@ -14,6 +14,7 @@ import (
 
 	"altalune.id/opensheet/internal/onboard"
 	"altalune.id/opensheet/internal/org"
+	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/user"
@@ -84,7 +85,7 @@ func onboardedSlugs(t *testing.T, f *handlerFixture) (string, string) {
 	t.Helper()
 	o, err := f.Orgs.SystemOrg(context.Background())
 	require.NoError(t, err, "onboarding must leave a system org behind")
-	ps, err := f.Projects.List(tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: o.OwnerID}), o.ID)
+	ps, err := f.Projects.List(authz.AsSystem(tenant.Into(context.Background(), tenant.Context{OrgID: o.ID, UserID: o.OwnerID})), o.ID)
 	require.NoError(t, err)
 	require.Len(t, ps, 1)
 	require.True(t, ps[0].System)
