@@ -19,6 +19,23 @@ type MemberRow struct {
 	Removable    bool
 	RoleEditable bool
 	LastOwner    bool
+	AllProjects  bool
+	ProjectCount int
+	Grant        *GrantView
+	AccessOpen   bool
+}
+
+// GrantView is the state of one project-access fieldset: all projects, or the checked options.
+type GrantView struct {
+	All     bool
+	Options []GrantOption
+}
+
+// GrantOption is one project checkbox in a project-access fieldset.
+type GrantOption struct {
+	ID      string
+	Name    string
+	Checked bool
 }
 
 type MembersView struct {
@@ -30,6 +47,7 @@ type MembersView struct {
 	GrantableRoles []RoleOption
 	ViewerIsOwner  bool
 	RoleUpdated    bool
+	AccessUpdated  bool
 	Error          string
 	ErrorCode      string
 }
@@ -60,6 +78,12 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 				{ d.Tr("members.role_updated") }
 			</p>
 		}
+		if v.AccessUpdated {
+			<p data-notice="access-updated" class="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
+				@icons.Icon("check", "mr-1.5 inline h-4 w-4 align-text-bottom")
+				{ d.Tr("members.access_updated") }
+			</p>
+		}
 		if v.Error != "" {
 			@ErrorBanner(d, v.Error, v.ErrorCode)
 		}
@@ -84,14 +108,14 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 								}
 							</p>
 							<p class="truncate text-xs text-muted-foreground">
-								{ m.Email } · { memberRowRole(d, m) }
+								{ m.Email } · { memberRowRole(d, m) } · <span data-access>{ memberAccess(d, v, m) }</span>
 								if m.System {
 									<span class="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/25">{ d.Tr("common.system") }</span>
 								}
 							</p>
 						</div>
-						if v.CanManage && (m.RoleEditable || m.LastOwner || m.Removable) {
-							<div class="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+						if v.CanManage && (m.RoleEditable || m.LastOwner || m.Removable || m.Grant != nil) {
+							<div class="group/access flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
 								if m.LastOwner {
 									<select disabled aria-label={ d.Tr("members.role_for", "Name", memberLabel(m)) } aria-describedby={ "last-owner-" + m.UserID } class="cursor-not-allowed rounded-md border border-border bg-card px-2 py-1 text-sm text-muted-foreground opacity-60 shadow-sm">
 										<option>{ d.Tr("members.role_owner") }</option>
@@ -112,6 +136,9 @@ templ MembersPage(d web.LayoutData, v MembersView) {
 											@icons.Icon("trash-2", "h-4 w-4")
 										</button>
 									</form>
+								}
+								if m.Grant != nil {
+									@memberAccessForm(d, v, m)
 								}
 							</div>
 						}
@@ -160,12 +187,95 @@ func memberRowRole(d web.LayoutData, m MemberRow) string {
 templ memberRoleForm(d web.LayoutData, v MembersView, m MemberRow) {
 	<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/role")) } class="flex items-center gap-2">
 		<select name="role" required aria-label={ d.Tr("members.role_for", "Name", memberLabel(m)) } class="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1">
+			if !roleListed(v.GrantableRoles, m.RoleValue) {
+				<option value="" selected disabled>{ memberRowRole(d, m) }</option>
+			}
 			for _, o := range v.GrantableRoles {
 				<option value={ o.Value } selected?={ m.RoleValue == o.Value }>{ roleOptionLabel(d, o) }</option>
 			}
 		</select>
 		<button type="submit" class="rounded-md border border-border bg-card px-2.5 py-1 text-sm font-medium text-foreground shadow-sm hover:bg-muted">{ d.Tr("members.save_role") }</button>
 	</form>
+}
+
+func roleListed(options []RoleOption, value string) bool {
+	for _, o := range options {
+		if o.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func memberAccess(d web.LayoutData, v MembersView, m MemberRow) string {
+	switch {
+	case m.Role == "owner" || m.AllProjects:
+		return d.Tr("members.access_all")
+	case v.CanManage:
+		return d.TrN("members.access_count", m.ProjectCount)
+	}
+	return d.Tr("members.access_some_label")
+}
+
+templ memberAccessForm(d web.LayoutData, v MembersView, m MemberRow) {
+	<details open?={ m.AccessOpen } class="basis-full text-sm group-has-[option[value=owner]:checked]/access:hidden">
+		<summary class="cursor-pointer select-none text-end text-xs text-muted-foreground hover:text-foreground">{ memberAccess(d, v, m) }</summary>
+		<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/members/" + m.UserID + "/projects")) } aria-label={ d.Tr("members.access_for", "Name", memberLabel(m)) } class="mt-2 space-y-2 rounded-md border border-border p-3">
+			@ProjectGrantFields(memberGrantCopy(d), *m.Grant, "")
+			<button type="submit" class="rounded-md border border-border bg-card px-2.5 py-1 text-sm font-medium text-foreground shadow-sm hover:bg-muted">{ d.Tr("members.save_access") }</button>
+		</form>
+	</details>
+	<p class="hidden basis-full text-end text-xs text-muted-foreground group-has-[option[value=owner]:checked]/access:block">{ d.Tr("members.access_owner") }</p>
+}
+
+// GrantCopy is the text of a project-access fieldset; Empty, when set, replaces the picker in an org with no projects.
+type GrantCopy struct {
+	Legend, All, Some, Hint, Empty string
+}
+
+func memberGrantCopy(d web.LayoutData) GrantCopy {
+	return GrantCopy{Legend: d.Tr("members.access_label"), All: d.Tr("members.access_all"), Some: d.Tr("members.access_some"), Hint: d.Tr("members.access_hint"), Empty: d.Tr("members.access_no_projects")}
+}
+
+// ProjectGrantFields is the "All projects" / "Only these projects" picker shared by invites, member edit and API keys.
+templ ProjectGrantFields(c GrantCopy, g GrantView, listID string) {
+	<fieldset class="group">
+		<legend class="block text-sm font-medium text-foreground/90">{ c.Legend }</legend>
+		if len(g.Options) == 0 && c.Empty != "" {
+			<input type="hidden" name="grant" value="all"/>
+			<p class="mt-1 text-xs text-muted-foreground">{ c.Empty }</p>
+		} else {
+			<div class="mt-1.5 flex flex-wrap gap-2">
+				<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+					<input type="radio" name="grant" value="all" checked?={ g.All } class="h-3.5 w-3.5"/>
+					<span>{ c.All }</span>
+				</label>
+				<label class="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+					<input type="radio" name="grant" value="selected" checked?={ !g.All } class="h-3.5 w-3.5"/>
+					<span>{ c.Some }</span>
+				</label>
+			</div>
+			@ProjectGrantList(listID, g.Options)
+			<p class="mt-1 text-xs text-muted-foreground group-has-[input[value=all]:checked]:hidden">{ c.Hint }</p>
+		}
+	</fieldset>
+}
+
+// ProjectGrantList is the checkbox list of ProjectGrantFields; the personal token form swaps it by id when its org changes.
+templ ProjectGrantList(id string, options []GrantOption) {
+	<div
+		if id != "" {
+			id={ id }
+		}
+		class="mt-2 flex flex-wrap gap-2 group-has-[input[value=all]:checked]:hidden"
+	>
+		for _, o := range options {
+			<label class="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-full border border-border px-3 py-1 text-sm text-foreground/90 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
+				<input type="checkbox" name="project_ids" value={ o.ID } checked?={ o.Checked } class="h-3.5 w-3.5 shrink-0 rounded border-border"/>
+				<span class="max-w-[14rem] truncate">{ o.Name }</span>
+			</label>
+		}
+	</div>
 }
 
 templ MembersLayout(d web.LayoutData, v MembersView) {

@@ -95,7 +95,7 @@ func newCustomService(t *testing.T, store invite.Store, roles *fakes.Roles) *inv
 	unf := noopUnexpected(&unex)
 	send := invite.NewSendWorkflow(store, nopMailer{}, "https://example.test", newTestLogger(), unf)
 	accept := invite.NewAcceptWorkflow(store, newFakeUsers(), newFakeOrgs(), newTestLogger(), unf)
-	return invite.NewService(store, send, accept, true, newTestLogger(), unf, invite.WithPermissions(authz.NewResolver(roles)))
+	return invite.NewService(store, send, accept, true, newTestLogger(), unf, invite.WithPermissions(authz.NewResolver(roles)), invite.WithMembers(fakes.UnrestrictedMembers{}))
 }
 
 func TestInvite_SendCustomRole(t *testing.T) {
@@ -152,4 +152,24 @@ func TestInvite_AcceptByExistingOwnerKeepsMembership(t *testing.T) {
 	stored, err := store.ByID(seedCtx(orgID), inv.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stored.UsedAt, "the invite is marked used")
+}
+
+func TestInvite_AcceptCopiesGrantAndRoleID(t *testing.T) {
+	store, orgs := fakes.NewInvite(), &txOrgs{fakeOrgs: newFakeOrgs()}
+	orgID, roleID, p1 := uuid.New(), uuid.New(), uuid.New()
+	raw := "raw-" + uuid.NewString()
+	inv, err := invite.New(invite.NewParams{OrgID: orgID, Email: "gil@example.com", Role: invite.RoleCustom, RoleID: roleID, TTL: time.Hour, Token: raw})
+	require.NoError(t, err)
+	inv.AllProjects, inv.ProjectIDs = false, []uuid.UUID{p1}
+	require.NoError(t, store.Save(context.Background(), inv))
+	orgs.byID[orgID] = &invite.OrgRef{ID: orgID, Slug: "acme", Name: "Acme"}
+
+	wf := invite.NewAcceptWorkflow(store, newFakeUsers(), orgs, newTestLogger(), noopUnexpected(nil), invite.WithUnitOfWork(orgs.uow))
+	res, err := wf.Execute(context.Background(), invite.AcceptRequest{Token: raw, Email: "gil@example.com"})
+	require.NoError(t, err)
+	m, err := orgs.MembershipOf(context.Background(), orgID, res.User.ID)
+	require.NoError(t, err)
+	require.Equal(t, roleID, m.RoleID)
+	require.False(t, m.AllProjects, "the accepted membership keeps the invite's restriction")
+	require.Equal(t, []uuid.UUID{p1}, m.ProjectIDs)
 }

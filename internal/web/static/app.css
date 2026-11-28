@@ -971,6 +971,10 @@ video {
   max-width: 12rem;
 }
 
+.max-w-\[14rem\] {
+  max-width: 14rem;
+}
+
 .max-w-\[86vw\] {
   max-width: 86vw;
 }
@@ -1563,6 +1567,10 @@ video {
   text-align: start;
 }
 
+.text-end {
+  text-align: end;
+}
+
 .align-top {
   vertical-align: top;
 }
@@ -2039,7 +2047,15 @@ video {
   background-color: hsl(var(--primary) / 0.1);
 }
 
+.group\/access:has(option[value=owner]:checked) .group-has-\[option\[value\=owner\]\:checked\]\/access\:block {
+  display: block;
+}
+
 .group:has(input[value=all]:checked) .group-has-\[input\[value\=all\]\:checked\]\:hidden {
+  display: none;
+}
+
+.group\/access:has(option[value=owner]:checked) .group-has-\[option\[value\=owner\]\:checked\]\/access\:hidden {
   display: none;
 }
 

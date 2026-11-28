@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/mailer"
 	"altalune.id/opensheet/nanoid"
@@ -28,6 +30,8 @@ type SendRequest struct {
 	Role   Role
 	RoleID uuid.UUID
 	TTL    time.Duration
+	// Grant names the projects the invitee reaches; nil reaches every project.
+	Grant *org.ProjectGrant
 }
 
 // SendWorkflow issues an invite: mints a token, persists the aggregate, and emails the raw token in an accept URL.
@@ -112,6 +116,9 @@ func (w *SendWorkflow) Execute(ctx context.Context, req SendRequest) (*Invite, e
 	if err != nil {
 		span.RecordError(err)
 		return nil, err
+	}
+	if req.Grant != nil {
+		inv.AllProjects, inv.ProjectIDs = req.Grant.All, slices.Clone(req.Grant.ProjectIDs)
 	}
 	if err := w.invites.Save(ctx, inv); err != nil {
 		span.RecordError(err)

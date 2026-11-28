@@ -61,6 +61,9 @@ type MembershipRef struct {
 	UserID uuid.UUID
 	Role   string
 	RoleID uuid.UUID
+	// AllProjects reaches every project in the org; when false only ProjectIDs are reached.
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // ProjectRef is the projection of a project record.
@@ -81,6 +84,9 @@ type InviteRef struct {
 	RoleID     uuid.UUID
 	ExpiresAt  time.Time
 	AcceptedAt *time.Time
+	// AllProjects reaches every project in the org; when false only ProjectIDs are reached.
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // OnboardResult reports the org and project the caller should switch into.
@@ -162,7 +168,7 @@ func (w *OnboardWorkflow) onboardSelfhosted(ctx context.Context, userID uuid.UUI
 	}
 
 	if _, mErr := w.orgs.MembershipOf(tenant.WithOrg(ctx, o.ID), o.ID, userID); mErr == nil {
-		projectID, err := w.pickProject(ctx, o.ID)
+		projectID, err := w.pickProject(ctx, o.ID, userID)
 		if err != nil {
 			return OnboardResult{}, err
 		}
@@ -180,7 +186,7 @@ func (w *OnboardWorkflow) onboardSelfhosted(ctx context.Context, userID uuid.UUI
 	if err := w.acceptInvite(ctx, inv, userID); err != nil {
 		return OnboardResult{}, err
 	}
-	projectID, err := w.pickProject(ctx, o.ID)
+	projectID, err := w.pickProject(ctx, o.ID, userID)
 	if err != nil {
 		return OnboardResult{}, err
 	}
@@ -193,7 +199,7 @@ func (w *OnboardWorkflow) onboardCloud(ctx context.Context, userID uuid.UUID, us
 		return OnboardResult{}, w.unexpected(ctx, "user.Onboard: list memberships", err)
 	}
 	if len(memberships) > 0 {
-		projectID, err := w.pickProject(ctx, memberships[0].ID)
+		projectID, err := w.pickProject(ctx, memberships[0].ID, userID)
 		if err != nil {
 			return OnboardResult{}, err
 		}
@@ -209,7 +215,7 @@ func (w *OnboardWorkflow) onboardCloud(ctx context.Context, userID uuid.UUID, us
 	if err := w.acceptInvite(ctx, inv, userID); err != nil {
 		return OnboardResult{}, err
 	}
-	projectID, err := w.pickProject(ctx, inv.OrgID)
+	projectID, err := w.pickProject(ctx, inv.OrgID, userID)
 	if err != nil {
 		return OnboardResult{}, err
 	}
@@ -234,7 +240,7 @@ func (w *OnboardWorkflow) acceptInvite(ctx context.Context, inv *InviteRef, user
 		if member {
 			return nil
 		}
-		m := &MembershipRef{OrgID: inv.OrgID, UserID: userID, Role: inv.Role, RoleID: inv.RoleID}
+		m := &MembershipRef{OrgID: inv.OrgID, UserID: userID, Role: inv.Role, RoleID: inv.RoleID, AllProjects: inv.AllProjects, ProjectIDs: inv.ProjectIDs}
 		if err := w.orgs.SaveMembership(tctx, m); err != nil {
 			return w.unexpected(ctx, "user.Onboard: save membership", err)
 		}
@@ -262,15 +268,20 @@ func (w *OnboardWorkflow) findAnyPendingInvite(ctx context.Context, userEmail st
 }
 
 // SECURITY: the caller is mid-login and holds no tenant scope yet, so bind to the org being joined.
-func (w *OnboardWorkflow) pickProject(ctx context.Context, orgID uuid.UUID) (uuid.UUID, error) {
-	list, err := w.projects.ListByOrg(tenant.WithOrg(ctx, orgID), orgID)
+func (w *OnboardWorkflow) pickProject(ctx context.Context, orgID, userID uuid.UUID) (uuid.UUID, error) {
+	scoped := tenant.WithOrg(ctx, orgID)
+	m, err := w.orgs.MembershipOf(scoped, orgID, userID)
+	if IsMembershipMissingError(err) {
+		return uuid.Nil, nil
+	}
+	if err != nil {
+		return uuid.Nil, w.unexpected(ctx, "user.Onboard: membership", err)
+	}
+	list, err := w.projects.ListByOrg(scoped, orgID)
 	if err != nil {
 		return uuid.Nil, w.unexpected(ctx, "user.Onboard: list projects", err)
 	}
-	if len(list) == 0 {
-		return uuid.Nil, nil
-	}
-	return list[0].ID, nil
+	return firstReachable(m, list), nil
 }
 
 // SECURITY: as pickProject — no tenant scope exists until the org is chosen.

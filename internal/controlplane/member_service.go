@@ -33,15 +33,24 @@ func (s *MemberService) ListMembers(ctx context.Context, _ *connect.Request[orgv
 	if err != nil {
 		return nil, err
 	}
+	// SECURITY: which projects a restricted member reaches is shown only to a caller who manages members org-wide.
+	manager := authz.CanOrgWide(ctx, authz.MembersWrite) == nil
 	resp := &orgv1.ListMembersResponse{Members: make([]*orgv1.Member, 0, len(items))}
 	for _, m := range items {
-		resp.Members = append(resp.Members, &orgv1.Member{
-			UserId:   m.UserID.String(),
-			Email:    m.Email,
-			Name:     m.Name,
-			Role:     string(m.Role),
-			JoinedAt: timestamppb.New(m.CreatedAt),
-		})
+		pb := &orgv1.Member{
+			UserId:      m.UserID.String(),
+			Email:       m.Email,
+			Name:        m.Name,
+			Role:        string(m.Role),
+			JoinedAt:    timestamppb.New(m.CreatedAt),
+			AllProjects: m.AllProjects || m.Role == org.RoleOwner,
+		}
+		if manager && !pb.AllProjects {
+			for _, id := range m.ProjectIDs {
+				pb.ProjectIds = append(pb.ProjectIds, id.String())
+			}
+		}
+		resp.Members = append(resp.Members, pb)
 	}
 	return connect.NewResponse(resp), nil
 }

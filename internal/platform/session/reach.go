@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReachesProject reports whether p may act inside projectID of orgID. SECURITY: the one rule every surface asks; a person reaches every project of their org, a key only the projects it was granted or all of them.
+// ReachesProject reports whether p may act inside projectID of orgID. SECURITY: the one rule every surface asks; the member grant must cover the project, and a key must also name it or reach all projects.
 func (p Principal) ReachesProject(orgID, projectID uuid.UUID) bool {
-	if orgID == uuid.Nil || orgID != p.ActiveOrgID {
+	if orgID == uuid.Nil || orgID != p.ActiveOrgID || !p.Member.Reaches(orgID, projectID) {
 		return false
 	}
 	if p.Source != SourceAPIKey || p.AllProjects {
@@ -28,4 +28,12 @@ func (p Principal) ReachesResource(orgID, projectID, resourceID uuid.UUID) bool 
 		return false
 	}
 	return len(p.ResourceIDs) == 0 || slices.Contains(p.ResourceIDs, resourceID)
+}
+
+// Reaches reports whether g covers projectID of orgID.
+func (g Grant) Reaches(orgID, projectID uuid.UUID) bool {
+	if orgID == uuid.Nil || g.OrgID != orgID {
+		return false
+	}
+	return g.All || slices.Contains(g.ProjectIDs, projectID)
 }

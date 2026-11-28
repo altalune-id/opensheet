@@ -105,17 +105,22 @@ type Membership struct {
 	CreatedAt time.Time
 	// System marks a bootstrap-owned membership that cannot be removed.
 	System bool
+	// AllProjects reaches every project in the org; when false only ProjectIDs are reached.
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // MemberProfile is a Membership joined with the member's User identity fields.
 type MemberProfile struct {
-	UserID    uuid.UUID
-	Email     string
-	Name      string
-	Role      Role
-	RoleID    uuid.UUID
-	CreatedAt time.Time
-	System    bool
+	UserID      uuid.UUID
+	Email       string
+	Name        string
+	Role        Role
+	RoleID      uuid.UUID
+	CreatedAt   time.Time
+	System      bool
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // NewMembership constructs a Membership after validating the role.
@@ -124,10 +129,11 @@ func NewMembership(orgID, userID uuid.UUID, role Role) (*Membership, error) {
 		return nil, &InvalidRoleError{Role: string(role)}
 	}
 	return &Membership{
-		OrgID:     orgID,
-		UserID:    userID,
-		Role:      role,
-		CreatedAt: time.Now().UTC(),
+		OrgID:       orgID,
+		UserID:      userID,
+		Role:        role,
+		CreatedAt:   time.Now().UTC(),
+		AllProjects: true,
 	}, nil
 }
 

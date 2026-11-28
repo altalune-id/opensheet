@@ -203,7 +203,7 @@ func newTenantFixture(t *testing.T) *tenantFixture {
 
 func (f *tenantFixture) join(t *testing.T, userID, orgID uuid.UUID) {
 	t.Helper()
-	require.NoError(t, f.orgs.SaveMembership(t.Context(), &user.MembershipRef{OrgID: orgID, UserID: userID, Role: "owner"}))
+	require.NoError(t, f.orgs.SaveMembership(t.Context(), &user.MembershipRef{OrgID: orgID, UserID: userID, Role: "owner", AllProjects: true}))
 }
 
 func seededLocalUser(t *testing.T, issuer, subject string) (*fakes.User, *user.User) {
@@ -338,4 +338,23 @@ func TestAuthenticator_IsAdminComesFromTheLocalRecordNotTheToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got.IsAdmin, "a token claiming admin must not make the principal an admin")
 	assert.Equal(t, f.orgA, got.ActiveOrgID, "the honored membership must still resolve")
+}
+
+func TestAuthenticator_DefaultProjectInsideGrant(t *testing.T) {
+	const issuer, subject = "https://idp.example", "restricted"
+	store, local := seededLocalUser(t, issuer, subject)
+	f := newTenantFixture(t)
+	granted := uuid.New()
+	require.NoError(t, f.projects.Save(t.Context(), &user.ProjectRef{ID: granted, OrgID: f.orgA, Slug: "g", Name: "G"}))
+	require.NoError(t, f.orgs.SaveMembership(t.Context(), &user.MembershipRef{OrgID: f.orgA, UserID: local.ID, Role: "member", ProjectIDs: []uuid.UUID{granted}}))
+
+	a := user.NewAuthenticator(
+		stubAuthenticator{p: session.Principal{Source: session.SourceToken, IDPIssuer: issuer, IDPSubject: subject}},
+		store,
+		user.WithTenantResolution(f.orgs, f.projects),
+	)
+	got, err := a.Authenticate(t.Context(), "raw-credential")
+	require.NoError(t, err)
+	assert.Equal(t, f.orgA, got.ActiveOrgID)
+	assert.Equal(t, granted, got.ActiveProjectID, "the default project is the first one the grant reaches, not the org's first")
 }

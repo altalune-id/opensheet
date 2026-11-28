@@ -46,6 +46,9 @@ type MembershipRef struct {
 	UserID uuid.UUID
 	Role   Role
 	RoleID uuid.UUID
+	// AllProjects reaches every project in the org; when false only ProjectIDs are reached.
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // AcceptRequest is the input to AcceptWorkflow.Execute.
@@ -147,7 +150,7 @@ func (w *AcceptWorkflow) Execute(ctx context.Context, req AcceptRequest) (*Accep
 
 	// tenant-scope the writes to the invite's org — the acceptor isn't yet a member of any tenant so ctx has no tenant.Context on it.
 	tctx := tenant.Into(ctx, tenant.Context{OrgID: inv.OrgID, UserID: usr.ID})
-	m := &MembershipRef{OrgID: inv.OrgID, UserID: usr.ID, Role: inv.Role, RoleID: inv.RoleID}
+	m := &MembershipRef{OrgID: inv.OrgID, UserID: usr.ID, Role: inv.Role, RoleID: inv.RoleID, AllProjects: inv.AllProjects, ProjectIDs: inv.ProjectIDs}
 	err = w.uow(tctx, func(tctx context.Context) error {
 		existing, err := w.orgs.MembershipOf(tctx, inv.OrgID, usr.ID)
 		switch {

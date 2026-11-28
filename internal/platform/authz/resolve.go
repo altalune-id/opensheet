@@ -38,7 +38,7 @@ func (r *Resolver) Bind(ctx context.Context, p session.Principal, tc tenant.Cont
 	for _, h := range g.perms {
 		p.Held = append(p.Held, string(h))
 	}
-	p.HeldOrg, p.HeldOrgID, p.HeldRole = g.orgName, tc.OrgID, g.role
+	p.HeldOrg, p.HeldOrgID, p.HeldRole, p.Member = g.orgName, tc.OrgID, g.role, g.member
 	if p.Source != session.SourceAPIKey {
 		p.ActiveOrgID = tc.OrgID
 	}
@@ -57,6 +57,7 @@ type grant struct {
 	perms   []Permission
 	role    string
 	orgName string
+	member  session.Grant
 }
 
 func (r *Resolver) held(ctx context.Context, p session.Principal, orgID uuid.UUID) (grant, error) {
@@ -80,7 +81,7 @@ func (r *Resolver) held(ctx context.Context, p session.Principal, orgID uuid.UUI
 // SECURITY: a key acts for its creator, so it holds no more than the creator's current role; a key with no recorded creator holds what its scopes admit.
 func (r *Resolver) keyRole(ctx context.Context, p session.Principal, orgID uuid.UUID) (grant, error) {
 	if p.KeyOwnerID == uuid.Nil {
-		return grant{perms: all()}, nil
+		return grant{perms: all(), member: session.Grant{OrgID: orgID, All: true}}, nil
 	}
 	return r.roleOf(ctx, orgID, p.KeyOwnerID)
 }
@@ -89,7 +90,7 @@ func (r *Resolver) roleOf(ctx context.Context, orgID, userID uuid.UUID) (grant, 
 	if userID == uuid.Nil {
 		return grant{}, &authn.UnauthorizedError{}
 	}
-	role, roleID, name, _, err := r.src.RoleOf(ctx, orgID, userID)
+	role, roleID, name, member, err := r.src.RoleOf(ctx, orgID, userID)
 	if err != nil {
 		return grant{}, &authn.UnavailableError{Cause: fmt.Errorf("authz: role of %s: %w", userID, err)}
 	}
@@ -100,7 +101,10 @@ func (r *Resolver) roleOf(ctx context.Context, orgID, userID uuid.UUID) (grant, 
 	if err != nil {
 		return grant{}, &authn.UnavailableError{Cause: fmt.Errorf("authz: permissions of %s: %w", role, err)}
 	}
-	return grant{perms: perms, role: role, orgName: name}, nil
+	if role == "owner" {
+		member = session.Grant{OrgID: orgID, All: true}
+	}
+	return grant{perms: perms, role: role, orgName: name, member: member}, nil
 }
 
 // SECURITY: a token or key holds a permission only when one of its scopes admits it, and never a console permission.

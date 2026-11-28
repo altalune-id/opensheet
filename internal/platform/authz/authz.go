@@ -98,9 +98,19 @@ func boundPrincipal(ctx context.Context) (session.Principal, bool) {
 	return pr, err == nil && tc.OrgID == pr.HeldOrgID && pr.HeldOrgID != uuid.Nil
 }
 
-// CanOrgWide is Can plus a grant that covers every project of the org.
+// CanOrgWide is Can plus a grant that covers every project of the org. SECURITY: a restricted member or a selected-projects key holds its org-level permissions in no project at all.
 func CanOrgWide(ctx context.Context, p Permission) error {
-	return Can(ctx, p)
+	if err := Can(ctx, p); err != nil {
+		return err
+	}
+	if sys, _ := ctx.Value(systemKey{}).(bool); sys {
+		return nil
+	}
+	pr := session.PrincipalFrom(ctx)
+	if pr.Member.All && pr.Member.OrgID == pr.HeldOrgID && (pr.Source != session.SourceAPIKey || pr.AllProjects) {
+		return nil
+	}
+	return &DeniedError{Permission: p, Org: pr.HeldOrg, Side: SideRole, Scopes: slices.Clone(pr.Scopes)}
 }
 
 // Held returns the permissions the principal bound on ctx holds.
@@ -144,4 +154,13 @@ func toPermissions(held []string) []Permission {
 		out = append(out, Permission(h))
 	}
 	return out
+}
+
+// ReachesProject reports whether the principal bound on ctx may act inside projectID of orgID; the system reaches every project.
+func ReachesProject(ctx context.Context, orgID, projectID uuid.UUID) bool {
+	if sys, _ := ctx.Value(systemKey{}).(bool); sys {
+		return true
+	}
+	pr, bound := boundPrincipal(ctx)
+	return bound && pr.ReachesProject(orgID, projectID)
 }

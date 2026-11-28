@@ -159,7 +159,7 @@ func (h *GoogleConnectHandler) stillMember(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	proj, err := h.Projects.ByID(ctx, target.ProjectID)
-	if err != nil || proj.OrgID != target.OrgID {
+	if err != nil || proj.OrgID != target.OrgID || !session.PrincipalFrom(ctx).ReachesProject(target.OrgID, target.ProjectID) {
 		h.ErrorPage(w, r, http.StatusNotFound, "Project not found", "No project with that id in this organization.", err)
 		return false
 	}

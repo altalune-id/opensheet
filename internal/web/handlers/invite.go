@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"altalune.id/opensheet/internal/i18n"
 	"altalune.id/opensheet/internal/invite"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authz"
@@ -38,8 +39,23 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	h.renderInvites(w, sc, http.StatusOK, inviteForm{grant: org.ProjectGrant{All: true}})
+}
+
+type inviteForm struct {
+	email, role string
+	grant       org.ProjectGrant
+	err         error
+	msgKey      string
+}
+
+func (h *InviteHandler) renderInvites(w http.ResponseWriter, sc OrgScope, status int, f inviteForm) {
 	o, r := sc.org, sc.req
-	view := templates.InvitesView{OrgSlug: o.Slug, CanManage: holds(r, authz.MembersWrite), Disabled: !h.Caps.InvitesEnabled}
+	view := templates.InvitesView{OrgSlug: o.Slug, CanManage: authz.CanOrgWide(r.Context(), authz.MembersWrite) == nil, Disabled: !h.Caps.InvitesEnabled, Email: f.email, Role: f.role}
+	if f.msgKey != "" {
+		view.Error = i18n.TranslatorFrom(r.Context()).T(f.msgKey)
+		view.ErrorCode = ErrorRef(f.err)
+	}
 	if view.CanManage {
 		items, err := h.Invites.ListPending(r.Context())
 		if err != nil {
@@ -50,8 +66,15 @@ func (h *InviteHandler) GetList(w http.ResponseWriter, r *http.Request) {
 		custom := h.customRoles(r)
 		view.Invites = inviteRows(items, custom)
 		view.CustomRoles = grantableCustomRoles(r, custom)
+		options, err := h.grantOptions(r, o.ID)
+		if err != nil {
+			h.LogErr("web invite: grant projects", err)
+			h.ErrorPage(w, r, http.StatusInternalServerError, "List failed", "Could not load invites.", err)
+			return
+		}
+		view.Grant = grantView(f.grant.All, f.grant.ProjectIDs, options)
 	}
-	Render(w, r, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", o.Slug, "invites"), view))
+	RenderStatus(w, r, status, templates.InvitesLayout(h.LayoutForOrg(r, "Invites", o.Slug, "invites"), view))
 }
 
 // PostSend handles POST /orgs/{slug}/invites.
@@ -71,13 +94,30 @@ func (h *InviteHandler) PostSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.TrimSpace(r.PostForm.Get("email"))
-	role, roleID := parseInviteRole(strings.TrimSpace(r.PostForm.Get("role")))
+	roleValue := strings.TrimSpace(r.PostForm.Get("role"))
+	role, roleID := parseInviteRole(roleValue)
 	if role == "" {
 		h.ErrorPage(w, r, http.StatusBadRequest, "Bad role", "Role must be admin, member or a custom role.")
 		return
 	}
-	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role, RoleID: roleID}); err != nil {
+	grant := memberGrant(r)
+	if _, err := h.Invites.Send(r.Context(), invite.SendRequest{Email: email, Role: role, RoleID: roleID, Grant: &grant}); err != nil {
 		h.LogErr("web invite: send", err)
+		form := inviteForm{email: email, role: roleValue, grant: grant, err: err}
+		switch {
+		case org.IsProjectGrantEmptyError(err):
+			form.msgKey = "members.error.access_empty"
+			h.renderInvites(w, sc, http.StatusUnprocessableEntity, form)
+			return
+		case org.IsProjectGrantEscalationError(err):
+			form.msgKey = "members.error.access_escalation"
+			h.renderInvites(w, sc, http.StatusForbidden, form)
+			return
+		case org.IsProjectGrantConflictError(err):
+			form.msgKey = "members.access_owner"
+			h.renderInvites(w, sc, http.StatusUnprocessableEntity, form)
+			return
+		}
 		if authz.IsDeniedError(err) {
 			h.refuseRole(w, r, "invites.read_only", err)
 			return
@@ -238,10 +278,12 @@ func inviteRows(items []*invite.Invite, custom []*rolepkg.Role) []templates.Invi
 			role = name
 		}
 		out = append(out, templates.InviteRow{
-			ID:        i.ID.String(),
-			Email:     i.Email,
-			Role:      role,
-			ExpiresAt: i.ExpiresAt.Format(time.RFC3339),
+			ID:           i.ID.String(),
+			Email:        i.Email,
+			Role:         role,
+			ExpiresAt:    i.ExpiresAt.Format(time.RFC3339),
+			AllProjects:  i.AllProjects,
+			ProjectCount: len(i.ProjectIDs),
 		})
 	}
 	return out

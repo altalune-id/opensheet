@@ -19,6 +19,7 @@ import (
 	"altalune.id/opensheet/internal/platform/capabilities"
 	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/sheet"
+	"altalune.id/opensheet/internal/testutil/fakes"
 	"altalune.id/opensheet/internal/web/handlers"
 	"altalune.id/opensheet/internal/web/templates"
 )
@@ -30,6 +31,7 @@ type roleFixture struct {
 	owner  uuid.UUID
 	admin  uuid.UUID
 	member uuid.UUID
+	known  *fakes.OrgProjects
 }
 
 func newRoleFixture(t *testing.T) *roleFixture {
@@ -43,13 +45,16 @@ func newRoleFixture(t *testing.T) *roleFixture {
 		require.NoError(t, err)
 		require.NoError(t, f.OrgStore.SaveMembership(context.Background(), m))
 	}
-	_, err := f.Projects.Create(authz.AsSystem(setTenant(context.Background(), o.ID, owner)), o.ID, "alpha", "Alpha")
+	alpha, err := f.Projects.Create(authz.AsSystem(setTenant(context.Background(), o.ID, owner)), o.ID, "alpha", "Alpha")
 	require.NoError(t, err)
+	known := fakes.NewOrgProjects()
+	known.Add(o.ID, alpha.ID)
+	f.Orgs = org.NewService(f.OrgStore, f.Deps.Caps, discardLogger(), passthroughUnexpected(), fakes.UnitOfWork, org.WithProjects(known))
 	mux := http.NewServeMux()
 	handlers.NewOrgHandler(f.Deps, f.Orgs).Register(mux)
 	handlers.NewInviteHandler(f.Deps, f.Orgs, f.Invites).Register(mux)
 	handlers.NewProjectHandler(f.Deps, f.Projects).Register(mux)
-	return &roleFixture{handlerFixture: f, mux: mux, org: o, owner: owner, admin: admin, member: member}
+	return &roleFixture{handlerFixture: f, mux: mux, org: o, owner: owner, admin: admin, member: member, known: known}
 }
 
 func (x *roleFixture) do(t *testing.T, as uuid.UUID, method, target string, form url.Values) *httptest.ResponseRecorder {

@@ -3,6 +3,7 @@ package org
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,10 +18,12 @@ import (
 )
 
 type sqliteStore struct {
-	db      *sql.DB
-	orgs    *sqliteent.Orgs
-	members *sqliteent.Memberships
-	users   *sqliteent.Users
+	db         *sql.DB
+	orgs       *sqliteent.Orgs
+	members    *sqliteent.Memberships
+	grants     *sqliteent.MembershipProjects
+	grantsExpr sqlite.Expression
+	users      *sqliteent.Users
 }
 
 func newSQLiteStore(db *sql.DB, tablePrefix string) *sqliteStore {
@@ -28,7 +31,11 @@ func newSQLiteStore(db *sql.DB, tablePrefix string) *sqliteStore {
 		db:      db,
 		orgs:    sqliteent.NewOrgs(tablePrefix),
 		members: sqliteent.NewMemberships(tablePrefix),
-		users:   sqliteent.NewUsers(tablePrefix),
+		grants:  sqliteent.NewMembershipProjects(tablePrefix),
+		// SECURITY: SQLite has no RLS, so the org predicate is the only thing keeping another org's grant rows out.
+		grantsExpr: sqlite.Raw("COALESCE((SELECT json_group_array(o.project_id) FROM (SELECT g.project_id FROM " + tablePrefix +
+			"membership_projects g WHERE g.org_id = memberships.org_id AND g.membership_id = memberships.id ORDER BY g.created_at, g.project_id) o), '[]')"),
+		users: sqliteent.NewUsers(tablePrefix),
 	}
 }
 
@@ -65,12 +72,14 @@ func (r *sqliteOrgRow) toOrg() (*Org, error) {
 }
 
 type sqliteMembershipRow struct {
-	OrgID     string  `alias:"memberships.org_id"`
-	UserID    string  `alias:"memberships.user_id"`
-	Role      string  `alias:"memberships.role"`
-	RoleID    *string `alias:"memberships.role_id"`
-	CreatedAt string  `alias:"memberships.created_at"`
-	System    int64   `alias:"memberships.system"`
+	OrgID       string  `alias:"memberships.org_id"`
+	UserID      string  `alias:"memberships.user_id"`
+	Role        string  `alias:"memberships.role"`
+	RoleID      *string `alias:"memberships.role_id"`
+	CreatedAt   string  `alias:"memberships.created_at"`
+	System      int64   `alias:"memberships.system"`
+	AllProjects bool    `alias:"memberships.all_projects"`
+	ProjectIDs  string  `alias:"memberships.project_ids"`
 }
 
 func (r *sqliteMembershipRow) toMembership() (*Membership, error) {
@@ -90,24 +99,32 @@ func (r *sqliteMembershipRow) toMembership() (*Membership, error) {
 	if err != nil {
 		return nil, err
 	}
+	projectIDs := []uuid.UUID{}
+	if err := json.Unmarshal([]byte(r.ProjectIDs), &projectIDs); err != nil {
+		return nil, fmt.Errorf("org.sqlite: parse project_ids: %w", err)
+	}
 	return &Membership{
-		OrgID:     orgID,
-		UserID:    userID,
-		Role:      Role(r.Role),
-		RoleID:    roleID,
-		CreatedAt: ca,
-		System:    r.System != 0,
+		OrgID:       orgID,
+		UserID:      userID,
+		Role:        Role(r.Role),
+		RoleID:      roleID,
+		CreatedAt:   ca,
+		System:      r.System != 0,
+		AllProjects: r.AllProjects,
+		ProjectIDs:  projectIDs,
 	}, nil
 }
 
 type sqliteMemberProfileRow struct {
-	UserID    string  `alias:"memberships.user_id"`
-	Role      string  `alias:"memberships.role"`
-	RoleID    *string `alias:"memberships.role_id"`
-	CreatedAt string  `alias:"memberships.created_at"`
-	System    int64   `alias:"memberships.system"`
-	Email     string  `alias:"users.email"`
-	Name      string  `alias:"users.name"`
+	UserID      string  `alias:"memberships.user_id"`
+	Role        string  `alias:"memberships.role"`
+	RoleID      *string `alias:"memberships.role_id"`
+	CreatedAt   string  `alias:"memberships.created_at"`
+	System      int64   `alias:"memberships.system"`
+	Email       string  `alias:"users.email"`
+	Name        string  `alias:"users.name"`
+	AllProjects bool    `alias:"memberships.all_projects"`
+	ProjectIDs  string  `alias:"memberships.project_ids"`
 }
 
 func (r *sqliteMemberProfileRow) toProfile() (*MemberProfile, error) {
@@ -123,14 +140,20 @@ func (r *sqliteMemberProfileRow) toProfile() (*MemberProfile, error) {
 	if err != nil {
 		return nil, err
 	}
+	projectIDs := []uuid.UUID{}
+	if err := json.Unmarshal([]byte(r.ProjectIDs), &projectIDs); err != nil {
+		return nil, fmt.Errorf("org.sqlite: parse project_ids: %w", err)
+	}
 	return &MemberProfile{
-		UserID:    userID,
-		Email:     r.Email,
-		Name:      r.Name,
-		Role:      Role(r.Role),
-		RoleID:    roleID,
-		CreatedAt: ca,
-		System:    r.System != 0,
+		UserID:      userID,
+		Email:       r.Email,
+		Name:        r.Name,
+		Role:        Role(r.Role),
+		RoleID:      roleID,
+		CreatedAt:   ca,
+		System:      r.System != 0,
+		AllProjects: r.AllProjects,
+		ProjectIDs:  projectIDs,
 	}, nil
 }
 
@@ -204,7 +227,8 @@ func (s *sqliteStore) List(ctx context.Context, userID uuid.UUID) ([]*Org, error
 }
 
 func (s *sqliteStore) SaveMembership(ctx context.Context, m *Membership) error {
-	stmt := s.members.INSERT(s.members.AllColumns).
+	cols := sqlite.ColumnList{s.members.ID, s.members.OrgID, s.members.UserID, s.members.Role, s.members.CreatedAt, s.members.System, s.members.RoleID}
+	stmt := s.members.INSERT(cols).
 		VALUES(
 			uuid.New().String(),
 			m.OrgID.String(),
@@ -226,8 +250,91 @@ func (s *sqliteStore) SaveMembership(ctx context.Context, m *Membership) error {
 	return nil
 }
 
+func (s *sqliteStore) SetProjectGrant(ctx context.Context, orgID, userID uuid.UUID, g ProjectGrant) error {
+	tx, owned, err := s.txAcquire(ctx)
+	if err != nil {
+		return err
+	}
+	return s.endTx(tx, owned, s.setProjectGrant(ctx, tx, orgID, userID, g))
+}
+
+func (s *sqliteStore) setProjectGrant(ctx context.Context, tx *sql.Tx, orgID, userID uuid.UUID, g ProjectGrant) error {
+	byMember := s.members.OrgID.EQ(sqlite.String(orgID.String())).AND(s.members.UserID.EQ(sqlite.String(userID.String())))
+	res, err := s.members.UPDATE(s.members.AllProjects).SET(sqlite.Bool(g.All)).WHERE(byMember).ExecContext(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("org.sqlite: SetProjectGrant: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("org.sqlite: SetProjectGrant: RowsAffected: %w", err)
+	}
+	if n == 0 {
+		return &MembershipMissingError{OrgID: orgID.String(), UserID: userID.String()}
+	}
+	var row struct {
+		ID string `alias:"memberships.id"`
+	}
+	if err := sqlite.SELECT(s.members.ID).FROM(s.members).WHERE(byMember).QueryContext(ctx, tx, &row); err != nil {
+		return fmt.Errorf("org.sqlite: SetProjectGrant: read id: %w", err)
+	}
+	return s.syncGrants(ctx, tx, orgID, row.ID, g.ProjectIDs)
+}
+
+// SECURITY: SQLite has no RLS, so every statement names the membership's org and the composite foreign keys refuse another org's project.
+func (s *sqliteStore) syncGrants(ctx context.Context, tx *sql.Tx, orgID uuid.UUID, membershipID string, projectIDs []uuid.UUID) error {
+	keep := make([]sqlite.Expression, 0, len(projectIDs))
+	for _, id := range projectIDs {
+		keep = append(keep, sqlite.String(id.String()))
+	}
+	where := s.grants.OrgID.EQ(sqlite.String(orgID.String())).AND(s.grants.MembershipID.EQ(sqlite.String(membershipID)))
+	if len(keep) > 0 {
+		where = where.AND(s.grants.ProjectID.NOT_IN(keep...))
+	}
+	if _, err := s.grants.DELETE().WHERE(where).ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("org.sqlite: SetProjectGrant: prune grants: %w", err)
+	}
+	if len(projectIDs) == 0 {
+		return nil
+	}
+	now := sqliteent.SQLiteTime(time.Now().UTC())
+	ins := s.grants.INSERT(s.grants.AllColumns)
+	for _, id := range projectIDs {
+		ins = ins.VALUES(orgID.String(), membershipID, id.String(), now)
+	}
+	if _, err := ins.ON_CONFLICT(s.grants.MembershipID, s.grants.ProjectID).DO_NOTHING().ExecContext(ctx, tx); err != nil {
+		return fmt.Errorf("org.sqlite: SetProjectGrant: add grants: %w", err)
+	}
+	return nil
+}
+
+// NOTE: enrolls in the caller's unit of work, so a save never opens a second SQLite writer transaction.
+func (s *sqliteStore) txAcquire(ctx context.Context) (*sql.Tx, bool, error) {
+	if tx, ok := pdb.CurrentTx(ctx); ok {
+		return tx, false, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("org.sqlite: begin: %w", err)
+	}
+	return tx, true, nil
+}
+
+func (s *sqliteStore) endTx(tx *sql.Tx, owned bool, err error) error {
+	if !owned {
+		return err
+	}
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return fmt.Errorf("org.sqlite: commit: %w", cerr)
+	}
+	return nil
+}
+
 func (s *sqliteStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*Membership, error) {
-	stmt := sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
+	stmt := sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System, s.members.AllProjects, s.grantsExpr.AS("memberships.project_ids")).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String())).
 			AND(s.members.UserID.EQ(sqlite.String(userID.String())))).
@@ -243,7 +350,7 @@ func (s *sqliteStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUID)
 }
 
 func (s *sqliteStore) listMembersStmt(orgID uuid.UUID) sqlite.SelectStatement {
-	return sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
+	return sqlite.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System, s.members.AllProjects, s.grantsExpr.AS("memberships.project_ids")).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String()))).
 		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
@@ -275,6 +382,8 @@ func (s *sqliteStore) listMemberProfilesStmt(orgID uuid.UUID) sqlite.SelectState
 		s.members.System,
 		s.users.Email,
 		s.users.Name,
+		s.members.AllProjects,
+		s.grantsExpr.AS("memberships.project_ids"),
 	).
 		FROM(s.members.INNER_JOIN(s.users, s.users.ID.EQ(s.members.UserID))).
 		WHERE(s.members.OrgID.EQ(sqlite.String(orgID.String()))).

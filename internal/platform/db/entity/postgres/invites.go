@@ -6,16 +6,17 @@ import "github.com/go-jet/jet/v2/postgres"
 type Invites struct {
 	postgres.Table
 
-	ID         postgres.ColumnString
-	OrgID      postgres.ColumnString
-	Email      postgres.ColumnString
-	Role       postgres.ColumnString
-	TokenHash  postgres.ColumnString
-	ExpiresAt  postgres.ColumnTimestampz
-	AcceptedAt postgres.ColumnTimestampz
-	InvitedBy  postgres.ColumnString
-	RoleID     postgres.ColumnString
-	CreatedAt  postgres.ColumnTimestampz
+	ID          postgres.ColumnString
+	OrgID       postgres.ColumnString
+	Email       postgres.ColumnString
+	Role        postgres.ColumnString
+	TokenHash   postgres.ColumnString
+	ExpiresAt   postgres.ColumnTimestampz
+	AcceptedAt  postgres.ColumnTimestampz
+	InvitedBy   postgres.ColumnString
+	RoleID      postgres.ColumnString
+	CreatedAt   postgres.ColumnTimestampz
+	AllProjects postgres.ColumnBool
 
 	AllColumns postgres.ColumnList
 }
@@ -26,30 +27,32 @@ func NewInvites(schema, tablePrefix string) *Invites {
 		schema = "public"
 	}
 	var (
-		id         = postgres.StringColumn("id")
-		orgID      = postgres.StringColumn("org_id")
-		email      = postgres.StringColumn("email")
-		role       = postgres.StringColumn("role")
-		tokenHash  = postgres.StringColumn("token_hash")
-		expiresAt  = postgres.TimestampzColumn("expires_at")
-		acceptedAt = postgres.TimestampzColumn("accepted_at")
-		invitedBy  = postgres.StringColumn("invited_by")
-		roleID     = postgres.StringColumn("role_id")
-		createdAt  = postgres.TimestampzColumn("created_at")
-		all        = postgres.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID}
+		id          = postgres.StringColumn("id")
+		orgID       = postgres.StringColumn("org_id")
+		email       = postgres.StringColumn("email")
+		role        = postgres.StringColumn("role")
+		tokenHash   = postgres.StringColumn("token_hash")
+		expiresAt   = postgres.TimestampzColumn("expires_at")
+		acceptedAt  = postgres.TimestampzColumn("accepted_at")
+		invitedBy   = postgres.StringColumn("invited_by")
+		roleID      = postgres.StringColumn("role_id")
+		createdAt   = postgres.TimestampzColumn("created_at")
+		allProjects = postgres.BoolColumn("all_projects")
+		all         = postgres.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID, allProjects}
 	)
 	return &Invites{
-		Table:      postgres.NewTable(schema, tablePrefix+"invites", "invites", all...),
-		ID:         id,
-		OrgID:      orgID,
-		Email:      email,
-		Role:       role,
-		TokenHash:  tokenHash,
-		ExpiresAt:  expiresAt,
-		AcceptedAt: acceptedAt,
-		InvitedBy:  invitedBy,
-		CreatedAt:  createdAt,
-		RoleID:     roleID,
-		AllColumns: all,
+		Table:       postgres.NewTable(schema, tablePrefix+"invites", "invites", all...),
+		ID:          id,
+		OrgID:       orgID,
+		Email:       email,
+		Role:        role,
+		TokenHash:   tokenHash,
+		ExpiresAt:   expiresAt,
+		AcceptedAt:  acceptedAt,
+		InvitedBy:   invitedBy,
+		CreatedAt:   createdAt,
+		RoleID:      roleID,
+		AllProjects: allProjects,
+		AllColumns:  all,
 	}
 }

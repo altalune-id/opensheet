@@ -50,6 +50,9 @@ type Invite struct {
 	ExpiresAt time.Time
 	UsedAt    *time.Time
 	CreatedAt time.Time
+	// AllProjects reaches every project in the org; when false only ProjectIDs are reached.
+	AllProjects bool
+	ProjectIDs  []uuid.UUID
 }
 
 // NewParams is the input to New.
@@ -79,14 +82,15 @@ func New(p NewParams) (*Invite, error) {
 		now = now.UTC()
 	}
 	return &Invite{
-		ID:        uuid.Must(uuid.NewV7()),
-		OrgID:     p.OrgID,
-		Email:     email,
-		Role:      p.Role,
-		RoleID:    p.RoleID,
-		TokenHash: HashToken(p.Token),
-		ExpiresAt: now.Add(p.TTL),
-		CreatedAt: now,
+		ID:          uuid.Must(uuid.NewV7()),
+		OrgID:       p.OrgID,
+		Email:       email,
+		Role:        p.Role,
+		RoleID:      p.RoleID,
+		TokenHash:   HashToken(p.Token),
+		ExpiresAt:   now.Add(p.TTL),
+		CreatedAt:   now,
+		AllProjects: true,
 	}, nil
 }
 

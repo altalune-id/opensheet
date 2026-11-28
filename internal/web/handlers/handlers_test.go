@@ -1218,7 +1218,7 @@ func TestInviteHandler_PostSend_HappyPath(t *testing.T) {
 	_ = o
 
 	sendWorkflow := invite.NewSendWorkflow(f.InvStore, nopMailer{}, "http://localhost", discardLogger(), passthroughUnexpected())
-	invites := invite.NewService(f.InvStore, sendWorkflow, nil, true, discardLogger(), passthroughUnexpected())
+	invites := invite.NewService(f.InvStore, sendWorkflow, nil, true, discardLogger(), passthroughUnexpected(), invite.WithMembers(fakes.UnrestrictedMembers{}))
 
 	h := handlers.NewInviteHandler(f.Deps, f.Orgs, invites)
 	mux := http.NewServeMux()

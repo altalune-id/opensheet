@@ -61,7 +61,7 @@ func (s *postgresStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUI
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
+	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System, s.members.AllProjects, s.grantsExpr.AS("memberships.project_ids")).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID)).
 			AND(s.members.UserID.EQ(postgres.UUID(userID)))).
@@ -73,7 +73,7 @@ func (s *postgresStore) MembershipOf(ctx context.Context, orgID, userID uuid.UUI
 		}
 		return nil, fmt.Errorf("org.postgres: MembershipOf: %w", err)
 	}
-	return row.toMembership(), nil
+	return row.toMembership()
 }
 
 func (s *postgresStore) LockOrg(ctx context.Context, orgID uuid.UUID) error {
@@ -102,7 +102,7 @@ func (s *postgresStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Me
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System).
+	stmt := postgres.SELECT(s.members.OrgID, s.members.UserID, s.members.Role, s.members.RoleID, s.members.CreatedAt, s.members.System, s.members.AllProjects, s.grantsExpr.AS("memberships.project_ids")).
 		FROM(s.members).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID))).
 		ORDER_BY(s.members.CreatedAt.ASC(), s.members.UserID.ASC())
@@ -112,7 +112,11 @@ func (s *postgresStore) ListMembers(ctx context.Context, orgID uuid.UUID) ([]*Me
 	}
 	out := make([]*Membership, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toMembership())
+		m, err := rows[i].toMembership()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
 	}
 	return out, nil
 }
@@ -133,6 +137,8 @@ func (s *postgresStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID)
 		s.members.System,
 		s.users.Email,
 		s.users.Name,
+		s.members.AllProjects,
+		s.grantsExpr.AS("memberships.project_ids"),
 	).
 		FROM(s.members.INNER_JOIN(s.users, s.users.ID.EQ(s.members.UserID))).
 		WHERE(s.members.OrgID.EQ(postgres.UUID(orgID))).
@@ -143,7 +149,11 @@ func (s *postgresStore) ListMemberProfiles(ctx context.Context, orgID uuid.UUID)
 	}
 	out := make([]*MemberProfile, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toProfile())
+		p, err := rows[i].toProfile()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }

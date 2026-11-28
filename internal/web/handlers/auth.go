@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -41,9 +42,6 @@ func NewAuthHandler(d Deps, authSvc *auth.Service, users *user.Service, orgs *or
 }
 
 func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Principal) session.Principal {
-	if p.ActiveOrgID != [16]byte{} && p.ActiveProjectID != [16]byte{} {
-		return p
-	}
 	if h.Orgs == nil {
 		return p
 	}
@@ -66,13 +64,16 @@ func (h *AuthHandler) resolveActiveTenant(ctx context.Context, p session.Princip
 		return p
 	}
 	projects, err := h.Projects.List(tctx, p.ActiveOrgID)
-	if err != nil || len(projects) == 0 {
-		if err != nil {
-			h.LogErr("web auth: resolve projects", err)
-		}
+	if err != nil {
+		h.LogErr("web auth: resolve projects", err)
 		return p
 	}
-	if p.ActiveProjectID == [16]byte{} {
+	// SECURITY: a remembered project outside the grant is treated as unset, so sign-in never lands on a project the person cannot open.
+	if slices.ContainsFunc(projects, func(pr *project.Project) bool { return pr.ID == p.ActiveProjectID }) {
+		return p
+	}
+	p.ActiveProjectID = uuid.Nil
+	if len(projects) > 0 {
 		p.ActiveProjectID = projects[0].ID
 	}
 	return p

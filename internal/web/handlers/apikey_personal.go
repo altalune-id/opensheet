@@ -35,7 +35,7 @@ func (h *APIKeyHandler) GetPersonalTokenProjects(w http.ResponseWriter, r *http.
 		h.listFailed(w, sc.req, err)
 		return
 	}
-	Render(w, sc.req, templates.APIKeyGrantProjects(h.OrgFragmentBase(sc), options))
+	Render(w, sc.req, templates.ProjectGrantList("apikey-grant-projects", options))
 }
 
 // PostPersonalTokenCreate mints a personal access token in the org the form names.

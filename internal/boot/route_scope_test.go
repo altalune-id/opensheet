@@ -104,6 +104,7 @@ func probeRoutes() []probeRoute {
 		{http.MethodPost, "/settings/tokens/" + org + "/" + id + "/revoke", url.Values{}},
 		{http.MethodPost, base + "/members/" + id + "/remove", url.Values{}},
 		{http.MethodPost, base + "/members/" + id + "/role", url.Values{"role": {"member"}}},
+		{http.MethodPost, base + "/members/" + id + "/projects", url.Values{"grant": {"all"}}},
 		{http.MethodPost, base + "/projects", url.Values{"slug": {"probe-new-project"}, "name": {"Probe New Project"}}},
 		{http.MethodPost, pbase + "/rename", url.Values{"name": {"Renamed"}}},
 		{http.MethodPost, pbase + "/credentials", url.Values{"name": {"Probe"}}},

@@ -59,6 +59,10 @@ func scopeToProject(ctx context.Context, rz *authz.Resolver, projects *project.S
 	if err != nil {
 		return nil, nil, err
 	}
+	// SECURITY: outside the member grant the project reads as missing; outside a key's own grant it stays forbidden, as before.
+	if !p.Member.Reaches(proj.OrgID, proj.ID) {
+		return nil, nil, &project.NotFoundError{ID: proj.ID.String()}
+	}
 	if !p.ReachesWholeProject(proj.OrgID, proj.ID) {
 		return nil, nil, forbiddenErr("project is outside this credential's reach", "project_id", proj.ID.String())
 	}
@@ -126,7 +130,7 @@ func scopeToActiveProject(ctx context.Context, rz *authz.Resolver, projects *pro
 	if err != nil {
 		return nil, nil, err
 	}
-	if p.ActiveProjectID == uuid.Nil {
+	if p.ActiveProjectID == uuid.Nil || !p.ReachesProject(p.ActiveOrgID, p.ActiveProjectID) {
 		return nil, nil, &ProjectUnresolvedError{}
 	}
 	return scopeToProject(ctx, rz, projects, orgs, p.ActiveProjectID.String())
@@ -137,6 +141,9 @@ func scopeToResource(ctx context.Context, rz *authz.Resolver, orgID, projectID, 
 	ctx, p, err := principal(ctx, rz)
 	if err != nil {
 		return nil, err
+	}
+	if orgID == p.ActiveOrgID && !p.Member.Reaches(orgID, projectID) {
+		return nil, &project.NotFoundError{ID: projectID.String()}
 	}
 	if !p.ReachesResource(orgID, projectID, resourceID) {
 		return nil, deny()

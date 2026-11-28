@@ -50,6 +50,20 @@ func TestAuthzRoleSource_MemberGetsRoleNameAndWholeOrgGrant(t *testing.T) {
 	assert.Equal(t, session.Grant{OrgID: o.ID, All: true}, grant)
 }
 
+func TestAuthzRoleSource_PassesTheMembershipGrant(t *testing.T) {
+	store := fakes.NewOrg()
+	owner, member, p1 := uuid.New(), uuid.New(), uuid.New()
+	o := seedOrg(t, store, owner)
+	m, err := org.NewMembership(o.ID, member, org.RoleMember)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveMembership(context.Background(), m))
+	require.NoError(t, store.SetProjectGrant(context.Background(), o.ID, member, org.ProjectGrant{ProjectIDs: []uuid.UUID{p1}}))
+
+	_, _, _, grant, err := authzRoleSource{orgs: store}.RoleOf(context.Background(), o.ID, member)
+	require.NoError(t, err)
+	assert.Equal(t, session.Grant{OrgID: o.ID, ProjectIDs: []uuid.UUID{p1}}, grant)
+}
+
 func TestAuthzRoleSource_NonMemberHasNoRole(t *testing.T) {
 	store := fakes.NewOrg()
 	o := seedOrg(t, store, uuid.New())

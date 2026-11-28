@@ -108,5 +108,6 @@ func BindRole(ctx context.Context, tc tenant.Context, role string) context.Conte
 		HeldOrg:         "Acme",
 		HeldOrgID:       tc.OrgID,
 		HeldRole:        role,
+		Member:          session.Grant{OrgID: tc.OrgID, All: true},
 	})
 }

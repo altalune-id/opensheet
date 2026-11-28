@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -156,7 +157,7 @@ func (s *Service) systemProject(ctx context.Context, span trace.Span, orgID uuid
 	return nil, nil
 }
 
-// List returns every project inside orgID.
+// List returns the projects inside orgID that the caller bound on ctx reaches. SECURITY: a caller Bind never saw lists nothing.
 func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]*Project, error) {
 	ctx, span := tracer.Start(ctx, "project.List",
 		trace.WithAttributes(attribute.String("org_id", orgID.String())))
@@ -170,7 +171,7 @@ func (s *Service) List(ctx context.Context, orgID uuid.UUID) ([]*Project, error)
 		span.RecordError(err)
 		return nil, s.unexpected(ctx, "project.List: list", err, "org_id", orgID)
 	}
-	return out, nil
+	return slices.DeleteFunc(out, func(p *Project) bool { return !authz.ReachesProject(ctx, orgID, p.ID) }), nil
 }
 
 // Rename updates the display name on the identified project.

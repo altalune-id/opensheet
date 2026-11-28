@@ -2,6 +2,7 @@ package invite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -27,6 +28,8 @@ type Service struct {
 	accept     *AcceptWorkflow
 	enabled    bool
 	perms      Permissions
+	members    Members
+	projects   org.Projects
 	log        *slog.Logger
 	unexpected apperror.UnexpectedFunc
 }
@@ -36,12 +39,27 @@ type Permissions interface {
 	PermissionsOf(ctx context.Context, role string, roleID uuid.UUID) ([]authz.Permission, error)
 }
 
+// Members reads a membership, for the sender's project grant.
+type Members interface {
+	MembershipOf(ctx context.Context, orgID, userID uuid.UUID) (*org.Membership, error)
+}
+
 // ServiceOption configures a Service.
 type ServiceOption func(*Service)
 
 // WithPermissions resolves role permissions through p, custom roles included; without it a custom role is refused.
 func WithPermissions(p Permissions) ServiceOption {
 	return func(s *Service) { s.perms = p }
+}
+
+// WithMembers re-reads the sender's stored project grant through m; Send needs it.
+func WithMembers(m Members) ServiceOption {
+	return func(s *Service) { s.members = m }
+}
+
+// WithProjects checks granted project ids through p; without it an invite naming any project is refused.
+func WithProjects(p org.Projects) ServiceOption {
+	return func(s *Service) { s.projects = p }
 }
 
 // NewService binds the service to its dependencies; enabled=false blocks Send with InvitesDisabledError.
@@ -84,10 +102,63 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (*Invite, error) {
 	if refusal := org.RoleChangeRefusal(authz.Held(ctx), org.HeldRole(ctx, tc.OrgID), "", org.Role(req.Role), nil, perms); refusal != nil {
 		return nil, refusal
 	}
+	if err := s.grantable(ctx, tc, req); err != nil {
+		return nil, err
+	}
 	if !s.enabled {
 		return nil, &InvitesDisabledError{Reason: "invites require OIDC in selfhosted mode; set OPENSHEET_OIDC_ISSUER to enable"}
 	}
 	return s.send.Execute(ctx, req)
+}
+
+// SECURITY: an invitee reaches no project its sender does not reach now, and an owner invite always reaches every project.
+func (s *Service) grantable(ctx context.Context, tc tenant.Context, req SendRequest) error {
+	g := org.ProjectGrant{All: true}
+	if req.Grant != nil {
+		g = *req.Grant
+		if err := g.Validate(); err != nil {
+			return err
+		}
+	}
+	if req.Role == RoleOwner && !g.All {
+		return &org.ProjectGrantConflictError{}
+	}
+	if err := s.inOrg(ctx, tc.OrgID, g); err != nil {
+		return err
+	}
+	sender, err := s.senderGrant(ctx, tc)
+	if err != nil {
+		return err
+	}
+	return g.Within(sender)
+}
+
+func (s *Service) inOrg(ctx context.Context, orgID uuid.UUID, g org.ProjectGrant) error {
+	if len(g.ProjectIDs) == 0 {
+		return nil
+	}
+	if s.projects == nil {
+		return &org.ProjectGrantEscalationError{ProjectID: g.ProjectIDs[0]}
+	}
+	ids, err := s.projects.ProjectIDs(ctx, orgID)
+	if err != nil {
+		return s.unexpected(ctx, "invite.Send: projects", err, "org_id", orgID.String())
+	}
+	return g.InOrg(ids)
+}
+
+func (s *Service) senderGrant(ctx context.Context, tc tenant.Context) (org.ProjectGrant, error) {
+	if s.members == nil {
+		return org.ProjectGrant{}, s.unexpected(ctx, "invite.Send: no members port", errors.New("invite: WithMembers is required to send"))
+	}
+	m, err := s.members.MembershipOf(ctx, tc.OrgID, tc.UserID)
+	if org.IsMembershipMissingError(err) {
+		return org.ProjectGrant{}, nil
+	}
+	if err != nil {
+		return org.ProjectGrant{}, s.unexpected(ctx, "invite.Send: sender membership", err, "org_id", tc.OrgID.String())
+	}
+	return org.ProjectGrant{All: m.AllProjects || m.Role == org.RoleOwner, ProjectIDs: m.ProjectIDs}, nil
 }
 
 func (s *Service) permissionsOf(ctx context.Context, r Role, roleID uuid.UUID) ([]authz.Permission, error) {

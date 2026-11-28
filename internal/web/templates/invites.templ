@@ -9,7 +9,9 @@ type InviteRow struct {
 	ID        string
 	Email     string
 	Role      string
-	ExpiresAt string
+	ExpiresAt   string
+	AllProjects bool
+	ProjectCount int
 }
 
 type InvitesView struct {
@@ -17,6 +19,9 @@ type InvitesView struct {
 	Invites     []InviteRow
 	CustomRoles []RoleOption
 	CanManage   bool
+	Grant       GrantView
+	Email       string
+	Role        string
 	Disabled  bool
 	Error     string
 	ErrorCode string
@@ -48,7 +53,7 @@ templ InvitesPage(d web.LayoutData, v InvitesView) {
 				<li class="flex items-center justify-between px-4 py-3">
 					<div class="min-w-0">
 						<p class="truncate text-sm font-medium text-foreground">{ i.Email }</p>
-						<p class="truncate text-xs text-muted-foreground">{ i.Role } · expires { i.ExpiresAt }</p>
+						<p class="truncate text-xs text-muted-foreground">{ i.Role } · <span data-access>{ inviteAccess(d, i) }</span> · expires { i.ExpiresAt }</p>
 					</div>
 					if v.CanManage {
 						<form method="post" action={ templ.SafeURL(d.Href("/orgs/" + v.OrgSlug + "/invites/" + i.ID + "/revoke")) } class="ml-4 inline">
@@ -69,18 +74,19 @@ templ InvitesPage(d web.LayoutData, v InvitesView) {
 				</div>
 				<div>
 					<label class="block text-sm font-medium text-foreground/90" for="invite-email">{ d.Tr("invites.form_email") }</label>
-					<input id="invite-email" name="email" type="email" required class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
+					<input id="invite-email" name="email" type="email" required value={ v.Email } class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"/>
 				</div>
 				<div>
 					<label class="block text-sm font-medium text-foreground/90" for="invite-role">{ d.Tr("invites.form_role") }</label>
 					<select id="invite-role" name="role" required class="mt-1.5 block w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1">
 						<option value="member">{ d.Tr("invites.role_member") }</option>
-						<option value="admin">{ d.Tr("invites.role_admin") }</option>
+						<option value="admin" selected?={ v.Role == "admin" }>{ d.Tr("invites.role_admin") }</option>
 						for _, o := range v.CustomRoles {
-							<option value={ o.Value }>{ o.Label }</option>
+							<option value={ o.Value } selected?={ v.Role == o.Value }>{ o.Label }</option>
 						}
 					</select>
 				</div>
+				@ProjectGrantFields(memberGrantCopy(d), v.Grant, "")
 				<button type="submit" class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
 					@icons.Icon("send", "h-4 w-4")
 					<span>{ d.Tr("invites.submit") }</span>
@@ -88,6 +94,13 @@ templ InvitesPage(d web.LayoutData, v InvitesView) {
 			</form>
 		}
 	</section>
+}
+
+func inviteAccess(d web.LayoutData, i InviteRow) string {
+	if i.AllProjects {
+		return d.Tr("members.access_all")
+	}
+	return d.TrN("members.access_count", i.ProjectCount)
 }
 
 templ InvitesLayout(d web.LayoutData, v InvitesView) {

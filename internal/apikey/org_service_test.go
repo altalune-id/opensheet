@@ -15,6 +15,7 @@ import (
 	"altalune.id/opensheet/internal/apperror"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/authz"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
@@ -52,6 +53,7 @@ func TestMintOrgKey(t *testing.T) {
 
 	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
+	p.Member = session.Grant{OrgID: f.orgID, All: true}
 	assert.True(t, p.ReachesProject(f.orgID, f.a), "the granted project must be reachable")
 	assert.False(t, p.ReachesProject(f.orgID, f.b), "an ungranted project must not be")
 
@@ -92,6 +94,7 @@ func TestPromoteOrgKey(t *testing.T) {
 
 	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
+	p.Member = session.Grant{OrgID: f.orgID, All: true}
 	assert.True(t, p.ReachesProject(f.orgID, uuid.New()), "an all-projects key reaches a project created later")
 }
 

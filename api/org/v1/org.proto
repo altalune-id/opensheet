@@ -23,6 +23,10 @@ message Member {
   // Role is owner, admin or member
   string role = 4;
   google.protobuf.Timestamp joined_at = 5;
+  // AllProjects is true when the member reaches every project of the organization
+  bool all_projects = 6;
+  // ProjectIds lists a restricted member's projects, shown only to a caller who manages members organization-wide
+  repeated string project_ids = 7;
 }
 
 message ListMembersRequest {}

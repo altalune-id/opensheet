@@ -14,6 +14,7 @@ import (
 	"altalune.id/opensheet/internal/apikey"
 	orgpkg "altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/platform/tenant"
 	"altalune.id/opensheet/internal/testutil/fakes"
 )
@@ -132,6 +133,7 @@ func TestAuthenticate_PersonalTokenAsksNoMembershipStore(t *testing.T) {
 	p, err := apikey.NewAuthenticator(f.store, nil, apikey.Scheme{}).Authenticate(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, f.alice, p.KeyOwnerID)
+	p.Member = session.Grant{OrgID: f.orgID, All: true}
 	assert.True(t, p.ReachesProject(f.orgID, f.b))
 	assert.Equal(t, uuid.Nil, p.UserID, "a token is never mistaken for a signed-in person")
 }

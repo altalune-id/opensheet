@@ -6,16 +6,17 @@ import "github.com/go-jet/jet/v2/sqlite"
 type Invites struct {
 	sqlite.Table
 
-	ID         sqlite.ColumnString
-	OrgID      sqlite.ColumnString
-	Email      sqlite.ColumnString
-	Role       sqlite.ColumnString
-	TokenHash  sqlite.ColumnString
-	ExpiresAt  sqlite.ColumnString
-	AcceptedAt sqlite.ColumnString
-	InvitedBy  sqlite.ColumnString
-	RoleID     sqlite.ColumnString
-	CreatedAt  sqlite.ColumnString
+	ID          sqlite.ColumnString
+	OrgID       sqlite.ColumnString
+	Email       sqlite.ColumnString
+	Role        sqlite.ColumnString
+	TokenHash   sqlite.ColumnString
+	ExpiresAt   sqlite.ColumnString
+	AcceptedAt  sqlite.ColumnString
+	InvitedBy   sqlite.ColumnString
+	RoleID      sqlite.ColumnString
+	CreatedAt   sqlite.ColumnString
+	AllProjects sqlite.ColumnBool
 
 	AllColumns sqlite.ColumnList
 }
@@ -23,30 +24,32 @@ type Invites struct {
 // NewInvites builds the invites binding.
 func NewInvites(tablePrefix string) *Invites {
 	var (
-		id         = sqlite.StringColumn("id")
-		orgID      = sqlite.StringColumn("org_id")
-		email      = sqlite.StringColumn("email")
-		role       = sqlite.StringColumn("role")
-		tokenHash  = sqlite.StringColumn("token_hash")
-		expiresAt  = sqlite.StringColumn("expires_at")
-		acceptedAt = sqlite.StringColumn("accepted_at")
-		invitedBy  = sqlite.StringColumn("invited_by")
-		roleID     = sqlite.StringColumn("role_id")
-		createdAt  = sqlite.StringColumn("created_at")
-		all        = sqlite.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID}
+		id          = sqlite.StringColumn("id")
+		orgID       = sqlite.StringColumn("org_id")
+		email       = sqlite.StringColumn("email")
+		role        = sqlite.StringColumn("role")
+		tokenHash   = sqlite.StringColumn("token_hash")
+		expiresAt   = sqlite.StringColumn("expires_at")
+		acceptedAt  = sqlite.StringColumn("accepted_at")
+		invitedBy   = sqlite.StringColumn("invited_by")
+		roleID      = sqlite.StringColumn("role_id")
+		createdAt   = sqlite.StringColumn("created_at")
+		allProjects = sqlite.BoolColumn("all_projects")
+		all         = sqlite.ColumnList{id, orgID, email, role, tokenHash, expiresAt, acceptedAt, invitedBy, createdAt, roleID, allProjects}
 	)
 	return &Invites{
-		Table:      sqlite.NewTable("", tablePrefix+"invites", "invites", all...),
-		ID:         id,
-		OrgID:      orgID,
-		Email:      email,
-		Role:       role,
-		TokenHash:  tokenHash,
-		ExpiresAt:  expiresAt,
-		AcceptedAt: acceptedAt,
-		InvitedBy:  invitedBy,
-		CreatedAt:  createdAt,
-		RoleID:     roleID,
-		AllColumns: all,
+		Table:       sqlite.NewTable("", tablePrefix+"invites", "invites", all...),
+		ID:          id,
+		OrgID:       orgID,
+		Email:       email,
+		Role:        role,
+		TokenHash:   tokenHash,
+		ExpiresAt:   expiresAt,
+		AcceptedAt:  acceptedAt,
+		InvitedBy:   invitedBy,
+		CreatedAt:   createdAt,
+		RoleID:      roleID,
+		AllProjects: allProjects,
+		AllColumns:  all,
 	}
 }

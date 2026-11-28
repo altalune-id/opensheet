@@ -45,7 +45,11 @@ func (s *postgresStore) scanWrapped(ctx context.Context, rawQuery string, args p
 	}
 	out := make([]*Invite, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toInvite())
+		inv, err := rows[i].toInvite()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
 	}
 	return out, nil
 }
@@ -58,7 +62,7 @@ func (s *postgresStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*In
 	if owned {
 		defer func() { _ = tx.Rollback() }()
 	}
-	stmt := postgres.SELECT(s.table.AllColumns).
+	stmt := postgres.SELECT(s.table.AllColumns, s.grantsExpr.AS("invites.project_ids")).
 		FROM(s.table).
 		WHERE(s.table.OrgID.EQ(postgres.UUID(orgID)).
 			AND(s.table.AcceptedAt.IS_NULL())).
@@ -69,7 +73,11 @@ func (s *postgresStore) ListPending(ctx context.Context, orgID uuid.UUID) ([]*In
 	}
 	out := make([]*Invite, 0, len(rows))
 	for i := range rows {
-		out = append(out, rows[i].toInvite())
+		inv, err := rows[i].toInvite()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
 	}
 	return out, nil
 }

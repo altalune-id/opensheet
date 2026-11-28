@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"altalune.id/opensheet/internal/apperror"
+	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
 	"altalune.id/opensheet/internal/platform/authz"
 	"altalune.id/opensheet/internal/platform/session"
@@ -294,7 +295,13 @@ func (s *Service) requireMinter(ctx context.Context, kind Kind, tc tenant.Contex
 	case KindOrg:
 		return authz.CanOrgWide(ctx, authz.APIKeysWrite)
 	}
-	return authz.Can(ctx, authz.APIKeysWrite)
+	if err := authz.Can(ctx, authz.APIKeysWrite); err != nil {
+		return err
+	}
+	if !authz.ReachesProject(ctx, tc.OrgID, tc.ProjectID) {
+		return &org.ProjectGrantEscalationError{ProjectID: tc.ProjectID}
+	}
+	return nil
 }
 
 // SECURITY: a personal token belongs to its owner alone — to anyone else it reads as absent — and every other kind needs an owner or admin.
@@ -311,6 +318,10 @@ func (s *Service) loadForChange(ctx context.Context, id uuid.UUID) (tenant.Conte
 	case KindOrg:
 		return tc, k, authz.CanOrgWide(ctx, authz.APIKeysWrite)
 	case KindProject:
+		// SECURITY: a project key outside the caller's grant reads as absent, like a key of another project.
+		if !authz.ReachesProject(ctx, k.OrgID, k.ProjectID) {
+			return tenant.Context{}, nil, &NotFoundError{}
+		}
 		return tc, k, authz.Can(ctx, authz.APIKeysWrite)
 	}
 	if tc.UserID == uuid.Nil || k.CreatedBy != tc.UserID {
@@ -353,9 +364,15 @@ func (s *Service) load(ctx context.Context, tc tenant.Context, id uuid.UUID) (*A
 	return k, nil
 }
 
+// SECURITY: a project the caller does not reach is ROL012 before the org check, so a restricted caller learns nothing about which projects exist.
 func (s *Service) requireOrgProjects(ctx context.Context, orgID uuid.UUID, projectIDs []uuid.UUID) error {
 	if len(projectIDs) == 0 {
 		return nil
+	}
+	for _, id := range projectIDs {
+		if !authz.ReachesProject(ctx, orgID, id) {
+			return &org.ProjectGrantEscalationError{ProjectID: id}
+		}
 	}
 	owned, err := s.projects.ProjectIDs(ctx, orgID)
 	if err != nil {

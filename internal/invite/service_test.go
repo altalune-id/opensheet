@@ -36,7 +36,7 @@ func newService(t *testing.T, store invite.Store) (*invite.Service, *int) {
 	unf := noopUnexpected(&unex)
 	send := invite.NewSendWorkflow(store, nopMailer{}, "https://example.test", newTestLogger(), unf)
 	accept := invite.NewAcceptWorkflow(store, newFakeUsers(), newFakeOrgs(), newTestLogger(), unf)
-	return invite.NewService(store, send, accept, true, newTestLogger(), unf), &unex
+	return invite.NewService(store, send, accept, true, newTestLogger(), unf, invite.WithMembers(fakes.UnrestrictedMembers{})), &unex
 }
 
 func tenantCtx(t *testing.T) (context.Context, tenant.Context) {
@@ -187,7 +187,7 @@ func TestService_Send_Disabled(t *testing.T) {
 	unf := noopUnexpected(&unex)
 	send := invite.NewSendWorkflow(store, nopMailer{}, "https://example.test", newTestLogger(), unf)
 	accept := invite.NewAcceptWorkflow(store, newFakeUsers(), newFakeOrgs(), newTestLogger(), unf)
-	svc := invite.NewService(store, send, accept, false, newTestLogger(), unf)
+	svc := invite.NewService(store, send, accept, false, newTestLogger(), unf, invite.WithMembers(fakes.UnrestrictedMembers{}))
 	if svc.Enabled() {
 		t.Fatal("Enabled must be false when disabled")
 	}
@@ -208,7 +208,7 @@ func TestService_Send_EnabledDoesNotBlock(t *testing.T) {
 	unf := noopUnexpected(&unex)
 	send := invite.NewSendWorkflow(store, nopMailer{}, "https://example.test", newTestLogger(), unf)
 	accept := invite.NewAcceptWorkflow(store, newFakeUsers(), newFakeOrgs(), newTestLogger(), unf)
-	svc := invite.NewService(store, send, accept, true, newTestLogger(), unf)
+	svc := invite.NewService(store, send, accept, true, newTestLogger(), unf, invite.WithMembers(fakes.UnrestrictedMembers{}))
 	if !svc.Enabled() {
 		t.Fatal("Enabled must be true when enabled")
 	}

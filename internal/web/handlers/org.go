@@ -124,6 +124,17 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	h.renderMembers(w, sc, http.StatusOK, nil)
+}
+
+type grantEdit struct {
+	userID uuid.UUID
+	grant  org.ProjectGrant
+	err    error
+	msgKey string
+}
+
+func (h *OrgHandler) renderMembers(w http.ResponseWriter, sc OrgScope, status int, edit *grantEdit) {
 	p, o, r := sc.principal, sc.org, sc.req
 	profiles, err := h.Orgs.ListMemberProfiles(r.Context(), o.ID)
 	if authz.IsDeniedError(err) {
@@ -137,20 +148,154 @@ func (h *OrgHandler) GetShow(w http.ResponseWriter, r *http.Request) {
 	}
 	held := authz.Held(r.Context())
 	role := viewerRole(profiles, p.UserID)
-	canManage := slices.Contains(held, authz.MembersWrite)
+	canManage := authz.CanOrgWide(r.Context(), authz.MembersWrite) == nil
+	rowHeld := held
+	if !canManage {
+		rowHeld = nil
+	}
 	var custom []*rolepkg.Role
 	if canManage {
 		custom = h.customRoles(r)
 	}
-	Render(w, r, templates.MembersLayout(h.LayoutForOrg(r, o.Name, o.Slug, "members"), templates.MembersView{
+	var options []templates.GrantOption
+	if canManage {
+		if options, err = h.grantOptions(r, o.ID); err != nil {
+			h.LogErr("web org: member grant projects", err)
+			h.ErrorPage(w, r, http.StatusInternalServerError, "Members failed", "Could not load members.", err)
+			return
+		}
+	}
+	perms := h.memberPermissions(r, profiles)
+	rows := memberProfileRows(profiles, o.ID, p.UserID, rowHeld, perms, custom)
+	if canManage {
+		attachGrants(rows, profiles, held, perms, options)
+	}
+	view := templates.MembersView{
 		OrgSlug:        o.Slug,
 		OrgName:        o.Name,
-		Members:        memberProfileRows(profiles, o.ID, p.UserID, held, h.memberPermissions(r, profiles), custom),
+		Members:        rows,
 		CanManage:      canManage,
 		GrantableRoles: grantableRoles(held, role, custom),
 		ViewerIsOwner:  role == org.RoleOwner,
 		RoleUpdated:    r.URL.Query().Has("role_updated"),
-	}))
+		AccessUpdated:  r.URL.Query().Has("access_updated"),
+	}
+	if edit != nil {
+		view.Error = i18n.TranslatorFrom(r.Context()).T(edit.msgKey)
+		view.ErrorCode = ErrorRef(edit.err)
+		for i := range rows {
+			if rows[i].Grant != nil && rows[i].UserID == edit.userID.String() {
+				g := grantView(edit.grant.All, edit.grant.ProjectIDs, options)
+				rows[i].Grant, rows[i].AccessOpen = &g, true
+			}
+		}
+	}
+	RenderStatus(w, r, status, templates.MembersLayout(h.LayoutForOrg(r, o.Name, o.Slug, "members"), view))
+}
+
+//i18n:use members.access_role_denied
+
+// PostSetAccess handles POST /orgs/{org}/members/{user}/projects.
+func (h *OrgHandler) PostSetAccess(w http.ResponseWriter, r *http.Request) {
+	sc, ok := h.RequireOrg(w, r)
+	if !ok {
+		return
+	}
+	o, r := sc.org, sc.req
+	if authz.CanOrgWide(r.Context(), authz.MembersWrite) != nil {
+		h.refuseRole(w, r, "members.read_only")
+		return
+	}
+	tr := i18n.TranslatorFrom(r.Context())
+	userID, err := uuid.Parse(r.PathValue("user"))
+	if err != nil {
+		h.ErrorPage(w, r, http.StatusBadRequest, "Bad id", "Malformed user id.")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		h.ErrorPage(w, r, http.StatusBadRequest, "Bad request", "Could not parse form body.")
+		return
+	}
+	g, ok := strictGrant(r)
+	if !ok {
+		h.ErrorPage(w, r, http.StatusBadRequest, tr.T("members.error.access_title"), tr.T("members.error.access_empty"))
+		return
+	}
+	err = h.Orgs.SetProjectGrant(r.Context(), o.ID, userID, g)
+	switch {
+	case err == nil:
+		http.Redirect(w, r, ResolveReturnTo(h.Cfg.HTTP.BasePath, "/orgs/"+o.Slug+"/members?access_updated=1"), http.StatusSeeOther) //nolint:gosec // G710: destination sanitized via ResolveReturnTo → SanitizeReturnTo
+	case authz.IsDeniedError(err):
+		h.refuseRole(w, r, "members.read_only", err)
+	case org.IsProjectGrantEmptyError(err):
+		h.renderMembers(w, sc, http.StatusUnprocessableEntity, &grantEdit{userID: userID, grant: g, err: err, msgKey: "members.error.access_empty"})
+	case org.IsProjectGrantEscalationError(err):
+		h.renderMembers(w, sc, http.StatusForbidden, &grantEdit{userID: userID, grant: g, err: err, msgKey: "members.error.access_escalation"})
+	case org.IsProjectGrantConflictError(err):
+		h.ErrorPage(w, r, http.StatusConflict, tr.T("members.error.access_title"), tr.T("members.access_owner"), err)
+	case authz.IsEscalationError(err):
+		h.refuseRole(w, r, "members.access_role_denied", err)
+	case org.IsMembershipMissingError(err), org.IsNotFoundError(err):
+		h.ErrorPage(w, r, http.StatusNotFound, tr.T("members.error.access_title"), tr.T("members.error.not_found"), err)
+	case org.IsSystemProtectedError(err):
+		h.ErrorPage(w, r, http.StatusConflict, tr.T("members.error.access_title"), tr.T("members.error.system"), err)
+	default:
+		h.LogErr("web org: set project grant", err)
+		h.ErrorPage(w, r, http.StatusInternalServerError, tr.T("members.error.access_title"), tr.T("members.error.access_failed"), err)
+	}
+}
+
+// SECURITY: a member edit names its choice, so a stale or forged post without one never widens a restricted member.
+func strictGrant(r *http.Request) (org.ProjectGrant, bool) {
+	switch r.PostForm.Get("grant") {
+	case "all", "selected":
+		return memberGrant(r), true
+	}
+	return org.ProjectGrant{}, false
+}
+
+// SECURITY: only "selected" restricts, and every other choice drops the checkbox values a hidden list still submits.
+func memberGrant(r *http.Request) org.ProjectGrant {
+	if r.PostForm.Get("grant") != "selected" {
+		return org.ProjectGrant{All: true}
+	}
+	return org.ProjectGrant{ProjectIDs: formUUIDs(r.PostForm["project_ids"])}
+}
+
+func (d Deps) grantOptions(r *http.Request, orgID uuid.UUID) ([]templates.GrantOption, error) {
+	if d.Projects == nil {
+		return nil, nil
+	}
+	items, err := d.Projects.List(r.Context(), orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]templates.GrantOption, 0, len(items))
+	for _, p := range items {
+		out = append(out, templates.GrantOption{ID: p.ID.String(), Name: p.Name})
+	}
+	return out, nil
+}
+
+func grantView(all bool, held []uuid.UUID, options []templates.GrantOption) templates.GrantView {
+	g := templates.GrantView{All: all, Options: make([]templates.GrantOption, len(options))}
+	for i, o := range options {
+		o.Checked = !all && slices.ContainsFunc(held, func(id uuid.UUID) bool { return id.String() == o.ID })
+		g.Options[i] = o
+	}
+	return g
+}
+
+// SECURITY: the access form shows only where SetProjectGrant would accept it: not an owner, not a system membership, and a role the viewer covers.
+func attachGrants(rows []templates.MemberRow, items []*org.MemberProfile, held []authz.Permission, perms map[uuid.UUID][]authz.Permission, options []templates.GrantOption) {
+	for i, m := range items {
+		mp, known := perms[m.UserID]
+		if !known || m.System || m.Role == org.RoleOwner || !authz.Covers(held, mp...) {
+			continue
+		}
+		g := grantView(m.AllProjects, m.ProjectIDs, options)
+		rows[i].Grant = &g
+	}
 }
 
 // PostRemoveMember handles POST /orgs/{slug}/members/{user}/remove.
@@ -361,6 +506,8 @@ func memberProfileRows(items []*org.MemberProfile, orgID, viewer uuid.UUID, held
 			Removable:    known && org.RemovalRefusal(orgID, viewer, m.UserID, viewerRole, m.Role, m.System, held, mp) == nil,
 			RoleEditable: known && !m.System && !lastOwner && org.RoleChangeRefusal(held, viewerRole, m.Role, m.Role, mp, mp) == nil,
 			LastOwner:    lastOwner,
+			AllProjects:  m.AllProjects,
+			ProjectCount: len(m.ProjectIDs),
 		})
 	}
 	return out
@@ -413,4 +560,5 @@ func (h *OrgHandler) Register(mux web.Mux) {
 	mux.HandleFunc("POST /orgs/{org}/rename", h.PostRename)
 	mux.HandleFunc("POST /orgs/{org}/members/{user}/remove", h.PostRemoveMember)
 	mux.HandleFunc("POST /orgs/{org}/members/{user}/role", h.PostSetRole)
+	mux.HandleFunc("POST /orgs/{org}/members/{user}/projects", h.PostSetAccess)
 }

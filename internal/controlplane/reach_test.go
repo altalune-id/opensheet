@@ -2,12 +2,16 @@ package controlplane_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apikeyv1 "altalune.id/opensheet/gen/go/apikey/v1"
@@ -15,8 +19,10 @@ import (
 	projectv1 "altalune.id/opensheet/gen/go/project/v1"
 	sheetv1 "altalune.id/opensheet/gen/go/sheet/v1"
 	spreadsheetv1 "altalune.id/opensheet/gen/go/spreadsheet/v1"
+	"altalune.id/opensheet/internal/controlplane"
 	"altalune.id/opensheet/internal/org"
 	"altalune.id/opensheet/internal/platform/authn"
+	"altalune.id/opensheet/internal/platform/session"
 	"altalune.id/opensheet/internal/project"
 	"altalune.id/opensheet/internal/sheet"
 	"altalune.id/opensheet/internal/spreadsheet"
@@ -30,6 +36,7 @@ type reachFixture struct {
 	siblingSheet     *sheet.Sheet
 	siblingWorkbook  *spreadsheet.Spreadsheet
 	siblingTabBefore string
+	person           session.Principal
 }
 
 // SECURITY: the fakes filter by org only, so the handler's reach check is the sole guard these tests exercise.
@@ -37,7 +44,8 @@ func newReachFixture(t *testing.T) *reachFixture {
 	t.Helper()
 	ctx := context.Background()
 	orgID := uuid.New()
-	h := newOSHarnessWithKeys(t, humanPrincipal(orgID))
+	person := humanPrincipal(orgID)
+	h := newOSHarnessWithKeys(t, person)
 	o, err := org.NewOrg("reach-org", "Reach Org", uuid.New())
 	require.NoError(t, err)
 	o.ID = orgID
@@ -50,7 +58,7 @@ func newReachFixture(t *testing.T) *reachFixture {
 	require.NoError(t, err)
 	require.NoError(t, h.projs.Save(ctx, sibling))
 
-	f := &reachFixture{h: h, orgID: orgID, own: own, sibling: sibling}
+	f := &reachFixture{h: h, orgID: orgID, own: own, sibling: sibling, person: person}
 	f.ownSheet = f.seedSheet(t, own, "own-sheet")
 	f.siblingSheet = f.seedSheet(t, sibling, "sibling-sheet")
 	f.siblingTabBefore = f.siblingSheet.Tab
@@ -92,76 +100,120 @@ func keyed[T any](key string, msg *T) *connect.Request[T] {
 	return req
 }
 
-// TestKeyNeverReachesASiblingProject pins a key to the project it was minted in. SECURITY: every row names a verb that took a sibling project's id; revert the reach check and each one fails.
-func TestKeyNeverReachesASiblingProject(t *testing.T) {
-	f := newReachFixture(t)
-	key := f.key(allScopes())
+type siblingCall struct {
+	name      string
+	procedure string
+	call      func(context.Context) error
+	want      connect.Code
+}
+
+func as[T any](key string, msg *T) *connect.Request[T] {
+	if key == "" {
+		req := connect.NewRequest(msg)
+		withBearer(req.Header())
+		return req
+	}
+	return keyed(key, msg)
+}
+
+func siblingCalls(f *reachFixture, key string) []siblingCall {
 	sibling := f.sibling.ID.String()
 	siblingSheet := f.siblingSheet.ID.String()
 	siblingWorkbook := f.siblingWorkbook.ID.String()
 	sheets, sprds, creds := f.h.sheetClient(), f.h.spreadsheetClient(), f.h.credentialClient()
-
-	tests := []struct {
-		name string
-		call func(context.Context) error
-		want connect.Code
-	}{
-		{"SheetList", func(ctx context.Context) error {
-			_, err := sheets.List(ctx, keyed(key, &sheetv1.ListRequest{ProjectId: sibling}))
+	return []siblingCall{
+		{"SheetList", "/sheet.v1.SheetService/List", func(ctx context.Context) error {
+			_, err := sheets.List(ctx, as(key, &sheetv1.ListRequest{ProjectId: sibling}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"SheetCreate", func(ctx context.Context) error {
-			_, err := sheets.Create(ctx, keyed(key, &sheetv1.CreateRequest{
+		{"SheetCreate", "/sheet.v1.SheetService/Create", func(ctx context.Context) error {
+			_, err := sheets.Create(ctx, as(key, &sheetv1.CreateRequest{
 				ProjectId: sibling, SpreadsheetId: siblingWorkbook, Tab: "Q1", Slug: "escalate", Visibility: string(sheet.VisibilityKey)}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"SheetGet", func(ctx context.Context) error {
-			_, err := sheets.Get(ctx, keyed(key, &sheetv1.GetRequest{ProjectId: sibling, SheetId: siblingSheet}))
+		{"SheetGet", "/sheet.v1.SheetService/Get", func(ctx context.Context) error {
+			_, err := sheets.Get(ctx, as(key, &sheetv1.GetRequest{ProjectId: sibling, SheetId: siblingSheet}))
 			return err
 		}, connect.CodeNotFound},
-		{"SheetUpdate", func(ctx context.Context) error {
+		{"SheetUpdate", "/sheet.v1.SheetService/Update", func(ctx context.Context) error {
 			tab := "Q2"
-			_, err := sheets.Update(ctx, keyed(key, &sheetv1.UpdateRequest{ProjectId: sibling, SheetId: siblingSheet, Tab: &tab}))
+			_, err := sheets.Update(ctx, as(key, &sheetv1.UpdateRequest{ProjectId: sibling, SheetId: siblingSheet, Tab: &tab}))
 			return err
 		}, connect.CodeNotFound},
-		{"SheetPurgeCache", func(ctx context.Context) error {
-			_, err := sheets.PurgeCache(ctx, keyed(key, &sheetv1.PurgeCacheRequest{ProjectId: sibling, SheetId: siblingSheet}))
+		{"SheetPurgeCache", "/sheet.v1.SheetService/PurgeCache", func(ctx context.Context) error {
+			_, err := sheets.PurgeCache(ctx, as(key, &sheetv1.PurgeCacheRequest{ProjectId: sibling, SheetId: siblingSheet}))
 			return err
 		}, connect.CodeNotFound},
-		{"SheetDelete", func(ctx context.Context) error {
-			_, err := sheets.Delete(ctx, keyed(key, &sheetv1.DeleteRequest{ProjectId: sibling, SheetId: siblingSheet}))
+		{"SheetDelete", "/sheet.v1.SheetService/Delete", func(ctx context.Context) error {
+			_, err := sheets.Delete(ctx, as(key, &sheetv1.DeleteRequest{ProjectId: sibling, SheetId: siblingSheet}))
 			return err
 		}, connect.CodeNotFound},
-		{"SpreadsheetList", func(ctx context.Context) error {
-			_, err := sprds.List(ctx, keyed(key, &spreadsheetv1.ListRequest{ProjectId: sibling}))
+		{"SpreadsheetList", "/spreadsheet.v1.SpreadsheetService/List", func(ctx context.Context) error {
+			_, err := sprds.List(ctx, as(key, &spreadsheetv1.ListRequest{ProjectId: sibling}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"SpreadsheetGet", func(ctx context.Context) error {
-			_, err := sprds.Get(ctx, keyed(key, &spreadsheetv1.GetRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook}))
+		{"SpreadsheetGet", "/spreadsheet.v1.SpreadsheetService/Get", func(ctx context.Context) error {
+			_, err := sprds.Get(ctx, as(key, &spreadsheetv1.GetRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"SpreadsheetDelete", func(ctx context.Context) error {
-			_, err := sprds.Delete(ctx, keyed(key, &spreadsheetv1.DeleteRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook}))
+		{"SpreadsheetDelete", "/spreadsheet.v1.SpreadsheetService/Delete", func(ctx context.Context) error {
+			_, err := sprds.Delete(ctx, as(key, &spreadsheetv1.DeleteRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"CredentialList", func(ctx context.Context) error {
-			_, err := creds.List(ctx, keyed(key, &credentialv1.ListRequest{ProjectId: sibling}))
+		{"CredentialList", "/credential.v1.CredentialService/List", func(ctx context.Context) error {
+			_, err := creds.List(ctx, as(key, &credentialv1.ListRequest{ProjectId: sibling}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"CredentialDelete", func(ctx context.Context) error {
-			_, err := creds.Delete(ctx, keyed(key, &credentialv1.DeleteRequest{ProjectId: sibling, CredentialId: uuid.NewString()}))
+		{"CredentialDelete", "/credential.v1.CredentialService/Delete", func(ctx context.Context) error {
+			_, err := creds.Delete(ctx, as(key, &credentialv1.DeleteRequest{ProjectId: sibling, CredentialId: uuid.NewString()}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"APIKeyCreate", func(ctx context.Context) error {
-			_, err := f.h.apikeyClient().Create(ctx, keyed(key, &apikeyv1.CreateRequest{
+		{"APIKeyCreate", "/apikey.v1.APIKeyService/Create", func(ctx context.Context) error {
+			_, err := f.h.apikeyClient().Create(ctx, as(key, &apikeyv1.CreateRequest{
 				ExpiresAt: timestamppb.New(time.Now().Add(24 * time.Hour)), ProjectId: sibling, Name: "escalate", Scopes: []string{authn.ScopeSheetsRead}}))
 			return err
 		}, connect.CodePermissionDenied},
-		{"APIKeyList", func(ctx context.Context) error {
-			_, err := f.h.apikeyClient().List(ctx, keyed(key, &apikeyv1.ListRequest{ProjectId: sibling}))
+		{"APIKeyList", "/apikey.v1.APIKeyService/List", func(ctx context.Context) error {
+			_, err := f.h.apikeyClient().List(ctx, as(key, &apikeyv1.ListRequest{ProjectId: sibling}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"APIKeyRevoke", "/apikey.v1.APIKeyService/Revoke", func(ctx context.Context) error {
+			_, err := f.h.apikeyClient().Revoke(ctx, as(key, &apikeyv1.RevokeRequest{ProjectId: sibling, Id: uuid.NewString()}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"CredentialStartGoogleConnect", "/credential.v1.CredentialService/StartGoogleConnect", func(ctx context.Context) error {
+			_, err := creds.StartGoogleConnect(ctx, as(key, &credentialv1.StartGoogleConnectRequest{ProjectId: sibling}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"CredentialUploadServiceAccount", "/credential.v1.CredentialService/UploadServiceAccount", func(ctx context.Context) error {
+			_, err := creds.UploadServiceAccount(ctx, as(key, &credentialv1.UploadServiceAccountRequest{ProjectId: sibling, Name: "escalate", ServiceAccountJson: []byte("{}")}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"SpreadsheetCreate", "/spreadsheet.v1.SpreadsheetService/Create", func(ctx context.Context) error {
+			_, err := sprds.Create(ctx, as(key, &spreadsheetv1.CreateRequest{ProjectId: sibling, CredentialId: uuid.NewString(), GoogleFileId: "FILE-x", Title: "x"}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"SpreadsheetListTabs", "/spreadsheet.v1.SpreadsheetService/ListTabs", func(ctx context.Context) error {
+			_, err := sprds.ListTabs(ctx, as(key, &spreadsheetv1.ListTabsRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"SpreadsheetProvision", "/spreadsheet.v1.SpreadsheetService/Provision", func(ctx context.Context) error {
+			_, err := sprds.Provision(ctx, as(key, &spreadsheetv1.ProvisionRequest{ProjectId: sibling, CredentialId: uuid.NewString(), Title: "x", IdempotencyKey: uuid.NewString()}))
+			return err
+		}, connect.CodePermissionDenied},
+		{"SpreadsheetUpdate", "/spreadsheet.v1.SpreadsheetService/Update", func(ctx context.Context) error {
+			title := "renamed"
+			_, err := sprds.Update(ctx, as(key, &spreadsheetv1.UpdateRequest{ProjectId: sibling, SpreadsheetId: siblingWorkbook, Title: &title}))
 			return err
 		}, connect.CodePermissionDenied},
 	}
+}
+
+// TestKeyNeverReachesASiblingProject pins a key to the project it was minted in. SECURITY: every row names a verb that took a sibling project's id; revert the reach check and each one fails.
+func TestKeyNeverReachesASiblingProject(t *testing.T) {
+	f := newReachFixture(t)
+	key := f.key(allScopes())
+	tests := siblingCalls(f, key)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call(t.Context())
@@ -255,4 +307,49 @@ func TestResourceBoundKeyReachesOnlyItsResources(t *testing.T) {
 	_, err = f.h.sheetClient().Create(t.Context(), keyed(key, &sheetv1.CreateRequest{
 		ProjectId: own, SpreadsheetId: uuid.NewString(), Tab: "Q1", Slug: "escalate", Visibility: string(sheet.VisibilityKey)}))
 	require.Equal(t, connect.CodePermissionDenied, connectCode(err), "a resource-bound key must not create; err=%v", err)
+}
+
+// SECURITY: a restricted person gets NotFound, never PermissionDenied, so a project outside the grant reads as missing.
+func TestControlPlane_RestrictedMemberOutsideGrantIsNotFound(t *testing.T) {
+	f := newReachFixture(t)
+	orgs := f.h.orgs
+	ctx := context.Background()
+	m, err := orgs.MembershipOf(ctx, f.orgID, f.person.UserID)
+	require.NoError(t, err)
+	m.Role = org.RoleAdmin
+	require.NoError(t, orgs.SaveMembership(ctx, m))
+	require.NoError(t, orgs.SetProjectGrant(ctx, f.orgID, f.person.UserID, org.ProjectGrant{ProjectIDs: []uuid.UUID{f.own.ID}}))
+
+	for _, tt := range siblingCalls(f, "") {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call(t.Context())
+			require.Error(t, err, "a restricted person reached a project outside the grant")
+			want := connect.CodeNotFound
+			if controlplane.ScopeTable()[tt.procedure] == authn.SessionOnly {
+				want = connect.CodePermissionDenied
+				require.ErrorContains(t, err, "only a signed-in person", "a token is refused by the scope table, whatever the project")
+			}
+			require.Equal(t, want, connectCode(err), "err=%v", err)
+		})
+	}
+	stored, err := f.h.sheets.ByID(ctx, f.siblingSheet.ID)
+	require.NoError(t, err)
+	require.Equal(t, f.siblingTabBefore, stored.Tab, "the sibling sheet must be left untouched")
+}
+
+func TestSiblingCallsCoverEveryProjectScopedProcedure(t *testing.T) {
+	covered := map[string]bool{}
+	for _, c := range siblingCalls(newReachFixture(t), "") {
+		covered[c.procedure] = true
+	}
+	for proc := range controlplane.ScopeTable() {
+		parts := strings.Split(strings.TrimPrefix(proc, "/"), "/")
+		d, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(parts[0]))
+		require.NoError(t, err, proc)
+		m := d.(protoreflect.ServiceDescriptor).Methods().ByName(protoreflect.Name(parts[1]))
+		require.NotNil(t, m, proc)
+		if m.Input().Fields().ByName("project_id") != nil {
+			assert.True(t, covered[proc], "%s takes a project_id but siblingCalls never aims it at a project outside the grant", proc)
+		}
+	}
 }
